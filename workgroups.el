@@ -5,7 +5,7 @@
 ;; File:      workgroups.el
 ;; Author:    tlh <thunkout@gmail.com>
 ;; Created:   2010-07-22
-;; Version:   0.1
+;; Version:   1.0
 ;; Keywords:  window persistence window-configuration
 
 ;; This program is free software; you can redistribute it and/or
@@ -27,13 +27,17 @@
 ;;
 ;; workgroups.el is a simple window configuration persistence package.
 ;;
-;; It supports:
+
+;;; Features:
 ;;
 ;;  - Saving window configurations
+;;
 ;;  - Restoring window configurations
+;;
 ;;  - Persisting window configurations across sessions
 ;;
-;; Installation:
+
+;;; Installation:
 ;;
 ;;  - put `workgroups.el' somewhere on your emacs load path
 ;;
@@ -44,8 +48,9 @@
 ;;  - to change the file that window-configs are saved in:
 ;;    (setq workgroups-configs-file "/path/to/new/file")
 ;;
-;; Some sample keybindings:
-;; 
+
+;;; Some sample keybindings:
+;;
 ;;   (global-set-key (kbd "C-c g a") 'workgroups-add-config)
 ;;   (global-set-key (kbd "C-c g r") 'workgroups-restore-config)
 ;;   (global-set-key (kbd "C-c g d") 'workgroups-delete-config)
@@ -53,14 +58,17 @@
 ;;   (global-set-key (kbd "C-c g p") 'workgroups-prev-config)
 ;;   (global-set-key (kbd "C-c g n") 'workgroups-next-config)
 ;;
-;; And if you use ido-mode:
+
+;;; And if you use ido-mode:
 ;;
 ;;   (global-set-key (kbd "C-c g A") 'workgroups-ido-add-config)
 ;;   (global-set-key (kbd "C-c g R") 'workgroups-ido-restore-config)
 ;;   (global-set-key (kbd "C-c g D") 'workgroups-ido-delete-config)
 ;;
-;; TODO:
-;;  - buffer modes persistence
+
+;;; TODO:
+;;
+;;  - buffer mode persistence
 ;;
 
 ;;; Code:
@@ -76,7 +84,7 @@
   "Name of the current window config.")
 
 (defvar workgroups-configs-file
-  (expand-file-name (concat user-emacs-directory "workgroups-configs"))
+  (expand-file-name "~/.emacs.d/workgroups-configs")
   "File containing saved window configs.")
 
 (defun workgroups-circular-next (elt lst)
@@ -98,13 +106,13 @@ it doesn't exist."
 window object."
   (let ((buffer (window-buffer winobj)))
     (list :window
-	  (let ((edges (window-edges winobj)))
-	    ;; this window-width calculation was found
-	    ;; in the documentation for window-width.
-	    (- (nth 2 edges) (nth 0 edges)))
-	  (window-height winobj)
-	  (buffer-file-name buffer)
-	  (buffer-name buffer))))
+          (let ((edges (window-edges winobj)))
+            ;; this window-width calculation was found
+            ;; in the documentation for window-width.
+            (- (nth 2 edges) (nth 0 edges)))
+          (window-height winobj)
+          (buffer-file-name buffer)
+          (buffer-name buffer))))
 
 (defun workgroups-leaf-window-p (window)
   "Returns t if WINDOW is a workgroups window object."
@@ -130,56 +138,56 @@ window object."
 traversal. `window-list' can't be used because its order isn't
 stable."
   (labels ((inner (obj)
-	     (if (atom obj)
-		 (list obj)
-	       (mapcan 'inner (cddr obj)))))
+                  (if (atom obj)
+                      (list obj)
+                    (mapcan 'inner (cddr obj)))))
     (inner (car (window-tree)))))
 
 (defun workgroups-get-config ()
   "Create workgroups' printable frame and window representation
 from the `window-tree' of the `selected-frame'."
   (labels ((inner (wt)
-	     (if (atom wt)
-		 (workgroups-make-window wt)
-	       (append (list (car wt) (cadr wt))
-		       (mapcar 'inner (cddr wt))))))
+                  (if (atom wt)
+                      (workgroups-make-window wt)
+                    (append (list (car wt) (cadr wt))
+                            (mapcar 'inner (cddr wt))))))
     (let ((frame (selected-frame)))
       `((,(frame-parameter frame 'left)
-	 ,(frame-parameter frame 'top)
-	 ,(frame-parameter frame 'width)
-	 ,(frame-parameter frame 'height)
-	 ,(position (selected-window) (workgroups-window-list)))
-	,(inner (car (window-tree frame)))))))
+         ,(frame-parameter frame 'top)
+         ,(frame-parameter frame 'width)
+         ,(frame-parameter frame 'height)
+         ,(position (selected-window) (workgroups-window-list)))
+        ,(inner (car (window-tree frame)))))))
 
 (defun workgroups-set-window-state (window)
   "Sets the state of `selected-window' to the file and/or
 buffer-name contained in WINDOW."
   (destructuring-bind (tag w h filename buffername) window
     (cond (filename (find-file filename))
-	  ((get-buffer buffername) (switch-to-buffer buffername)))))
+          ((get-buffer buffername) (switch-to-buffer buffername)))))
 
 (defun workgroups-set-config (window-config)
   "Restores the `selected-frame' and `window-tree' from the
 WINDOW-CONFIG object."
   (labels ((inner (wt)
-	     (cond ((workgroups-leaf-window-p wt)
-		    (workgroups-set-window-state wt)
-		    (other-window 1))
-		   (t (mapc (lambda (subwin)
-			      (unless (eq subwin (car (last wt)))
-				(if (car wt)
-				    (split-window-vertically (workgroups-window-height subwin))
-				  (split-window-horizontally (workgroups-window-width subwin))))
-			      (inner subwin))
-			    (cddr wt))))))
+                  (cond ((workgroups-leaf-window-p wt)
+                         (workgroups-set-window-state wt)
+                         (other-window 1))
+                        (t (mapc (lambda (subwin)
+                                   (unless (eq subwin (car (last wt)))
+                                     (if (car wt)
+                                         (split-window-vertically (workgroups-window-height subwin))
+                                       (split-window-horizontally (workgroups-window-width subwin))))
+                                   (inner subwin))
+                                 (cddr wt))))))
     (let ((frame (selected-frame)))
       (destructuring-bind ((left top width height window-index) window-tree) window-config
-	(set-frame-position frame left top)
-	(set-frame-width    frame width)
-	(set-frame-height   frame height)
-	(delete-other-windows)
-	(inner window-tree)
-	(set-frame-selected-window frame (nth window-index (workgroups-window-list)))))))
+        (set-frame-position frame left top)
+        (set-frame-width    frame width)
+        (set-frame-height   frame height)
+        (delete-other-windows)
+        (inner window-tree)
+        (set-frame-selected-window frame (nth window-index (workgroups-window-list)))))))
 
 (defun workgroups-save-configs ()
   "Saves `workgroups-window-configs' to `workgroups-configs-file'."
@@ -193,22 +201,22 @@ WINDOW-CONFIG object."
 `workgroups-configs-file'."
   (interactive)
   (setq workgroups-window-configs
-	(let (make-backup-files)
-	  (with-temp-buffer
-	    (condition-case nil
-		(progn
-		  (insert-file-contents workgroups-configs-file)
-		  (goto-char (point-min))
-		  (read (current-buffer)))
-	      (file-error nil))))))
+        (let (make-backup-files)
+          (with-temp-buffer
+            (condition-case nil
+                (progn
+                  (insert-file-contents workgroups-configs-file)
+                  (goto-char (point-min))
+                  (read (current-buffer)))
+              (file-error nil))))))
 
 (defun workgroups-add-window-config (name)
   "Adds the current window config to `workgroups-window-configs'
 under NAME and saves the updated list to
 `workgroups-configs-file'."
   (setq workgroups-window-configs
-	(cons (list name (workgroups-get-config))
-	      (remove (workgroups-find-config name) workgroups-window-configs)))
+        (cons (list name (workgroups-get-config))
+              (remove (workgroups-find-config name) workgroups-window-configs)))
   (workgroups-save-configs))
 
 (defun workgroups-add-config (name)
@@ -227,11 +235,11 @@ under NAME and saves the updated list to
   (interactive "sName: ")
   (let ((config (workgroups-find-config name)))
     (cond ((not config)
-	   (ding)
-	   (message "There is no config named %s." name))
-	  (t (workgroups-set-config (cadr config))
-	     (setq workgroups-current-config name)
-	     (message "Restored config %s." name)))))
+           (ding)
+           (message "There is no config named %s." name))
+          (t (workgroups-set-config (cadr config))
+             (setq workgroups-current-config name)
+             (message "Restored config %s." name)))))
 
 (defun workgroups-delete-config (name)
   "Delete the window config named NAME from
@@ -239,29 +247,29 @@ under NAME and saves the updated list to
   (interactive "sName: ")
   (let ((config (workgroups-find-config name)))
     (cond ((not config)
-	   (ding)
-	   (message "There is no config named %s." name))
-	  (t (setq workgroups-window-configs
-		   (remove config workgroups-window-configs))
-	     (workgroups-save-configs)
-	     (message "Deleted config %s." name)))))
+           (ding)
+           (message "There is no config named %s." name))
+          (t (setq workgroups-window-configs
+                   (remove config workgroups-window-configs))
+             (workgroups-save-configs)
+             (message "Deleted config %s." name)))))
 
 (defun workgroups-update-config ()
   "Updates the config stored under `workgroups-current-config'."
   (interactive)
   (cond ((null workgroups-current-config)
-	 (ding)
-	 (message "There is no current config to update."))
-	(t (workgroups-add-window-config workgroups-current-config)
-	   (message "Updated config %s" workgroups-current-config))))
+         (ding)
+         (message "There is no current config to update."))
+        (t (workgroups-add-window-config workgroups-current-config)
+           (message "Updated config %s" workgroups-current-config))))
 
 (defun workgroups-circular-restore (&optional prev)
   "Restores the previous or next window config circularly in
 `workgroups-config-names'."
   (workgroups-restore-config
    (workgroups-circular-next workgroups-current-config
-			     (let ((names (workgroups-config-names)))
-			       (if prev (nreverse names) names)))))
+                             (let ((names (workgroups-config-names)))
+                               (if prev (nreverse names) names)))))
 
 (defun workgroups-next-config ()
   "Restore the next window config from
