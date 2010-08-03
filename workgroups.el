@@ -1,4 +1,4 @@
-;;; workgroups.el -- workgroups for windows
+;;; workgroups.el --- workgroups for windows
 
 ;; Copyright (C) 2010 tlh <thunkout@gmail.com>
 
@@ -76,19 +76,33 @@
 (eval-when-compile
   (require 'cl))
 
+;; Customization
+
+(defgroup workgroups nil
+  "Workgroup for windows: A simple window configuration
+persistence package."
+  :group 'convenience
+  :version "1.0")
+
+(defcustom workgroups-configs-file
+  (expand-file-name "~/.emacs.d/workgroups-configs")
+  "File containing saved window configs."
+  :type 'file
+  :group 'workgroups)
+
+;; Non-customizable variables
+
 (defvar workgroups-window-configs nil
   "List containing all window configs that workgroups is
-  tracking.")
+tracking.")
 
 (defvar workgroups-current-config nil
   "Name of the current window config.")
 
-(defvar workgroups-configs-file
-  (expand-file-name "~/.emacs.d/workgroups-configs")
-  "File containing saved window configs.")
+;; Functions
 
 (defun workgroups-circular-next (elt lst)
-  "Returns the element after ELT in LST, or the car of LST if ELT
+  "Return the element after ELT in LST, or the car of LST if ELT
 is the last element of LST or is not present in LST."
   (or (cadr (member elt lst)) (car lst)))
 
@@ -97,13 +111,13 @@ is the last element of LST or is not present in LST."
   (mapcar 'car workgroups-window-configs))
 
 (defun workgroups-find-config (name)
-  "Finds and returns a workgroups config from its name, or nil if
-it doesn't exist."
+  "Find and return a workgroups config from NAME, or nil if it
+doesn't exist."
   (assoc-string name workgroups-window-configs))
 
 (defun workgroups-make-window (winobj)
-  "Create a printable window object from WINOBJ, emacs's internal
-window object."
+  "Create a printable window object from WINOBJ, an Emacs window
+object."
   (let ((buffer (window-buffer winobj)))
     (list :window
           (let ((edges (window-edges winobj)))
@@ -115,27 +129,27 @@ window object."
           (buffer-name buffer))))
 
 (defun workgroups-leaf-window-p (window)
-  "Returns t if WINDOW is a workgroups window object."
+  "Return t if WINDOW is a workgroups window object."
   (and (consp window)
        (eq (car window) :window)))
 
 (defun workgroups-window-width (window)
-  "Returns the width of workgroups window WINDOW."
+  "Return the width of workgroups window WINDOW."
   (if (workgroups-leaf-window-p window)
       (nth 1 window)
     (destructuring-bind (x1 y1 x2 y2) (cadr window)
       (- x2 x1))))
 
 (defun workgroups-window-height (window)
-  "Returns a workgroups window's height."
+  "Return the height of workgroups window WINDOW."
   (if (workgroups-leaf-window-p window)
       (nth 2 window)
     (destructuring-bind (x1 y1 x2 y2) (cadr window)
       (- y2 y1))))
 
 (defun workgroups-window-list ()
-  "Flatten the `window-tree' into a stable list by depth-first
-traversal. `window-list' can't be used because its order isn't
+  "Flatten `window-tree' into a stable list by depth-first
+traversal.  `window-list' can't be used because its order isn't
 stable."
   (labels ((inner (obj)
                   (if (atom obj)
@@ -160,15 +174,15 @@ from the `window-tree' of the `selected-frame'."
         ,(inner (car (window-tree frame)))))))
 
 (defun workgroups-set-window-state (window)
-  "Sets the state of `selected-window' to the file and/or
+  "Set the state of `selected-window' to the file and/or
 buffer-name contained in WINDOW."
   (destructuring-bind (tag w h filename buffername) window
     (cond (filename (find-file filename))
           ((get-buffer buffername) (switch-to-buffer buffername)))))
 
 (defun workgroups-set-config (window-config)
-  "Restores the `selected-frame' and `window-tree' from the
-WINDOW-CONFIG object."
+  "Restore `selected-frame' and `window-tree' from
+WINDOW-CONFIG."
   (labels ((inner (wt)
                   (cond ((workgroups-leaf-window-p wt)
                          (workgroups-set-window-state wt)
@@ -190,14 +204,15 @@ WINDOW-CONFIG object."
         (set-frame-selected-window frame (nth window-index (workgroups-window-list)))))))
 
 (defun workgroups-save-configs ()
-  "Saves `workgroups-window-configs' to `workgroups-configs-file'."
+  "Save `workgroups-window-configs' to
+`workgroups-configs-file'."
   (with-temp-buffer
     (let (make-backup-files)
       (insert (format "%S" workgroups-window-configs))
       (write-file workgroups-configs-file))))
 
 (defun workgroups-load-configs ()
-  "Loads persisted window configurations from
+  "Load persisted window configurations from
 `workgroups-configs-file'."
   (interactive)
   (setq workgroups-window-configs
@@ -211,8 +226,8 @@ WINDOW-CONFIG object."
               (file-error nil))))))
 
 (defun workgroups-add-window-config (name)
-  "Adds the current window config to `workgroups-window-configs'
-under NAME and saves the updated list to
+  "Add the current window config to `workgroups-window-configs'
+under NAME, and save the updated list to
 `workgroups-configs-file'."
   (setq workgroups-window-configs
         (cons (list name (workgroups-get-config))
@@ -220,7 +235,7 @@ under NAME and saves the updated list to
   (workgroups-save-configs))
 
 (defun workgroups-add-config (name)
-  "Calls `workgroups-add-window-config' with NAME and sets
+  "Call `workgroups-add-window-config' with NAME, and set
 `workgroups-current-config' to NAME."
   (interactive "sName: ")
   (let ((config (workgroups-find-config name)))
@@ -230,8 +245,8 @@ under NAME and saves the updated list to
       (message "Added config %s" name))))
 
 (defun workgroups-restore-config (name)
-  "Finds the window config named NAME in
-`workgroups-window-configs' and restores it."
+  "Find the window config named NAME in
+`workgroups-window-configs' and restore it."
   (interactive "sName: ")
   (let ((config (workgroups-find-config name)))
     (cond ((not config)
@@ -255,7 +270,7 @@ under NAME and saves the updated list to
              (message "Deleted config %s." name)))))
 
 (defun workgroups-update-config ()
-  "Updates the config stored under `workgroups-current-config'."
+  "Update the config stored under `workgroups-current-config'."
   (interactive)
   (cond ((null workgroups-current-config)
          (ding)
@@ -264,7 +279,7 @@ under NAME and saves the updated list to
            (message "Updated config %s" workgroups-current-config))))
 
 (defun workgroups-circular-restore (&optional prev)
-  "Restores the previous or next window config circularly in
+  "Restore the previous or next window config circularly in
 `workgroups-config-names'."
   (workgroups-restore-config
    (workgroups-circular-next workgroups-current-config
@@ -283,25 +298,26 @@ under NAME and saves the updated list to
   (interactive)
   (workgroups-circular-restore t))
 
-(defun* workgroups-ido-read-name (function &optional (prompt "Config name: "))
-  "Calls FUNCTION on the config name returned by
+(defun* workgroups-ido-read-name (FN &optional prompt)
+  "Call FN on the config name returned by
 `ido-completing-read'."
-  (funcall function (ido-completing-read prompt (workgroups-config-names))))
+  (funcall fn (ido-completing-read (or prompt "Config name: ")
+                                   (workgroups-config-names))))
 
 (defun workgroups-ido-add-config ()
-  "Adds a new config using `ido-completing-read' to suggest
+  "Add a new config using `ido-completing-read' to suggest
 possible completions."
   (interactive)
   (workgroups-ido-read-name 'workgroups-add-config))
 
 (defun workgroups-ido-restore-config ()
-  "Presents restorable window configs using
+  "Present restorable window configs using
 `ido-completing-read'."
   (interactive)
   (workgroups-ido-read-name 'workgroups-restore-config))
 
 (defun workgroups-ido-delete-config ()
-  "Presents deletable window configs using `ido-completing-read'"
+  "Present deletable window configs using `ido-completing-read'."
   (interactive)
   (workgroups-ido-read-name 'workgroups-delete-config))
 
