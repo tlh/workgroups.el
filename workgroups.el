@@ -298,7 +298,7 @@ under NAME, and save the updated list to
   (interactive)
   (workgroups-circular-restore t))
 
-(defun* workgroups-ido-read-name (FN &optional prompt)
+(defun* workgroups-ido-read-name (fn &optional prompt)
   "Call FN on the config name returned by
 `ido-completing-read'."
   (funcall fn (ido-completing-read (or prompt "Config name: ")
