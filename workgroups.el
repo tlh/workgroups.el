@@ -45,8 +45,16 @@
 ;;    (require 'workgroups)
 ;;    (add-hook 'after-init-hook 'workgroups-load-configs)
 ;;
+
+;;; Configuration:
+;;
 ;;  - to change the file that window-configs are saved in:
 ;;    (setq workgroups-configs-file "/path/to/new/file")
+;;
+;;  - workgroups-restore-hook is a hook that's run whenever a
+;;    workgroup is restored. You can add functions to it like this:
+;;
+;;    (add-hook 'workgroups-restore-hook 'foo)
 ;;
 
 ;;; Some sample keybindings:
@@ -88,6 +96,11 @@ persistence package."
   (expand-file-name "~/.emacs.d/workgroups-configs")
   "File containing saved window configs."
   :type 'file
+  :group 'workgroups)
+
+(defcustom workgroups-restore-hook nil
+  "Hook run whenever a window config is restored."
+  :type 'hook
   :group 'workgroups)
 
 ;; Non-customizable variables
@@ -253,6 +266,7 @@ under NAME, and save the updated list to
            (ding)
            (message "There is no config named %s." name))
           (t (workgroups-set-config (cadr config))
+             (run-hooks 'workgroups-restore-hook)
              (setq workgroups-current-config name)
              (message "Restored config %s." name)))))
 
