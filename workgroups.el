@@ -182,41 +182,11 @@ from the `window-tree' of the `selected-frame'."
           (position (selected-window) (workgroups-window-list frame))
           (inner (car (window-tree frame))))))
 
-(defun workgroups-set-window-state (window)
-  "Set the state of `selected-window' to the file and/or
-buffer-name contained in WINDOW."
-  (destructuring-bind (tag w h filename buffername) window
-    (cond (filename (find-file filename))
-          ((get-buffer buffername) (switch-to-buffer buffername)))))
-
-(defun* workgroups-set-config (wconfig &optional (frame (selected-frame)))
-  "Restore WCONFIG in FRAME or `selected-frame'."
-  (labels ((inner (wtree)
-                  (if (workgroups-leaf-window-p wtree)
-                      (progn (workgroups-set-window-state wtree)
-                             (other-window 1))
-                    (dolist (win (cddr wtree))
-                      (unless (eq win (car (last wtree)))
-                        (if (car wtree)
-                            (split-window-vertically
-                             (workgroups-window-height win))
-                          (split-window-horizontally
-                           (workgroups-window-width win))))
-                      (inner win)))))
-    (destructuring-bind ((left top width height) index wtree) wconfig
-      (set-frame-position frame left top)
-      (set-frame-width    frame width)
-      (set-frame-height   frame height)
-      (delete-other-windows)
-      (inner wtree)
-      (set-frame-selected-window
-       frame (nth index (workgroups-window-list frame))))))
-
 (defun workgroups-save-configs (configs)
   "Save `workgroups-window-configs' to
 `workgroups-configs-file'."
-  (with-temp-buffer
-    (let (make-backup-files)
+  (let (make-backup-files)
+    (with-temp-buffer
       (insert (format "%S" (setq workgroups-window-configs configs)))
       (write-file workgroups-configs-file))))
 
@@ -254,6 +224,36 @@ under NAME, and save the updated list to
       (setq workgroups-current-config name)
       (message "Added config %s" name))))
 
+(defun workgroups-restore-window-state (window)
+  "Set the state of `selected-window' to the file and/or
+buffer-name contained in WINDOW."
+  (destructuring-bind (tag w h filename buffername) window
+    (cond (filename (find-file filename))
+          ((get-buffer buffername) (switch-to-buffer buffername)))))
+
+(defun* workgroups-restore-helper (wconfig &optional (frame (selected-frame)))
+  "Restore WCONFIG in FRAME or `selected-frame'."
+  (labels ((inner (wtree)
+                  (if (workgroups-leaf-window-p wtree)
+                      (progn (workgroups-restore-window-state wtree)
+                             (other-window 1))
+                    (dolist (win (cddr wtree))
+                      (unless (eq win (car (last wtree)))
+                        (if (car wtree)
+                            (split-window-vertically
+                             (workgroups-window-height win))
+                          (split-window-horizontally
+                           (workgroups-window-width win))))
+                      (inner win)))))
+    (destructuring-bind ((left top width height) index wtree) wconfig
+      (set-frame-position frame left top)
+      (set-frame-width    frame width)
+      (set-frame-height   frame height)
+      (delete-other-windows)
+      (inner wtree)
+      (set-frame-selected-window
+       frame (nth index (workgroups-window-list frame))))))
+
 (defun workgroups-restore-config (name)
   "Find the window config named NAME in
 `workgroups-window-configs' and restore it."
@@ -262,7 +262,7 @@ under NAME, and save the updated list to
     (cond ((not config)
            (ding)
            (message "There is no config named %s." name))
-          (t (workgroups-set-config (cadr config))
+          (t (workgroups-restore-helper (cadr config))
              (run-hooks 'workgroups-restore-hook)
              (setq workgroups-current-config name)
              (message "Restored config %s." name)))))
