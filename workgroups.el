@@ -249,7 +249,7 @@ under NAME, and save the updated list to
 `workgroups-current-config' to NAME."
   (interactive "sName: ")
   (let ((config (workgroups-find-config name)))
-    (when (or (not config) (y-or-n-p "A configuration with this name already exists. Do you wish to overwrite it? "))
+    (when (or (not config) (y-or-n-p (format "%s already exists. Overwrite? " name)))
       (workgroups-add-window-config name)
       (setq workgroups-current-config name)
       (message "Added config %s" name))))
@@ -277,6 +277,8 @@ under NAME, and save the updated list to
            (message "There is no config named %s." name))
           (t (setq workgroups-window-configs
                    (remove config workgroups-window-configs))
+             (when (string= name workgroups-current-config)
+               (setq workgroups-current-config nil))
              (workgroups-save-configs)
              (message "Deleted config %s." name)))))
 
