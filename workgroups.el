@@ -309,27 +309,23 @@ under NAME, and save the updated list to
   (interactive)
   (workgroups-circular-restore t))
 
-(defun* workgroups-ido-read-name (fn &optional prompt)
-  "Call FN on the config name returned by
-`ido-completing-read'."
-  (funcall fn (ido-completing-read (or prompt "Config name: ")
-                                   (workgroups-config-names))))
+(defun workgroups-ido-read ()
+  "Get a config name with `ido-completing-read'."
+  (ido-completing-read "Config name: " (workgroups-config-names)))
 
 (defun workgroups-ido-add-config ()
-  "Add a new config using `ido-completing-read' to suggest
-possible completions."
+  "Add a config with `ido-completing-read'."
   (interactive)
-  (workgroups-ido-read-name 'workgroups-add-config))
+  (workgroups-add-config (workgroups-ido-read)))
 
 (defun workgroups-ido-restore-config ()
-  "Present restorable window configs using
-`ido-completing-read'."
+  "Restore a config with `ido-completing-read'."
   (interactive)
-  (workgroups-ido-read-name 'workgroups-restore-config))
+  (workgroups-restore-config (workgroups-ido-read)))
 
 (defun workgroups-ido-delete-config ()
-  "Present deletable window configs using `ido-completing-read'."
+  "Delete a config with `ido-completing-read'."
   (interactive)
-  (workgroups-ido-read-name 'workgroups-elete-config))
+  (workgroups-delete-config (workgroups-ido-read)))
 
 (provide 'workgroups)
