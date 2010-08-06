@@ -224,19 +224,20 @@ WINDOW-CONFIG."
       (insert (format "%S" workgroups-window-configs))
       (write-file workgroups-configs-file))))
 
-(defun workgroups-load-configs ()
-  "Load persisted window configurations from
-`workgroups-configs-file'."
+(defun workgroups-load-configs (&optional file)
+  "Load configs from FILE or `workgroups-configs-file'."
   (interactive)
-  (setq workgroups-window-configs
-        (let (make-backup-files)
-          (with-temp-buffer
-            (condition-case nil
-                (progn
-                  (insert-file-contents workgroups-configs-file)
-                  (goto-char (point-min))
-                  (read (current-buffer)))
-              (file-error nil))))))
+  (let ((file (expand-file-name (or file workgroups-configs-file))))
+    (if (not (file-exists-p file))
+        (message "workgroups-configs-file doesn't exist: %s" file)
+      (let (make-backup-files)
+        (with-temp-buffer
+          (insert-file-contents file)
+          (goto-char (point-min))
+          (condition-case nil
+              (progn (read (current-buffer))
+                     (message "Workgroups: loaded configs file: %s" file))
+            (error (message "There was an error reading workgroups configs file: %s" file))))))))
 
 (defun workgroups-add-window-config (name)
   "Add the current window config to `workgroups-window-configs'
