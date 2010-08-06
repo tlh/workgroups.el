@@ -193,28 +193,29 @@ buffer-name contained in WINDOW."
     (cond (filename (find-file filename))
           ((get-buffer buffername) (switch-to-buffer buffername)))))
 
-(defun workgroups-set-config (window-config)
-  "Restore `selected-frame' and `window-tree' from
-WINDOW-CONFIG."
-  (labels ((inner (wt)
-                  (cond ((workgroups-leaf-window-p wt)
-                         (workgroups-set-window-state wt)
-                         (other-window 1))
-                        (t (mapc (lambda (subwin)
-                                   (unless (eq subwin (car (last wt)))
-                                     (if (car wt)
-                                         (split-window-vertically (workgroups-window-height subwin))
-                                       (split-window-horizontally (workgroups-window-width subwin))))
-                                   (inner subwin))
-                                 (cddr wt))))))
-    (let ((frame (selected-frame)))
-      (destructuring-bind ((left top width height window-index) window-tree) window-config
+(defun workgroups-set-config (wconfig &optional frame)
+  "Restore WCONFIG in FRAME or `selected-frame'."
+  (labels ((inner (wtree)
+                  (if (workgroups-leaf-window-p wtree)
+                      (progn (workgroups-set-window-state wtree)
+                             (other-window 1))
+                    (dolist (win (cddr wtree))
+                      (unless (eq win (car (last wtree)))
+                        (if (car wtree)
+                            (split-window-vertically
+                             (workgroups-window-height win))
+                          (split-window-horizontally
+                           (workgroups-window-width win))))
+                      (inner win)))))
+    (let ((frame (or frame (selected-frame))))
+      (destructuring-bind ((left top width height index) wtree) wconfig
         (set-frame-position frame left top)
         (set-frame-width    frame width)
         (set-frame-height   frame height)
         (delete-other-windows)
-        (inner window-tree)
-        (set-frame-selected-window frame (nth window-index (workgroups-window-list)))))))
+        (inner wtree)
+        (set-frame-selected-window
+         frame (nth index (workgroups-window-list)))))))
 
 (defun workgroups-save-configs ()
   "Save `workgroups-window-configs' to
