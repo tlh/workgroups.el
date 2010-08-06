@@ -212,12 +212,12 @@ buffer-name contained in WINDOW."
       (set-frame-selected-window
        frame (nth index (workgroups-window-list frame))))))
 
-(defun workgroups-save-configs ()
+(defun workgroups-save-configs (configs)
   "Save `workgroups-window-configs' to
 `workgroups-configs-file'."
   (with-temp-buffer
     (let (make-backup-files)
-      (insert (format "%S" workgroups-window-configs))
+      (insert (format "%S" (setq workgroups-window-configs configs)))
       (write-file workgroups-configs-file))))
 
 (defun workgroups-load-configs (&optional file)
@@ -230,19 +230,19 @@ buffer-name contained in WINDOW."
         (with-temp-buffer
           (insert-file-contents file)
           (goto-char (point-min))
-          (condition-case nil
+          (condition-case err
               (progn (read (current-buffer))
-                     (message "Workgroups: loaded configs file: %s" file))
-            (error (message "There was an error reading workgroups configs file: %s" file))))))))
+                     (message "Loaded workgroups configs file: %s" file))
+            (error (message "Error in %S: %s %s" file (car err) (cdr err)))))))))
 
 (defun workgroups-add-window-config (name)
   "Add the current window config to `workgroups-window-configs'
 under NAME, and save the updated list to
 `workgroups-configs-file'."
-  (setq workgroups-window-configs
-        (cons (list name (workgroups-get-config))
-              (remove (workgroups-find-config name) workgroups-window-configs)))
-  (workgroups-save-configs))
+  (workgroups-save-configs
+   (cons (list name (workgroups-get-config))
+         (remove (workgroups-find-config name)
+                 workgroups-window-configs))))
 
 (defun workgroups-add-config (name)
   "Call `workgroups-add-window-config' with NAME, and set
@@ -275,11 +275,9 @@ under NAME, and save the updated list to
     (cond ((not config)
            (ding)
            (message "There is no config named %s." name))
-          (t (setq workgroups-window-configs
-                   (remove config workgroups-window-configs))
+          (t (workgroups-save-configs (remove config workgroups-window-configs))
              (when (string= name workgroups-current-config)
                (setq workgroups-current-config nil))
-             (workgroups-save-configs)
              (message "Deleted config %s." name)))))
 
 (defun workgroups-update-config ()
@@ -332,6 +330,6 @@ possible completions."
 (defun workgroups-ido-delete-config ()
   "Present deletable window configs using `ido-completing-read'."
   (interactive)
-  (workgroups-ido-read-name 'workgroups-delete-config))
+  (workgroups-ido-read-name 'workgroups-elete-config))
 
 (provide 'workgroups)
