@@ -160,7 +160,7 @@ object."
     (destructuring-bind (x1 y1 x2 y2) (cadr window)
       (- y2 y1))))
 
-(defun workgroups-window-list ()
+(defun workgroups-window-list (frame)
   "Flatten `window-tree' into a stable list by depth-first
 traversal.  `window-list' can't be used because its order isn't
 stable."
@@ -168,23 +168,19 @@ stable."
                   (if (atom obj)
                       (list obj)
                     (mapcan 'inner (cddr obj)))))
-    (inner (car (window-tree)))))
+    (inner (car (window-tree frame)))))
 
-(defun workgroups-get-config ()
+(defun* workgroups-get-config (&optional (frame (selected-frame)))
   "Create workgroups' printable frame and window representation
 from the `window-tree' of the `selected-frame'."
   (labels ((inner (wt)
                   (if (atom wt)
                       (workgroups-make-window wt)
-                    (append (list (car wt) (cadr wt))
-                            (mapcar 'inner (cddr wt))))))
-    (let ((frame (selected-frame)))
-      `((,(frame-parameter frame 'left)
-         ,(frame-parameter frame 'top)
-         ,(frame-parameter frame 'width)
-         ,(frame-parameter frame 'height)
-         ,(position (selected-window) (workgroups-window-list)))
-        ,(inner (car (window-tree frame)))))))
+                    `(,(car wt) ,(cadr wt) ,@(mapcar 'inner (cddr wt))))))
+    (list (mapcar (lambda (p) (frame-parameter frame p))
+                  '(left top width height))
+          (position (selected-window) (workgroups-window-list frame))
+          (inner (car (window-tree frame))))))
 
 (defun workgroups-set-window-state (window)
   "Set the state of `selected-window' to the file and/or
@@ -193,7 +189,7 @@ buffer-name contained in WINDOW."
     (cond (filename (find-file filename))
           ((get-buffer buffername) (switch-to-buffer buffername)))))
 
-(defun workgroups-set-config (wconfig &optional frame)
+(defun* workgroups-set-config (wconfig &optional (frame (selected-frame)))
   "Restore WCONFIG in FRAME or `selected-frame'."
   (labels ((inner (wtree)
                   (if (workgroups-leaf-window-p wtree)
@@ -207,15 +203,14 @@ buffer-name contained in WINDOW."
                           (split-window-horizontally
                            (workgroups-window-width win))))
                       (inner win)))))
-    (let ((frame (or frame (selected-frame))))
-      (destructuring-bind ((left top width height index) wtree) wconfig
-        (set-frame-position frame left top)
-        (set-frame-width    frame width)
-        (set-frame-height   frame height)
-        (delete-other-windows)
-        (inner wtree)
-        (set-frame-selected-window
-         frame (nth index (workgroups-window-list)))))))
+    (destructuring-bind ((left top width height) index wtree) wconfig
+      (set-frame-position frame left top)
+      (set-frame-width    frame width)
+      (set-frame-height   frame height)
+      (delete-other-windows)
+      (inner wtree)
+      (set-frame-selected-window
+       frame (nth index (workgroups-window-list frame))))))
 
 (defun workgroups-save-configs ()
   "Save `workgroups-window-configs' to
