@@ -231,7 +231,7 @@ buffer-name contained in WINDOW."
           (insert-file-contents file)
           (goto-char (point-min))
           (condition-case err
-              (progn (read (current-buffer))
+              (progn (setq workgroups-window-configs (read (current-buffer)))
                      (message "Loaded workgroups configs file: %s" file))
             (error (message "Error in %S: %s %s" file (car err) (cdr err)))))))))
 
