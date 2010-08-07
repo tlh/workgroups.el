@@ -116,7 +116,7 @@ tracking.")
 
 (defun workgroups-circular-next (elt lst)
   "Return the element after ELT in LST, or the car of LST if ELT
-is the last element of LST or is not present in LST."
+is the lat element of LST or is not present in LST."
   (or (cadr (member elt lst)) (car lst)))
 
 (defun workgroups-config-names ()
@@ -182,12 +182,13 @@ from the `window-tree' of the `selected-frame'."
           (position (selected-window) (workgroups-window-list frame))
           (inner (car (window-tree frame))))))
 
-(defun workgroups-save-configs (configs)
+(defun workgroups-write-configs (configs)
   "Save `workgroups-window-configs' to
 `workgroups-configs-file'."
   (let (make-backup-files)
     (with-temp-buffer
-      (insert (format "%S" (setq workgroups-window-configs configs)))
+      (insert ";; workgroups for windows - saved window configurations \n\n"
+              (format "%S" (setq workgroups-window-configs configs)))
       (write-file workgroups-configs-file))))
 
 (defun workgroups-load-configs (&optional file)
@@ -201,16 +202,16 @@ from the `window-tree' of the `selected-frame'."
              (goto-char (point-min))
              (condition-case err
                  (setq workgroups-window-configs (read (current-buffer)))
-               (error (message "workgroups: Error in %s - %s" file (car err))))
+               (error (message "workgroups: Error in %s: %s" file (car err))))
              (message "workgroups: Loaded %s" filename))
-            (t (write-file filename)
+            (t (workgroups-write-configs nil)
                (message "workgroups: Created file %s" filename))))))
 
 (defun workgroups-add-window-config (name)
   "Add the current window config to `workgroups-window-configs'
 under NAME, and save the updated list to
 `workgroups-configs-file'."
-  (workgroups-save-configs
+  (workgroups-write-configs
    (cons (list name (workgroups-get-config))
          (remove (workgroups-find-config name)
                  workgroups-window-configs))))
@@ -276,7 +277,7 @@ buffer-name contained in WINDOW."
     (cond ((not config)
            (ding)
            (message "There is no config named %s." name))
-          (t (workgroups-save-configs (remove config workgroups-window-configs))
+          (t (workgroups-write-configs (remove config workgroups-window-configs))
              (when (string= name workgroups-current-config)
                (setq workgroups-current-config nil))
              (message "Deleted config %s." name)))))
