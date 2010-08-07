@@ -116,7 +116,7 @@ tracking.")
 
 (defun workgroups-circular-next (elt lst)
   "Return the element after ELT in LST, or the car of LST if ELT
-is the last element of LST or is not present in LST."
+is the lat element of LST or is not present in LST."
   (or (cadr (member elt lst)) (car lst)))
 
 (defun workgroups-config-names ()
