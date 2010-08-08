@@ -125,25 +125,26 @@ persistence package."
 `workgroups-configs-file'."
   (let (make-backup-files)
     (with-temp-buffer
-      (insert ";; workgroups for windows - saved window configurations \n\n"
+      (insert ";; workgroups for windows - saved window configurations\n"
+              ";; Don't edit this file manually\n"
               (format "%S" configs))
       (write-file workgroups-configs-file))))
 
-(defun workgroups-get-configs (&optional file)
-  "Get configs from FILE or `workgroups-configs-file'."
-  (let ((filename (expand-file-name (or file workgroups-configs-file)))
-        make-backup-files configs)
+(defun workgroups-get-configs ()
+  "Get configs from `workgroups-configs-file'."
+  (let ((filename (expand-file-name workgroups-configs-file))
+        make-backup-files)
     (with-temp-buffer
       (cond ((file-exists-p filename)
              (insert-file-contents filename)
              (goto-char (point-min))
-             (condition-case err
-                 (setq configs (read (current-buffer)))
-               (error (message "workgroups: Error in %s: %s" file (car err))))
-             (message "workgroups: Loaded %s" filename))
+             (prog1 (condition-case err
+                        (read (current-buffer))
+                      (error (message "workgroups: Error in %s: %s" file (car err))))
+               (message "workgroups: Loaded %s" filename)))
             (t (workgroups-write-configs nil)
-               (message "workgroups: Created file %s" filename))))
-    configs))
+               (message "workgroups: Created file %s" filename)
+               nil)))))
 
 (defun workgroups-get-config (name)
   "Return the config named NAME if it exists, otherwise nil."
