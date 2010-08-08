@@ -11,7 +11,7 @@ things like erc or gnus buffers, you should launch those applications
 and buffers again in your next session before restoring the
 configuration that includes them. Nothing bad will happen otherwise,
 of course -- workgroups will just default to a buffer that already
-exist.
+exists.
 
 ## Features
 
@@ -33,7 +33,7 @@ exist.
 
 ## Configuration
 
- - to change the file that configs are saved in:
+ - To change the file that configs are saved in:
 
         (setq workgroups-configs-file "/path/to/new/file")
 
