@@ -48,9 +48,9 @@
 
 ;;; Installation:
 ;;
-;;  - put `workgroups.el' somewhere on your emacs load path
+;;  - Put `workgroups.el' somewhere on your emacs load path
 ;;
-;;  - Just add this line to your .emacs file:
+;;  - Add this line to your .emacs file:
 ;;
 ;;    (require 'workgroups)
 ;;
@@ -115,12 +115,6 @@ persistence package."
 
 ;; Non-customizable variables
 
-(defvar workgroups-loaded-flag nil
-  "NIL until `workgroups-configs-file' is loaded; t after.")
-
-(defvar workgroups-window-configs nil
-  "List containing all saved window configs.")
-
 (defvar workgroups-current-config nil
   "Name of the current window config.")
 
@@ -132,33 +126,24 @@ persistence package."
   (let (make-backup-files)
     (with-temp-buffer
       (insert ";; workgroups for windows - saved window configurations \n\n"
-              (format "%S" (setq workgroups-window-configs configs)))
+              (format "%S" configs))
       (write-file workgroups-configs-file))))
 
-(defun workgroups-load-configs (&optional file)
-  "Load configs from FILE or `workgroups-configs-file'."
-  (interactive)
+(defun workgroups-get-configs (&optional file)
+  "Get configs from FILE or `workgroups-configs-file'."
   (let ((filename (expand-file-name (or file workgroups-configs-file)))
-        (make-backup-files))
+        make-backup-files configs)
     (with-temp-buffer
       (cond ((file-exists-p filename)
              (insert-file-contents filename)
              (goto-char (point-min))
              (condition-case err
-                 (setq workgroups-window-configs (read (current-buffer)))
+                 (setq configs (read (current-buffer)))
                (error (message "workgroups: Error in %s: %s" file (car err))))
              (message "workgroups: Loaded %s" filename))
             (t (workgroups-write-configs nil)
                (message "workgroups: Created file %s" filename))))
-    (setq workgroups-loaded-flag t)))
-
-(defun workgroups-get-configs ()
-  "Return `workgroups-window-configs', calling
-`workgroups-load-configs' first if it hasn't been called
-already. This function is the only way other functions should
-access `workgroups-window-configs'."
-  (or workgroups-loaded-flag (workgroups-load-configs))
-  workgroups-window-configs)
+    configs))
 
 (defun workgroups-get-config (name)
   "Return the config named NAME if it exists, otherwise nil."
