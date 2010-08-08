@@ -25,7 +25,16 @@
 
 ;;; Commentary:
 ;;
-;; workgroups.el is a simple window configuration persistence package.
+;;    workgroups.el is a simple window configuration persistence
+;;    package.  It saves the window layout of the current frame, and,
+;;    if a window's buffer is visiting a file, it saves the filename
+;;    as well.  And that's it. It doesn't try to save complicated
+;;    information about the buffer, like major or minor modes. If you
+;;    save configurations that include things like erc or gnus
+;;    buffers, you should launch those applications and buffers again
+;;    in your next session before restoring the configuration that
+;;    includes them. Nothing bad will happen otherwise, of course --
+;;    workgroups will just default to a buffer that already exist.
 ;;
 
 ;;; Features:
@@ -41,14 +50,14 @@
 ;;
 ;;  - put `workgroups.el' somewhere on your emacs load path
 ;;
-;;  - add these lines to your .emacs file:
+;;  - Just add this line to your .emacs file:
+;;
 ;;    (require 'workgroups)
-;;    (add-hook 'after-init-hook 'workgroups-load-configs)
 ;;
 
 ;;; Configuration:
 ;;
-;;  - to change the file that window-configs are saved in:
+;;  - to change the file that configs are saved in:
 ;;    (setq workgroups-configs-file "/path/to/new/file")
 ;;
 ;;  - workgroups-restore-hook is a hook that's run whenever a
@@ -59,20 +68,20 @@
 
 ;;; Some sample keybindings:
 ;;
-;;   (global-set-key (kbd "C-c C-g C-a") 'workgroups-add-config)
-;;   (global-set-key (kbd "C-c C-g C-r") 'workgroups-restore-config)
-;;   (global-set-key (kbd "C-c C-g C-d") 'workgroups-delete-config)
-;;   (global-set-key (kbd "C-c C-g C-u") 'workgroups-update-config)
-;;   (global-set-key (kbd "C-c C-g C-v") 'workgroups-revert-config)
-;;   (global-set-key (kbd "C-s ,")       'workgroups-prev-config)
-;;   (global-set-key (kbd "C-s .")       'workgroups-next-config)
+;;    (global-set-key (kbd "C-c C-g C-a") 'workgroups-add-config)
+;;    (global-set-key (kbd "C-c C-g C-r") 'workgroups-restore-config)
+;;    (global-set-key (kbd "C-c C-g C-d") 'workgroups-delete-config)
+;;    (global-set-key (kbd "C-c C-g C-u") 'workgroups-update-config)
+;;    (global-set-key (kbd "C-c C-g C-v") 'workgroups-revert-config)
+;;    (global-set-key (kbd "C-s ,")       'workgroups-prev-config)
+;;    (global-set-key (kbd "C-s .")       'workgroups-next-config)
 ;;
 
 ;;; Or if you use ido-mode:
 ;;
-;;   (global-set-key (kbd "C-c C-g C-a") 'workgroups-ido-add-config)
-;;   (global-set-key (kbd "C-c C-g C-r") 'workgroups-ido-restore-config)
-;;   (global-set-key (kbd "C-c C-g C-d") 'workgroups-ido-delete-config)
+;;    (global-set-key (kbd "C-c C-g C-a") 'workgroups-ido-add-config)
+;;    (global-set-key (kbd "C-c C-g C-r") 'workgroups-ido-restore-config)
+;;    (global-set-key (kbd "C-c C-g C-d") 'workgroups-ido-delete-config)
 ;;
 
 ;;; TODO:
@@ -106,14 +115,54 @@ persistence package."
 
 ;; Non-customizable variables
 
+(defvar workgroups-loaded-flag nil
+  "NIL until `workgroups-configs-file' is loaded; t after.")
+
 (defvar workgroups-window-configs nil
-  "List containing all window configs that workgroups is
-tracking.")
+  "List containing all saved window configs.")
 
 (defvar workgroups-current-config nil
   "Name of the current window config.")
 
 ;; Functions
+
+(defun workgroups-write-configs (configs)
+  "Save `workgroups-window-configs' to
+`workgroups-configs-file'."
+  (let (make-backup-files)
+    (with-temp-buffer
+      (insert ";; workgroups for windows - saved window configurations \n\n"
+              (format "%S" (setq workgroups-window-configs configs)))
+      (write-file workgroups-configs-file))))
+
+(defun workgroups-load-configs (&optional file)
+  "Load configs from FILE or `workgroups-configs-file'."
+  (interactive)
+  (let ((filename (expand-file-name (or file workgroups-configs-file)))
+        (make-backup-files))
+    (with-temp-buffer
+      (cond ((file-exists-p filename)
+             (insert-file-contents filename)
+             (goto-char (point-min))
+             (condition-case err
+                 (setq workgroups-window-configs (read (current-buffer)))
+               (error (message "workgroups: Error in %s: %s" file (car err))))
+             (message "workgroups: Loaded %s" filename))
+            (t (workgroups-write-configs nil)
+               (message "workgroups: Created file %s" filename))))
+    (setq workgroups-loaded-flag t)))
+
+(defun workgroups-get-configs ()
+  "Return `workgroups-window-configs', calling
+`workgroups-load-configs' first if it hasn't been called
+already. This function is the only way other functions should
+access `workgroups-window-configs'."
+  (or workgroups-loaded-flag (workgroups-load-configs))
+  workgroups-window-configs)
+
+(defun workgroups-get-config (name)
+  "Return the config named NAME if it exists, otherwise nil."
+  (assoc-string name (workgroups-get-configs)))
 
 (defun workgroups-circular-next (elt lst)
   "Return the element after ELT in LST, or the car of LST if ELT
@@ -122,14 +171,7 @@ is the lat element of LST or is not present in LST."
 
 (defun workgroups-config-names ()
   "Return a list of saved window config names."
-  (mapcar 'car workgroups-window-configs))
-
-;; foo
-
-(defun workgroups-get-config (name)
-  "Find and return a workgroups config from NAME, or nil if it
-doesn't exist."
-  (assoc-string name workgroups-window-configs))
+  (mapcar 'car (workgroups-get-configs)))
 
 (defun workgroups-make-window (winobj)
   "Make printable window object from WINOBJ.
@@ -185,39 +227,13 @@ from the `window-tree' of the `selected-frame'."
           (position (selected-window) (workgroups-window-list frame))
           (inner (car (window-tree frame))))))
 
-(defun workgroups-write-configs (configs)
-  "Save `workgroups-window-configs' to
-`workgroups-configs-file'."
-  (let (make-backup-files)
-    (with-temp-buffer
-      (insert ";; workgroups for windows - saved window configurations \n\n"
-              (format "%S" (setq workgroups-window-configs configs)))
-      (write-file workgroups-configs-file))))
-
-(defun workgroups-load-configs (&optional file)
-  "Load configs from FILE or `workgroups-configs-file'."
-  (interactive)
-  (let ((filename (expand-file-name (or file workgroups-configs-file)))
-        (make-backup-files))
-    (with-temp-buffer
-      (cond ((file-exists-p filename)
-             (insert-file-contents filename)
-             (goto-char (point-min))
-             (condition-case err
-                 (setq workgroups-window-configs (read (current-buffer)))
-               (error (message "workgroups: Error in %s: %s" file (car err))))
-             (message "workgroups: Loaded %s" filename))
-            (t (workgroups-write-configs nil)
-               (message "workgroups: Created file %s" filename))))))
-
 (defun workgroups-add-window-config (name)
-  "Add the current window config to `workgroups-window-configs'
-under NAME, and save the updated list to
-`workgroups-configs-file'."
+  "Add the current window config under NAME, and write the
+updated list to `workgroups-configs-file'."
   (workgroups-write-configs
    (cons (list name (workgroups-make-config))
          (remove (workgroups-get-config name)
-                 workgroups-window-configs))))
+                 (workgroups-get-configs)))))
 
 (defun workgroups-add-config (name)
   "Call `workgroups-add-window-config' with NAME, and set
@@ -260,8 +276,7 @@ buffer-name contained in WINDOW."
        frame (nth index (workgroups-window-list frame))))))
 
 (defun workgroups-restore-config (name)
-  "Find the window config named NAME in
-`workgroups-window-configs' and restore it."
+  "Restore window config named NAME."
   (interactive "sName: ")
   (let ((config (workgroups-get-config name)))
     (cond ((not config)
@@ -273,14 +288,13 @@ buffer-name contained in WINDOW."
              (message "Restored config %s." name)))))
 
 (defun workgroups-delete-config (name)
-  "Delete the window config named NAME from
-`workgroups-window-configs'."
+  "Delete window config named NAME."
   (interactive "sName: ")
   (let ((config (workgroups-get-config name)))
     (cond ((not config)
            (ding)
            (message "There is no config named %s." name))
-          (t (workgroups-write-configs (remove config workgroups-window-configs))
+          (t (workgroups-write-configs (remove config (workgroups-get-configs)))
              (when (string= name workgroups-current-config)
                (setq workgroups-current-config nil))
              (message "Deleted config %s." name)))))
@@ -310,14 +324,12 @@ buffer-name contained in WINDOW."
                                (if prev (nreverse names) names)))))
 
 (defun workgroups-next-config ()
-  "Restore the next window config from
-`workgroups-window-configs' circularly."
+  "Restore the next window config circularly."
   (interactive)
   (workgroups-circular-restore))
 
 (defun workgroups-prev-config ()
-  "Restore the previous window config from
-`workgroups-window-configs' circularly."
+  "Restore the previous window config circularly."
   (interactive)
   (workgroups-circular-restore t))
 
