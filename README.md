@@ -40,7 +40,7 @@ exist.
  - <tt>workgroups-restore-hook</tt> is a hook that's run whenever a
    workgroup is restored. You can add functions to it like this:
 
-    (add-hook 'workgroups-restore-hook 'foo)
+        (add-hook 'workgroups-restore-hook 'foo)
 
 ## Some sample keybindings
 
