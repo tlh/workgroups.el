@@ -63,11 +63,12 @@
 ;;   (global-set-key (kbd "C-c C-g C-r") 'workgroups-restore-config)
 ;;   (global-set-key (kbd "C-c C-g C-d") 'workgroups-delete-config)
 ;;   (global-set-key (kbd "C-c C-g C-u") 'workgroups-update-config)
+;;   (global-set-key (kbd "C-c C-g C-v") 'workgroups-revert-config)
 ;;   (global-set-key (kbd "C-s ,")       'workgroups-prev-config)
 ;;   (global-set-key (kbd "C-s .")       'workgroups-next-config)
 ;;
 
-;;; And if you use ido-mode:
+;;; Or if you use ido-mode:
 ;;
 ;;   (global-set-key (kbd "C-c C-g C-a") 'workgroups-ido-add-config)
 ;;   (global-set-key (kbd "C-c C-g C-r") 'workgroups-ido-restore-config)
@@ -290,6 +291,13 @@ buffer-name contained in WINDOW."
          (message "There is no current config to update."))
         (t (workgroups-add-window-config workgroups-current-config)
            (message "Updated config %s" workgroups-current-config))))
+
+(defun workgroups-revert-config ()
+  "Revert the current config to `workgroups-current-config'."
+  (interactive)
+  (if workgroups-current-config
+      (workgroups-restore-config workgroups-current-config)
+    (message "There is no current workgroups configuration.")))
 
 (defun workgroups-circular-restore (&optional prev)
   "Restore the previous or next window config circularly in
