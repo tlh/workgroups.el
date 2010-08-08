@@ -124,14 +124,14 @@ is the lat element of LST or is not present in LST."
   "Return a list of saved window config names."
   (mapcar 'car workgroups-window-configs))
 
-(defun workgroups-find-config (name)
+(defun workgroups-get-config (name)
   "Find and return a workgroups config from NAME, or nil if it
 doesn't exist."
   (assoc-string name workgroups-window-configs))
 
 (defun workgroups-make-window (winobj)
-  "Create a printable window object from WINOBJ, an Emacs window
-object."
+  "Make printable window object from WINOBJ.
+WINOBJ is an Emacs window object."
   (let ((buffer (window-buffer winobj)))
     (list :window
           (let ((edges (window-edges winobj)))
@@ -171,8 +171,8 @@ stable."
                     (mapcan 'inner (cddr obj)))))
     (inner (car (window-tree frame)))))
 
-(defun* workgroups-get-config (&optional (frame (selected-frame)))
-  "Create workgroups' printable frame and window representation
+(defun* workgroups-make-config (&optional (frame (selected-frame)))
+  "Make workgroups' printable frame and window representation
 from the `window-tree' of the `selected-frame'."
   (labels ((inner (wt)
                   (if (atom wt)
@@ -213,15 +213,15 @@ from the `window-tree' of the `selected-frame'."
 under NAME, and save the updated list to
 `workgroups-configs-file'."
   (workgroups-write-configs
-   (cons (list name (workgroups-get-config))
-         (remove (workgroups-find-config name)
+   (cons (list name (workgroups-make-config))
+         (remove (workgroups-get-config name)
                  workgroups-window-configs))))
 
 (defun workgroups-add-config (name)
   "Call `workgroups-add-window-config' with NAME, and set
 `workgroups-current-config' to NAME."
   (interactive "sName: ")
-  (let ((config (workgroups-find-config name)))
+  (let ((config (workgroups-get-config name)))
     (when (or (not config) (y-or-n-p (format "%s already exists. Overwrite? " name)))
       (workgroups-add-window-config name)
       (setq workgroups-current-config name)
@@ -261,7 +261,7 @@ buffer-name contained in WINDOW."
   "Find the window config named NAME in
 `workgroups-window-configs' and restore it."
   (interactive "sName: ")
-  (let ((config (workgroups-find-config name)))
+  (let ((config (workgroups-get-config name)))
     (cond ((not config)
            (ding)
            (message "There is no config named %s." name))
@@ -274,7 +274,7 @@ buffer-name contained in WINDOW."
   "Delete the window config named NAME from
 `workgroups-window-configs'."
   (interactive "sName: ")
-  (let ((config (workgroups-find-config name)))
+  (let ((config (workgroups-get-config name)))
     (cond ((not config)
            (ding)
            (message "There is no config named %s." name))
