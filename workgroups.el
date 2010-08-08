@@ -124,6 +124,8 @@ is the lat element of LST or is not present in LST."
   "Return a list of saved window config names."
   (mapcar 'car workgroups-window-configs))
 
+;; foo
+
 (defun workgroups-get-config (name)
   "Find and return a workgroups config from NAME, or nil if it
 doesn't exist."
