@@ -21,6 +21,7 @@ exist.
 
  - Persisting window configurations across sessions
 
+ - Cycling through window configurations
 
 ## Installation
 
@@ -28,19 +29,18 @@ exist.
 
  - Add this line to your <tt>.emacs</tt> file:
 
-    (require 'workgroups)
+        (require 'workgroups)
 
 ## Configuration
 
  - to change the file that configs are saved in:
 
-    (setq workgroups-configs-file "/path/to/new/file")
+        (setq workgroups-configs-file "/path/to/new/file")
 
  - <tt>workgroups-restore-hook</tt> is a hook that's run whenever a
    workgroup is restored. You can add functions to it like this:
 
     (add-hook 'workgroups-restore-hook 'foo)
-
 
 ## Some sample keybindings
 
@@ -51,7 +51,6 @@ exist.
     (global-set-key (kbd "C-c C-g C-v") 'workgroups-revert-config)
     (global-set-key (kbd "C-s ,")       'workgroups-prev-config)
     (global-set-key (kbd "C-s .")       'workgroups-next-config)
-
 
 Or if you use ido-mode:
 
