@@ -301,6 +301,11 @@ buffer-name contained in WINDOW."
       (workgroups-restore-config workgroups-current-config)
     (message "There is no current workgroups configuration.")))
 
+(defun workgroups-echo-current-config ()
+  "Print `workgroups-current-config' to the echo area."
+  (interactive)
+  (message "Current workgroups config: %s" workgroups-current-config))
+
 (defun workgroups-circular-restore (&optional prev)
   "Restore the previous or next window config circularly in
 `workgroups-config-names'."
