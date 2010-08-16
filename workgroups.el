@@ -155,6 +155,15 @@ persistence package."
 is the lat element of LST or is not present in LST."
   (or (cadr (member elt lst)) (car lst)))
 
+
+;; TODO
+;; workgroups-next-workgroup
+;; workgroups-previous-workgroup
+;; workgroups-bury-workgroup
+;; workgroups-switch-to-workgroup
+;; workgroups-kill-workgroup
+
+
 (defun workgroups-config-names ()
   "Return a list of saved window config names."
   (mapcar 'car (workgroups-get-configs)))
@@ -344,3 +353,5 @@ buffer-name contained in WINDOW."
   (workgroups-delete-config (workgroups-ido-read)))
 
 (provide 'workgroups)
+
+;;; workgroups.el ends here
