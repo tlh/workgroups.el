@@ -2,61 +2,86 @@
 
 ## Commentary
 
-workgroups.el is a simple window configuration persistence package.
-It saves the window layout of the current frame, and, if a window's
-buffer is visiting a file, it saves the filename as well.  And that's
-it. It doesn't try to save complicated information about the buffer,
-like major or minor modes. If you save configurations that include
-things like erc or gnus buffers, you should launch those applications
-and buffers again in your next session before restoring the
-configuration that includes them. Nothing bad will happen otherwise,
-of course -- workgroups will just default to a buffer that already
-exists.
+workgroups-mode.el is a window configuration persistence minor mode
+for GNU Emacs.  It allows you to persist window configurations, called
+"workgroups" because it's shorter and funnier, between sessions.
+workgroups-mode saves the window layout of the current frame, as well
+as each window's buffer's filename if it's visiting a file, or its
+buffername otherwise.  And that's it. It doesn't try to save
+complicated information about the buffer, like major or minor modes.
+If you save workgroups that include things like erc or gnus buffers,
+you should launch those applications and buffers again in your next
+session before restoring the workgroup that includes them. Nothing bad
+will happen otherwise, of course.  workgroups-mode will just default
+to a buffer that already exists, like *scratch*.
 
-## Features
+`workgroups-list' contains all the currently available workgroups.
+You can switch to workgroups (i.e. restore window configurations),
+bury them, go to the previous or next workgroup circularly, etc.
+`workgroups-save' saves `workgroups-list' to a file, which can then be
+loaded in another session.  Workgroups are added to `workgroups-list'
+by calling `workgroups-add', removed by calling `workgroups-kill', and
+can be moved to the end of `workgroups-list' by calling
+`workgroups-bury'.  In general, operations on workgroups and
+`workgroups-list' behave as similarly to buffers and buffer-lists as
+possible.
 
- - Saving window configurations
+## Installation:
 
- - Restoring window configurations
+ - Put `workgroups-mode.el' somewhere on your emacs load path
 
- - Persisting window configurations across sessions
+ - Add this line to your .emacs file:
 
- - Cycling through window configurations
+        (require 'workgroups-mode)
 
-## Installation
+## Configuration:
 
- - Put <tt>workgroups.el</tt> somewhere on your emacs load path
+Once you've added a few workgroups with `workgroups-add', you should
+save them to a file with `workgroups-save'.  You can designate a file
+to be automatically loaded when workgroups-mode is started by setting
+`workgroups-default-file' like so:
 
- - Add this line to your <tt>.emacs</tt> file:
+    (setq workgroups-default-file "/path/to/workgroups/file")
 
-        (require 'workgroups)
+If `workgroups-autoswitch' is non-nil, the first workgroup in a file
+will automatically be switched to when the file is loaded:
 
-## Configuration
+    (setq workgroups-autoswitch t)
 
- - To change the file that configs are saved in:
+With these two options set, workgroups mode will automatically load
+the default file and switch to the first workgroup in it at emacs
+startup.
 
-        (setq workgroups-configs-file "/path/to/new/file")
+To turn on workgroups-mode, either issue the command:
 
- - <tt>workgroups-restore-hook</tt> is a hook that's run whenever a
-   workgroup is restored. You can add functions to it like this:
+    M-x workgroups-mode
 
-        (add-hook 'workgroups-restore-hook 'foo)
+Or put this in your .emacs file:
 
-## Some sample keybindings
+    (workgroups-mode t)
 
-    (global-set-key (kbd "C-c C-g C-a") 'workgroups-add-config)
-    (global-set-key (kbd "C-c C-g C-r") 'workgroups-restore-config)
-    (global-set-key (kbd "C-c C-g C-d") 'workgroups-delete-config)
-    (global-set-key (kbd "C-c C-g C-u") 'workgroups-update-config)
-    (global-set-key (kbd "C-c C-g C-v") 'workgroups-revert-config)
-    (global-set-key (kbd "C-s ,")       'workgroups-prev-config)
-    (global-set-key (kbd "C-s .")       'workgroups-next-config)
+Check the documentation of the customizable variables below for more
+configuration options.
 
-Or if you use ido-mode:
+## Some sample keybindings:
 
-    (global-set-key (kbd "C-c C-g C-a") 'workgroups-ido-add-config)
-    (global-set-key (kbd "C-c C-g C-r") 'workgroups-ido-restore-config)
-    (global-set-key (kbd "C-c C-g C-d") 'workgroups-ido-delete-config)
+    (global-set-key (kbd "C-c w a") 'workgroups-add)
+    (global-set-key (kbd "C-c w k") 'workgroups-kill)
+    (global-set-key (kbd "C-c w b") 'workgroups-switch)
+    (global-set-key (kbd "C-c w s") 'workgroups-save)
+    (global-set-key (kbd "C-c w f") 'workgroups-find-file)
+    (global-set-key (kbd "C-c w u") 'workgroups-update)
+    (global-set-key (kbd "C-c w r") 'workgroups-revert)
+    (global-set-key (kbd "C-c w j") 'workgroups-bury)
+    (global-set-key (kbd "C-c w e") 'workgroups-show-current)
+    (global-set-key (kbd "C-s-,")   'workgroups-previous)
+    (global-set-key (kbd "C-s-.")   'workgroups-next)
+
+## Or the ido versions if you use ido-mode:
+
+    (global-set-key (kbd "C-c w a") 'workgroups-ido-add)
+    (global-set-key (kbd "C-c w b") 'workgroups-ido-switch)
+    (global-set-key (kbd "C-c w k") 'workgroups-ido-kill)
 
 ## License
 
