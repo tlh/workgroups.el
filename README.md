@@ -13,22 +13,22 @@ If you save workgroups that include things like erc or gnus buffers,
 you should launch those applications and buffers again in your next
 session before restoring the workgroup that includes them. Nothing bad
 will happen otherwise, of course.  workgroups-mode will just default
-to a buffer that already exists, like *scratch*.
+to a buffer that already exists, like \*scratch\*.
 
-`workgroups-list' contains all the currently available workgroups.
+<tt>workgroups-list</tt> contains all the currently available workgroups.
 You can switch to workgroups (i.e. restore window configurations),
 bury them, go to the previous or next workgroup circularly, etc.
-`workgroups-save' saves `workgroups-list' to a file, which can then be
-loaded in another session.  Workgroups are added to `workgroups-list'
-by calling `workgroups-add', removed by calling `workgroups-kill', and
-can be moved to the end of `workgroups-list' by calling
-`workgroups-bury'.  In general, operations on workgroups and
-`workgroups-list' behave as similarly to buffers and buffer-lists as
+<tt>workgroups-save</tt> saves <tt>workgroups-list</tt> to a file, which can then be
+loaded in another session.  Workgroups are added to <tt>workgroups-list</tt>
+by calling <tt>workgroups-add</tt>, removed by calling <tt>workgroups-kill</tt>, and
+can be moved to the end of <tt>workgroups-list</tt> by calling
+<tt>workgroups-bury</tt>.  In general, operations on workgroups and
+<tt>workgroups-list</tt> behave as similarly to buffers and buffer-lists as
 possible.
 
 ## Installation:
 
- - Put `workgroups-mode.el' somewhere on your emacs load path
+ - Put <tt>workgroups-mode.el</tt> somewhere on your emacs load path
 
  - Add this line to your .emacs file:
 
@@ -36,14 +36,14 @@ possible.
 
 ## Configuration:
 
-Once you've added a few workgroups with `workgroups-add', you should
-save them to a file with `workgroups-save'.  You can designate a file
+Once you've added a few workgroups with <tt>workgroups-add</tt>, you should
+save them to a file with <tt>workgroups-save</tt>.  You can designate a file
 to be automatically loaded when workgroups-mode is started by setting
-`workgroups-default-file' like so:
+<tt>workgroups-default-file</tt> like so:
 
     (setq workgroups-default-file "/path/to/workgroups/file")
 
-If `workgroups-autoswitch' is non-nil, the first workgroup in a file
+If <tt>workgroups-autoswitch</tt> is non-nil, the first workgroup in a file
 will automatically be switched to when the file is loaded:
 
     (setq workgroups-autoswitch t)
