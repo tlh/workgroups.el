@@ -2,8 +2,8 @@
 
 ## Commentary
 
-workgroups-mode.el is a window configuration persistence minor mode
-for GNU Emacs.  It allows you to persist window configurations, called
+workgroups-mode is a window configuration persistence minor mode for
+GNU Emacs.  It allows you to persist window configurations, called
 "workgroups" because it's shorter and funnier, between sessions.
 workgroups-mode saves the window layout of the current frame, as well
 as each window's buffer's filename if it's visiting a file, or its
@@ -85,4 +85,4 @@ configuration options.
 
 ## License
 
-workgroups.el is released under the GPL. See <tt>workgroups.el</tt>
+workgroups-mode is released under the GPL. See <tt>workgroups-mode.el</tt>
