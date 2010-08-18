@@ -60,8 +60,8 @@ Or put this in your .emacs file:
 
     (workgroups-mode t)
 
-Check the documentation of the customizable variables below for more
-configuration options.
+Check the documentation of the customizable variables in
+`workgroups-mode.el` for more configuration options.
 
 ## Some sample keybindings:
 
