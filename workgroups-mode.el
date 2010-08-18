@@ -100,6 +100,7 @@
 ;;   (global-set-key (kbd "C-c w f") 'workgroups-find-file)
 ;;   (global-set-key (kbd "C-c w u") 'workgroups-update)
 ;;   (global-set-key (kbd "C-c w r") 'workgroups-revert)
+;;   (global-set-key (kbd "C-c w i") 'workgroups-raise)
 ;;   (global-set-key (kbd "C-c w j") 'workgroups-bury)
 ;;   (global-set-key (kbd "C-c w e") 'workgroups-show-current)
 ;;   (global-set-key (kbd "C-s-,")   'workgroups-previous)
@@ -111,6 +112,7 @@
 ;;   (global-set-key (kbd "C-c w a") 'workgroups-ido-add)
 ;;   (global-set-key (kbd "C-c w b") 'workgroups-ido-switch)
 ;;   (global-set-key (kbd "C-c w k") 'workgroups-ido-kill)
+;;   (global-set-key (kbd "C-c w i") 'workgroups-ido-raise)
 ;;
 
 ;;; Code:
@@ -391,6 +393,16 @@ buffer-name contained in WINDOW."
       (workgroups-kill-workgroup workgroup)
       (message "Killed %s." name))))
 
+(defun workgroups-raise (name)
+  "Raise workgroup named NAME to the front of `workgroups-list'.
+Don't restore it, though."
+  (interactive (workgroups-completing-read))
+  (let ((workgroup (workgroups-get-workgroup name)))
+    (if (not workgroup)
+        (message "There is no workgroup named %s." name)
+      (workgroups-raise-workgroup workgroup)
+      (message "Raised %s." name))))
+
 (defun workgroups-bury ()
   "Move `workgroups-current-workgroup' to the end of
 `workgroups-list', but don't restore the new
@@ -459,6 +471,11 @@ buffer-name contained in WINDOW."
   "Kill workgroup chosen with `ido-completing-read'."
   (interactive)
   (workgroups-kill (workgroups-ido-read)))
+
+(defun workgroups-ido-raise ()
+  "Raise workgroup chosen with `ido-completing-read'."
+  (interactive)
+  (workgroups-raise (workgroups-ido-read)))
 
 ;; mode definition
 
