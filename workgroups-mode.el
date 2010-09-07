@@ -63,10 +63,22 @@
 
 ;;; Configuration:
 ;;
+;;   To turn on workgroups-mode, either issue the command:
+;;
+;;     M-x workgroups-mode
+;;
+;;   Or put this in your .emacs file:
+;;
+;;     (workgroups-mode t)
+;;
+;;   To start off, you should add a few workgroups.  When your frame
+;;   is in a state that you'd like to save, run the command
+;;   `workgroups-add', and give the workgroup a name when prompted.
 ;;   Once you've added a few workgroups with `workgroups-add', you
 ;;   should save them to a file with `workgroups-save'.  You can
-;;   designate a file to be automatically loaded when workgroups-mode
-;;   is started by setting `workgroups-default-file' like so:
+;;   designate this file to be automatically loaded when
+;;   workgroups-mode is started by setting `workgroups-default-file'
+;;   like so:
 ;;
 ;;     (setq workgroups-default-file "/path/to/workgroups/file")
 ;;
@@ -78,14 +90,6 @@
 ;;   With these two options set, workgroups mode will automatically
 ;;   load the default file and switch to the first workgroup in it at
 ;;   emacs startup.
-;;
-;;   To turn on workgroups-mode, either issue the command:
-;;
-;;     M-x workgroups-mode
-;;
-;;   Or put this in your .emacs file:
-;;
-;;     (workgroups-mode t)
 ;;
 ;;   Check the documentation of the customizable variables below for
 ;;   more configuration options.
@@ -113,6 +117,13 @@
 ;;   (global-set-key (kbd "C-c w b") 'workgroups-ido-switch)
 ;;   (global-set-key (kbd "C-c w k") 'workgroups-ido-kill)
 ;;   (global-set-key (kbd "C-c w i") 'workgroups-ido-raise)
+;;
+
+;;; TODO:
+;;
+;;  - Window locking: Locked means the window is tied to a specific
+;;    buffer.  Unlocked means the opposite.
+;;
 ;;
 
 ;;; Code:
@@ -213,9 +224,8 @@ it before calling `workgroups-mode'."
           workgroups-dirty nil)))
 
 (defun workgroups-window-list (frame)
-  "Flatten `window-tree' into a stable list by depth-first
-traversal.  `window-list' can't be used because its order isn't
-stable."
+  "Flatten `window-tree' into a stable list.  `window-list' can't
+be used because its order isn't stable."
   (labels ((inner (obj)
                   (if (atom obj)
                       (list obj)
