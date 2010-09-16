@@ -124,7 +124,6 @@
 ;;  - Window locking: Locked means the window is tied to a specific
 ;;    buffer.  Unlocked means the opposite.
 ;;
-;;
 
 ;;; Code:
 
@@ -493,7 +492,7 @@ Don't restore it, though."
   "Query for save on exit if `workgroups-dirty' is non-nil."
   (and workgroups-dirty
        workgroups-query-save-on-exit
-       (y-or-n-p "Workgroups have been modified. Save them? ")
+       (y-or-n-p "Workgroups have been modified. Svave them? ")
        (workgroups-save))
   t)
 
