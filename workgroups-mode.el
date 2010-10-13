@@ -124,13 +124,17 @@
 ;;  - Window locking: Locked means the window is tied to a specific
 ;;    buffer.  Unlocked means the opposite.
 ;;
+;;  - Multi-frame support
+;;
 
 ;;; Code:
+
 
 (eval-when-compile
   (require 'cl))
 
-;; Customization
+
+;;; customization
 
 (defgroup workgroups nil
   "Workgroup for Windows -- A simple window configuration
@@ -168,7 +172,8 @@ it before calling `workgroups-mode'."
   :type 'boolean
   :group 'workgroups)
 
-;; Non-customizable variables
+
+;;; non-customizable variables
 
 (defvar workgroups-file nil
   "Current workgroups file.")
@@ -180,7 +185,8 @@ it before calling `workgroups-mode'."
   "Non-nil means workgroups have been added or removed from
 `workgroups-list' since the last save.")
 
-;; Functions
+
+;;; functions
 
 (defun workgroups-current-workgroup ()
   "Return car of `workgroups-list'."
@@ -200,6 +206,10 @@ it before calling `workgroups-mode'."
     (if bury-first
         (append (cdr names) (list (car names)))
       names)))
+
+(defun workgroups-rename-workgroup (workgroup newname)
+  "Rename WORKGROUP to NEWNAME."
+  (setcar workgroup newname))
 
 (defun workgroups-current-workgroup-name ()
   "Return the name of the current workgroup."
@@ -231,7 +241,8 @@ be used because its order isn't stable."
                     (mapcan 'inner (cddr obj)))))
     (inner (car (window-tree frame)))))
 
-;; workgroups-list operations
+
+;;; workgroups-list operations
 
 (defun workgroups-autosave ()
   "Save `workgroups-file' when `workgroups-autosave' is non-nil."
@@ -264,7 +275,8 @@ be used because its order isn't stable."
                 (list workgroup)))
   (workgroups-autosave))
 
-;; workgroup making
+
+;;; workgroup making
 
 (defun workgroups-make-window (winobj)
   "Make printable window object from WINOBJ.
@@ -293,7 +305,8 @@ WINOBJ is an Emacs window object."
             (position (selected-window) (workgroups-window-list frame))
             (inner (car (window-tree frame)))))))
 
-;; workgroup restoring
+
+;;; workgroup restoring
 
 (defun workgroups-leaf-window-p (window)
   "Return t if WINDOW is a workgroups window object."
@@ -323,7 +336,7 @@ buffer-name contained in WINDOW."
           ((and buffername (get-buffer buffername))
            (switch-to-buffer buffername)))))
 
-(defun workgroups-restore-workgroup (workgroup &optional frame)
+(defun workgroups-restore-workgroup (workgroup frame)
   "Restore WORKGROUP in FRAME or `selected-frame'."
   (labels ((inner (wtree)
                   (if (workgroups-leaf-window-p wtree)
@@ -337,18 +350,19 @@ buffer-name contained in WINDOW."
                           (split-window-horizontally
                            (workgroups-window-width win))))
                       (inner win)))))
-    (let ((frame (or frame (selected-frame))))
-      (destructuring-bind (name (left top width height) index wtree) workgroup
-        (set-frame-position frame left top)
-        (set-frame-width    frame width)
-        (set-frame-height   frame height)
-        (delete-other-windows)
-        (inner wtree)
-        (set-frame-selected-window
-         frame (nth index (workgroups-window-list frame)))))
+    (destructuring-bind (name (left top width height) index wtree)
+        workgroup
+      (set-frame-position frame left top)
+      (set-frame-width    frame width)
+      (set-frame-height   frame height)
+      (delete-other-windows)
+      (inner wtree)
+      (set-frame-selected-window
+       frame (nth index (workgroups-window-list frame))))
     (run-hooks 'workgroups-switch-hook)))
 
-;; commands
+
+;;; commands
 
 (defun workgroups-save (&optional new)
   "`workgroups-save-file' command."
@@ -363,7 +377,7 @@ buffer-name contained in WINDOW."
     (if (not workgroup)
         (message "There is no workgroup named %s." name)
       (workgroups-raise-workgroup workgroup)
-      (workgroups-restore-workgroup workgroup)
+      (workgroups-restore-workgroup workgroup (current-frame))
       (message "Switched to %s." name))))
 
 (defun workgroups-find-file (file)
@@ -452,6 +466,17 @@ Don't restore it, though."
       (message "Updated workgroup %s"
                (workgroups-name workgroup)))))
 
+(defun workgroups-rename ()
+  "Rename the current workgroup. Prompt for new name."
+  (interactive)
+  (let* ((workgroup (workgroups-current-workgroup))
+         (oldname (car workgroup))
+         (newname (read-from-minibuffer
+                   (format "Rename workgroup from %S to: "
+                           oldname))))
+    (workgroups-rename-workgroup workgroup newname)
+    (message "Rename %S to %S." oldname newname)))
+
 (defun workgroups-show-current ()
   "Message name of `workgroups-current-workgroup'."
   (interactive)
@@ -460,7 +485,8 @@ Don't restore it, though."
         (message "Current workgroup: %s" name)
       (message "No workgroups are currently loaded."))))
 
-;; ido
+
+;;; ido
 
 (defun workgroups-ido-read (&optional bury-first)
   "Read a workgroup name with `ido-completing-read'."
@@ -486,13 +512,14 @@ Don't restore it, though."
   (interactive)
   (workgroups-raise (workgroups-ido-read)))
 
-;; mode definition
+
+;;; mode definition
 
 (defun workgroups-query-hook-fn ()
   "Query for save on exit if `workgroups-dirty' is non-nil."
   (and workgroups-dirty
        workgroups-query-save-on-exit
-       (y-or-n-p "Workgroups have been modified. Svave them? ")
+       (y-or-n-p "Workgroups have been modified. Save them? ")
        (workgroups-save))
   t)
 
@@ -520,8 +547,10 @@ Otherwise, turn off workgroups-mode."
         (workgroups-mode  (workgroups-enable t))
         (t                (workgroups-enable nil))))
 
-;; provide
+
+;;; provide
 
 (provide 'workgroups-mode)
+
 
 ;;; workgroups-mode.el ends here
