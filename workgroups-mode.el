@@ -121,9 +121,6 @@
 
 ;;; TODO:
 ;;
-;;  - Window locking: Locked means the window is tied to a specific
-;;    buffer.  Unlocked means the opposite.
-;;
 ;;  - Switch just the window structure, keeping the current buffers,
 ;;    as far as that is possible with mismatch.
 ;;
@@ -195,17 +192,11 @@ it before calling `workgroups-mode'."
   "Non-nil means workgroups have been added or removed from
 `workgroups-list' since the last save.")
 
-(defvar workgroups-kill-ring nil
-  "List of saved configurations.")
+(defvar workgroups-clipboard nil
+  "Clipboard to which configs can be copied.")
 
 
 ;;; utils
-
-(defun workgroups-rotlist (list &optional backwards)
-  "Rotate LIST forwards or backwards when BACKWARDS is non-nil."
-  (if backwards
-      (cons (car (last list)) (butlast list))
-    (append (cdr list) (list (car list)))))
 
 (defun workgroups-window-list (frame)
   "Flatten `window-tree' into a stable list.
@@ -215,10 +206,12 @@ it before calling `workgroups-mode'."
     (inner (car (window-tree frame)))))
 
 (defun workgroups-circular-next (elt list)
+  "Return elt after ELT in LIST, or car of LIST."
   (let ((next (cdr (member elt list))))
     (if next (car next) (car list))))
 
 (defun workgroups-circular-prev (elt list)
+  "Return elt before ELT in LIST, or car of last of LIST."
   (workgroups-circular-next elt (reverse list)))
 
 (defun workgroups-take (lst n)
@@ -264,12 +257,6 @@ Iterative to prevent stack overflow."
 (defun workgroups-name (workgroup)
   "Return the name of WORKGROUP."
   (car workgroup))
-
-;; (defun workgroups-names (&optional bury-first)
-;;   "Return list of workgroups names."
-;;   (mapcar 'workgroups-name
-;;           (if (not bury-first) (workgroups-list)
-;;             (workgroups-rotlist (workgroups-list)))))
 
 (defun workgroups-names ()
   "Return list of workgroups names."
@@ -332,17 +319,31 @@ Iterative to prevent stack overflow."
 
 ;;; workgroup making
 
+;; (defun workgroups-make-window (winobj)
+;;   "Make printable window object from WINOBJ.
+;; WINOBJ is an Emacs window object."
+;;   (let ((buffer (window-buffer winobj)))
+;;     (list :window
+;;           ;; From `window-width' docstring:
+;;           (let ((edges (window-edges winobj)))
+;;             (- (nth 2 edges) (nth 0 edges)))
+;;           (window-height winobj)
+;;           (buffer-file-name buffer)
+;;           (buffer-name buffer))))
+
 (defun workgroups-make-window (winobj)
   "Make printable window object from WINOBJ.
 WINOBJ is an Emacs window object."
   (let ((buffer (window-buffer winobj)))
     (list :window
+          (buffer-file-name buffer)
+          (buffer-name buffer)
           ;; From `window-width' docstring:
           (let ((edges (window-edges winobj)))
             (- (nth 2 edges) (nth 0 edges)))
           (window-height winobj)
-          (buffer-file-name buffer)
-          (buffer-name buffer))))
+          (window-point winobj)
+          (window-start winobj))))
 
 (defun workgroups-make-config (&optional frame)
   (flet ((inner (wt)
@@ -373,28 +374,30 @@ WINOBJ is an Emacs window object."
 (defun workgroups-window-width (window)
   "Return the width of workgroups window WINDOW."
   (if (workgroups-leaf-window-p window)
-      (nth 1 window)
+      (nth 3 window)
     (destructuring-bind (x1 y1 x2 y2) (cadr window)
       (- x2 x1))))
 
 (defun workgroups-window-height (window)
   "Return the height of workgroups window WINDOW."
   (if (workgroups-leaf-window-p window)
-      (nth 2 window)
+      (nth 4 window)
     (destructuring-bind (x1 y1 x2 y2) (cadr window)
       (- y2 y1))))
 
 (defun workgroups-restore-window-state (window)
   "Set the state of `selected-window' to the file and/or
 buffer-name contained in WINDOW."
-  (destructuring-bind (tag w h filename buffername) window
-    (cond ((and filename (file-exists-p filename))
-           (find-file filename))
-          ((and buffername (get-buffer buffername))
-           (switch-to-buffer buffername)))))
+  (destructuring-bind (tag fname bname w h p s) window
+    (cond ((and fname (file-exists-p fname))
+           (find-file fname))
+          ((and bname (get-buffer bname))
+           (switch-to-buffer bname)))
+    (goto-char p)
+    (set-window-start (selected-window) s)))
 
-(defun workgroups-restore-workgroup (workgroup frame &optional orig)
-  "Restore WORKGROUP in FRAME or `selected-frame'."
+(defun workgroups-restore-config (config &optional frame)
+  "Restore CONFIG in FRAME or `selected-frame'."
   (flet ((inner (wtree)
                 (if (workgroups-leaf-window-p wtree)
                     (progn (workgroups-restore-window-state wtree)
@@ -407,17 +410,23 @@ buffer-name contained in WINDOW."
                         (split-window-horizontally
                          (workgroups-window-width win))))
                     (inner win)))))
-    (destructuring-bind ((left top width height) index wtree)
-        (if (or (not (nth 1 workgroup)) orig)
-            (nth 2 workgroup)
-          (nth 1 workgroup))
-      (set-frame-position frame left top)
-      (set-frame-width    frame width)
-      (set-frame-height   frame height)
-      (delete-other-windows)
-      (inner wtree)
-      (set-frame-selected-window
-       frame (nth index (workgroups-window-list frame))))))
+    (let ((frame (or frame (selected-frame))))
+      (destructuring-bind ((left top width height) index wtree) config
+        (set-frame-position frame left top)
+        (set-frame-width    frame width)
+        (set-frame-height   frame height)
+        (delete-other-windows)
+        (inner wtree)
+        (set-frame-selected-window
+         frame (nth index (workgroups-window-list frame)))))))
+
+(defun workgroups-restore-workgroup (workgroup &optional orig frame)
+  "Restore WORKGROUP in FRAME or `selected-frame'."
+  (workgroups-restore-config
+   (if (or (not (nth 1 workgroup)) orig)
+       (nth 2 workgroup)
+     (nth 1 workgroup))
+   frame))
 
 
 ;;; commands
@@ -438,18 +447,12 @@ Uses `ido-completing-read' if ido-mode is loaded and on,
       (and current-prefix-arg (workgroups-completing-read))
       (workgroups-current)))
 
-(defun workgroups-save (&optional new)
-  "`workgroups-save-file' command."
-  (interactive)
-  (workgroups-save-file (or current-prefix-arg new))
-  (message "Saved workgroups to %s" workgroups-file))
-
 (defun workgroups-switch (workgroup &optional orig)
   "Switch to workgroup named NAME."
   (interactive (list (workgroups-completing-read) current-prefix-arg))
   (let ((w (workgroups-current t)))
     (when w (setcar (cdr w) (workgroups-make-config))))
-  (workgroups-restore-workgroup workgroup (selected-frame) orig)
+  (workgroups-restore-workgroup workgroup orig)
   (workgroups-set-current workgroup)
   (run-hooks 'workgroups-switch-hook)
   (message "Switched to %S." (workgroups-name workgroup)))
@@ -471,33 +474,6 @@ Try N, then the prefix arg, then prompt for a number."
         (error "There are only %s workgroups [0-%s]" len (1- len)))
       (workgroups-switch (nth n wl)))))
 
-(defun workgroups-find-file (file)
-  "Load FILE or `workgroups-file'."
-  (interactive "fFile: ")
-  (let ((file (or file workgroups-file)))
-    (if (not (file-exists-p file))
-        (message "File %s does not exist." file)
-      (load-file file)
-      (setq workgroups-file file)
-      (when workgroups-autoswitch
-        (workgroups-switch
-         (workgroups-current)))
-      (message "Loaded workgroups file %s" file))))
-
-(defun workgroups-kill (&optional workgroup)
-  "Kill workgroup named NAME."
-  (interactive)
-  (let* ((w (workgroups-smart-get workgroup))
-         (name (workgroups-name w)))
-    (when (or (not workgroups-confirm-kill)
-              (yes-or-no-p
-               (format "Really kill %S?" name)))
-      (let ((next (workgroups-circular-next w (workgroups-list))))
-        (when next
-          (workgroups-restore-workgroup next (selected-frame))))
-      (workgroups-kill-workgroup w)
-      (message "Killed %S." name))))
-
 (defun workgroups-add (name)
   "Add workgroup named NAME."
   (interactive "sName: ")
@@ -509,6 +485,40 @@ Try N, then the prefix arg, then prompt for a number."
         (workgroups-add-workgroup new)
         (workgroups-set-current new)
         (message "Added %S" name)))))
+
+(defun workgroups-add (name)
+  "Add workgroup named NAME."
+  (interactive "sName: ")
+  (let ((new (workgroups-make-workgroup name)))
+    (workgroups-add-workgroup new)
+    (workgroups-set-current new)
+    (message "Added %S" name)))
+
+(defun workgroups-copy ()
+  "Copy current config to `workgroups-clipboard'."
+  (interactive)
+  (setq workgroups-clipboard (workgroups-make-config))
+  (message "Copied!"))
+
+(defun workgroups-kill (&optional workgroup)
+  "Kill workgroup named NAME."
+  (interactive)
+  (let* ((w (workgroups-smart-get workgroup))
+         (name (workgroups-name w)))
+    (when (or (not workgroups-confirm-kill)
+              (yes-or-no-p
+               (format "Really kill %S?" name)))
+      (workgroups-copy)
+      (let ((next (workgroups-circular-next w (workgroups-list))))
+        (when next (workgroups-restore-workgroup next)))
+      (workgroups-kill-workgroup w)
+      (message "Killed %S." name))))
+
+(defun workgroups-yank ()
+  "Restore `workgroups-clipboard' in `selected-frame'."
+  (interactive)
+  (unless workgroups-clipboard (error "Clipboard is empty"))
+  (workgroups-restore-config workgroups-clipboard))
 
 (defun workgroups-revert ()
   "Revert to `workgroups-current'."
@@ -578,6 +588,28 @@ Try N, then the prefix arg, then prompt for a number."
   (interactive)
   (message "Current workgroup: %S"
            (workgroups-name (workgroups-current))))
+
+
+;; file commands
+
+(defun workgroups-save (&optional new)
+  "`workgroups-save-file' command."
+  (interactive)
+  (workgroups-save-file (or current-prefix-arg new))
+  (message "Saved workgroups to %s" workgroups-file))
+
+(defun workgroups-find-file (file)
+  "Load FILE or `workgroups-file'."
+  (interactive "fFile: ")
+  (let ((file (or file workgroups-file)))
+    (if (not (file-exists-p file))
+        (message "File %s does not exist." file)
+      (load-file file)
+      (setq workgroups-file file)
+      (when workgroups-autoswitch
+        (workgroups-switch
+         (workgroups-current)))
+      (message "Loaded workgroups file %s" file))))
 
 
 ;;; mode definition
