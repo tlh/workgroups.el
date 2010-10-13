@@ -124,14 +124,15 @@
 ;;  - Window locking: Locked means the window is tied to a specific
 ;;    buffer.  Unlocked means the opposite.
 ;;
+;;  - Switch just the window structure, keeping the current buffers,
+;;    as far as that is possible with mismatch.
+;;
 ;;  - Multi-frame support
 ;;
 
 ;;; Code:
 
-
-(eval-when-compile
-  (require 'cl))
+(require 'cl)
 
 
 ;;; customization
@@ -159,6 +160,12 @@ a file is loaded."
   :type 'boolean
   :group 'workgroups)
 
+(defcustom workgroups-confirm-kill nil
+  "Request confirmation before killing a workgroup when non-nil,
+don't otherwise."
+  :type 'boolean
+  :group 'workgroups)
+
 (defcustom workgroups-default-file nil
   "File to load automatically when `workgroups-mode' is enabled.
 If you want this to be loaded at emacs startup, make sure to set
@@ -181,43 +188,96 @@ it before calling `workgroups-mode'."
 (defvar workgroups-list nil
   "List of current workgroups.")
 
+(defvar workgroups-current nil
+  "Current workgroup.")
+
 (defvar workgroups-dirty nil
   "Non-nil means workgroups have been added or removed from
 `workgroups-list' since the last save.")
 
+(defvar workgroups-kill-ring nil
+  "List of saved configurations.")
+
+
+;;; utils
+
+(defun workgroups-rotlist (list &optional backwards)
+  "Rotate LIST forwards or backwards when BACKWARDS is non-nil."
+  (if backwards
+      (cons (car (last list)) (butlast list))
+    (append (cdr list) (list (car list)))))
+
+(defun workgroups-window-list (frame)
+  "Flatten `window-tree' into a stable list.
+`window-list' can't be used because its order isn't stable."
+  (flet ((inner (obj) (if (atom obj) (list obj)
+                        (mapcan 'inner (cddr obj)))))
+    (inner (car (window-tree frame)))))
+
+(defun workgroups-circular-next (elt list)
+  (let ((next (cdr (member elt list))))
+    (if next (car next) (car list))))
+
+(defun workgroups-circular-prev (elt list)
+  (workgroups-circular-next elt (reverse list)))
+
+(defun workgroups-take (lst n)
+  "Return a list of the first N elts in LST.
+Iterative to prevent stack overflow."
+  (let (acc)
+    (while (and lst (> n 0))
+      (decf n)
+      (push (pop lst) acc))
+    (nreverse acc)))
+
+(defun workgroups-list-insert (elt n lst)
+  "Insert ELT into LST at N."
+  (append (take lst n) (list elt) (nthcdr n lst)))
+
 
 ;;; functions
 
-(defun workgroups-current-workgroup ()
-  "Return car of `workgroups-list'."
-  (car workgroups-list))
+(defun workgroups-list ()
+  "Return `workgroups-list'."
+  workgroups-list)
 
-(defun workgroups-get-workgroup (name)
+(defun workgroups-set-workgroups (list)
+  "Set `workgroups-list' to LIST."
+  (setq workgroups-list list))
+
+(defun workgroups-set-current (workgroup)
+  (setq workgroups-current workgroup))
+
+(defun workgroups-current (&optional no-error)
+  "Return car of `workgroups-list'."
+  (or workgroups-current
+      (let ((wl (workgroups-list)))
+        (if wl (workgroups-set-current (car wl))
+          (unless no-error (error "No workgroups defined"))))))
+
+(defun workgroups-get-workgroup (name &optional no-error)
   "Return workgroup named NAME if it exists, otherwise nil."
-  (assoc name workgroups-list))
+  (or (assoc name (workgroups-list))
+      (unless no-error
+        (error "There is no workgroup named %S" name))))
 
 (defun workgroups-name (workgroup)
   "Return the name of WORKGROUP."
   (car workgroup))
 
-(defun workgroups-names (&optional bury-first)
+;; (defun workgroups-names (&optional bury-first)
+;;   "Return list of workgroups names."
+;;   (mapcar 'workgroups-name
+;;           (if (not bury-first) (workgroups-list)
+;;             (workgroups-rotlist (workgroups-list)))))
+
+(defun workgroups-names ()
   "Return list of workgroups names."
-  (let ((names (mapcar 'workgroups-name workgroups-list)))
-    (if bury-first
-        (append (cdr names) (list (car names)))
-      names)))
+  (mapcar 'workgroups-name (workgroups-list)))
 
 (defun workgroups-rename-workgroup (workgroup newname)
   "Rename WORKGROUP to NEWNAME."
   (setcar workgroup newname))
-
-(defun workgroups-current-workgroup-name ()
-  "Return the name of the current workgroup."
-  (workgroups-name (workgroups-current-workgroup)))
-
-(defun workgroups-completing-read (&optional bury-first)
-  "Read a workgroup name from the minibuffer."
-  (list (completing-read "Workgroup: " (workgroups-names bury-first))))
 
 (defun workgroups-save-file (&optional query)
   "Save `workgroups-list' to `workgroups-file'."
@@ -226,53 +286,47 @@ it before calling `workgroups-mode'."
                 workgroups-file))
         make-backup-files)
     (with-temp-buffer
-      (insert ";; workgroups for windows - saved workgroups\n\n\n"
-              (format "(setq workgroups-list '%S)" workgroups-list))
+      (insert ";; saved workgroups\n"
+              (format "(workgroups-set-workgroups '%S)"
+                      (workgroups-list)))
       (write-file file))
     (setq workgroups-file  file
           workgroups-dirty nil)))
-
-(defun workgroups-window-list (frame)
-  "Flatten `window-tree' into a stable list.  `window-list' can't
-be used because its order isn't stable."
-  (labels ((inner (obj)
-                  (if (atom obj)
-                      (list obj)
-                    (mapcan 'inner (cddr obj)))))
-    (inner (car (window-tree frame)))))
 
 
 ;;; workgroups-list operations
 
 (defun workgroups-autosave ()
-  "Save `workgroups-file' when `workgroups-autosave' is non-nil."
+  "`workgroups-save-file' when `workgroups-autosave' is non-nil."
   (when workgroups-autosave
     (workgroups-save-file)))
 
-(defun workgroups-raise-workgroup (workgroup)
-  "Move WORKGROUP to the front of `workgroups-list'."
-  (setq workgroups-list
-        (cons workgroup
-              (remove workgroup workgroups-list)))
-  (workgroups-autosave))
-
 (defun workgroups-add-workgroup (workgroup)
   "Add WORKGROUP to the front of `workgroups-list'."
-  (setq workgroups-list (cons workgroup workgroups-list))
+  (workgroups-set-workgroups (cons workgroup (workgroups-list)))
   (setq workgroups-dirty t)
   (workgroups-autosave))
 
 (defun workgroups-kill-workgroup (workgroup)
   "Remove WORKGROUP from `workgroups-list'."
-  (setq workgroups-list (remove workgroup workgroups-list))
-  (setq workgroups-dirty t)
-  (workgroups-autosave))
+  (let ((wl (workgroups-list)))
+    (when (eq workgroup (workgroups-current))
+      (workgroups-set-current
+       (workgroups-circular-next workgroup wl)))
+    (workgroups-set-workgroups (remove workgroup wl))
+    (setq workgroups-dirty t)
+    (workgroups-autosave)))
 
 (defun workgroups-bury-workgroup (workgroup)
   "Move WORKGROUP to the end of `workgroups-list'."
-  (setq workgroups-list
-        (append (remove workgroup workgroups-list)
-                (list workgroup)))
+  (workgroups-set-workgroups
+   (append (remove workgroup (workgroups-list)) (list workgroup)))
+  (workgroups-autosave))
+
+(defun workgroups-raise-workgroup (workgroup)
+  "Move WORKGROUP to the front of `workgroups-list'."
+  (workgroups-set-workgroups
+   (cons workgroup (remove workgroup (workgroups-list))))
   (workgroups-autosave))
 
 
@@ -283,27 +337,30 @@ be used because its order isn't stable."
 WINOBJ is an Emacs window object."
   (let ((buffer (window-buffer winobj)))
     (list :window
+          ;; From `window-width' docstring:
           (let ((edges (window-edges winobj)))
-            ;; this window-width calculation was found
-            ;; in the documentation for window-width.
             (- (nth 2 edges) (nth 0 edges)))
           (window-height winobj)
           (buffer-file-name buffer)
           (buffer-name buffer))))
 
+(defun workgroups-make-config (&optional frame)
+  (flet ((inner (wt)
+                (if (atom wt)
+                    (workgroups-make-window wt)
+                  `(,(car wt) ,(cadr wt) ,@(mapcar 'inner (cddr wt))))))
+    (let ((frame (or frame (selected-frame))))
+      (list (mapcar (lambda (p) (frame-parameter frame p))
+                    '(left top width height))
+            (position (selected-window)
+                      (workgroups-window-list frame))
+            (inner (car (window-tree frame)))))))
+
 (defun workgroups-make-workgroup (name &optional frame)
   "Make a workgroup from the `window-tree' of the
 `selected-frame'."
-  (labels ((inner (wt)
-                  (if (atom wt)
-                      (workgroups-make-window wt)
-                    `(,(car wt) ,(cadr wt) ,@(mapcar 'inner (cddr wt))))))
-    (let ((frame (or frame (selected-frame))))
-      (list name
-            (mapcar (lambda (p) (frame-parameter frame p))
-                    '(left top width height))
-            (position (selected-window) (workgroups-window-list frame))
-            (inner (car (window-tree frame)))))))
+  (let ((config (workgroups-make-config frame)))
+    (list name config config)))
 
 
 ;;; workgroup restoring
@@ -336,33 +393,50 @@ buffer-name contained in WINDOW."
           ((and buffername (get-buffer buffername))
            (switch-to-buffer buffername)))))
 
-(defun workgroups-restore-workgroup (workgroup frame)
+(defun workgroups-restore-workgroup (workgroup frame &optional orig)
   "Restore WORKGROUP in FRAME or `selected-frame'."
-  (labels ((inner (wtree)
-                  (if (workgroups-leaf-window-p wtree)
-                      (progn (workgroups-restore-window-state wtree)
-                             (other-window 1))
-                    (dolist (win (cddr wtree))
-                      (unless (eq win (car (last wtree)))
-                        (if (car wtree)
-                            (split-window-vertically
-                             (workgroups-window-height win))
-                          (split-window-horizontally
-                           (workgroups-window-width win))))
-                      (inner win)))))
-    (destructuring-bind (name (left top width height) index wtree)
-        workgroup
+  (flet ((inner (wtree)
+                (if (workgroups-leaf-window-p wtree)
+                    (progn (workgroups-restore-window-state wtree)
+                           (other-window 1))
+                  (dolist (win (cddr wtree))
+                    (unless (eq win (car (last wtree)))
+                      (if (car wtree)
+                          (split-window-vertically
+                           (workgroups-window-height win))
+                        (split-window-horizontally
+                         (workgroups-window-width win))))
+                    (inner win)))))
+    (destructuring-bind ((left top width height) index wtree)
+        (if (or (not (nth 1 workgroup)) orig)
+            (nth 2 workgroup)
+          (nth 1 workgroup))
       (set-frame-position frame left top)
       (set-frame-width    frame width)
       (set-frame-height   frame height)
       (delete-other-windows)
       (inner wtree)
       (set-frame-selected-window
-       frame (nth index (workgroups-window-list frame))))
-    (run-hooks 'workgroups-switch-hook)))
+       frame (nth index (workgroups-window-list frame))))))
 
 
 ;;; commands
+
+(defun workgroups-completing-read ()
+  "Read a workgroup name from the minibuffer.
+Uses `ido-completing-read' if ido-mode is loaded and on,
+`completing-read' otherwise."
+  (workgroups-get-workgroup
+   (funcall (if (and (boundp 'ido-mode) ido-mode)
+                'ido-completing-read
+              'completing-read)
+            "Workgroup: " (workgroups-names))))
+
+(defun workgroups-smart-get (&optional workgroup)
+  "Return a WORKGROUP, one way or another."
+  (or workgroup
+      (and current-prefix-arg (workgroups-completing-read))
+      (workgroups-current)))
 
 (defun workgroups-save (&optional new)
   "`workgroups-save-file' command."
@@ -370,15 +444,32 @@ buffer-name contained in WINDOW."
   (workgroups-save-file (or current-prefix-arg new))
   (message "Saved workgroups to %s" workgroups-file))
 
-(defun workgroups-switch (name)
+(defun workgroups-switch (workgroup &optional orig)
   "Switch to workgroup named NAME."
-  (interactive (workgroups-completing-read t))
-  (let ((workgroup (workgroups-get-workgroup name)))
-    (if (not workgroup)
-        (message "There is no workgroup named %s." name)
-      (workgroups-raise-workgroup workgroup)
-      (workgroups-restore-workgroup workgroup (current-frame))
-      (message "Switched to %s." name))))
+  (interactive (list (workgroups-completing-read) current-prefix-arg))
+  (let ((w (workgroups-current t)))
+    (when w (setcar (cdr w) (workgroups-make-config))))
+  (workgroups-restore-workgroup workgroup (selected-frame) orig)
+  (workgroups-set-current workgroup)
+  (run-hooks 'workgroups-switch-hook)
+  (message "Switched to %S." (workgroups-name workgroup)))
+
+(defun workgroups-switch-to-nth (&optional n)
+  "Switch to the Nth workgroup (zero-indexed) in `workgroups-list'.
+Try N, then the prefix arg, then prompt for a number."
+  (interactive)
+  (let ((wl (workgroups-list)))
+    (unless wl (error "There are no workgroups defined"))
+    (let* ((len (length wl))
+           (n (or n current-prefix-arg
+                  (read-from-minibuffer
+                   (format "Workgroup number (%s total): " len)
+                   nil nil t))))
+      (unless (integerp n)
+        (error "Argument %s not an integer" n))
+      (unless (and (>= n 0) (< n len))
+        (error "There are only %s workgroups [0-%s]" len (1- len)))
+      (workgroups-switch (nth n wl)))))
 
 (defun workgroups-find-file (file)
   "Load FILE or `workgroups-file'."
@@ -390,127 +481,103 @@ buffer-name contained in WINDOW."
       (setq workgroups-file file)
       (when workgroups-autoswitch
         (workgroups-switch
-         (workgroups-current-workgroup-name)))
+         (workgroups-current)))
       (message "Loaded workgroups file %s" file))))
+
+(defun workgroups-kill (&optional workgroup)
+  "Kill workgroup named NAME."
+  (interactive)
+  (let* ((w (workgroups-smart-get workgroup))
+         (name (workgroups-name w)))
+    (when (or (not workgroups-confirm-kill)
+              (yes-or-no-p
+               (format "Really kill %S?" name)))
+      (let ((next (workgroups-circular-next w (workgroups-list))))
+        (when next
+          (workgroups-restore-workgroup next (selected-frame))))
+      (workgroups-kill-workgroup w)
+      (message "Killed %S." name))))
 
 (defun workgroups-add (name)
   "Add workgroup named NAME."
   (interactive "sName: ")
-  (let ((workgroup (workgroups-get-workgroup name)))
-    (when (or (not workgroup)
-              (y-or-n-p (format "%s already exists. Overwrite? " name)))
-      (workgroups-kill-workgroup workgroup)
-      (workgroups-add-workgroup
-       (workgroups-make-workgroup name))
-      (message "Added workgroup %s" name))))
-
-(defun workgroups-kill (&optional name)
-  "Kill workgroup named NAME."
-  (interactive (workgroups-completing-read))
-  (let* ((workgroup (if name
-                        (workgroups-get-workgroup name)
-                      (workgroups-current-workgroup)))
-         (name (workgroups-name workgroup)))
-    (if (not workgroup)
-        (message "There is no workgroup named %s." name)
-      (workgroups-kill-workgroup workgroup)
-      (message "Killed %s." name))))
-
-(defun workgroups-raise (name)
-  "Raise workgroup named NAME to the front of `workgroups-list'.
-Don't restore it, though."
-  (interactive (workgroups-completing-read))
-  (let ((workgroup (workgroups-get-workgroup name)))
-    (if (not workgroup)
-        (message "There is no workgroup named %s." name)
-      (workgroups-raise-workgroup workgroup)
-      (message "Raised %s." name))))
-
-(defun workgroups-bury ()
-  "Move `workgroups-current-workgroup' to the end of
-`workgroups-list', but don't restore the new
-`workgroup-current-workgroup'."
-  (interactive)
-  (let ((workgroup (workgroups-current-workgroup)))
-    (workgroups-bury-workgroup workgroup)
-    (message "Buried %s" (workgroups-name workgroup))))
+  (let ((w (workgroups-get-workgroup name t)))
+    (when (or (not w)
+              (y-or-n-p (format "%S already exists. Overwrite? " name)))
+      (workgroups-kill-workgroup w)
+      (let ((new (workgroups-make-workgroup name)))
+        (workgroups-add-workgroup new)
+        (workgroups-set-current new)
+        (message "Added %S" name)))))
 
 (defun workgroups-revert ()
-  "Revert to `workgroups-current-workgroup'."
+  "Revert to `workgroups-current'."
   (interactive)
-  (workgroups-switch
-   (workgroups-current-workgroup-name)))
+  (let ((w (workgroups-current)))
+    (workgroups-switch w t)
+    (message "Reverted %S" (workgroups-name w))))
+
+(defun workgroups-promote (&optional workgroup)
+  "Move WORKGROUP toward the beginning of `workgroups-list'."
+  (interactive)
+  (let* ((w (workgroups-smart-get workgroup))
+         (name (workgroups-name w))
+         (wl (workgroups-list)))
+    (when (eq w (car wl))
+      (error "%S is already at the beginning of the list." name))
+    (workgroups-set-workgroups
+     (workgroups-list-insert w (1- (position w wl)) (remove w wl)))
+    (message "Promoted %S" name)))
+
+(defun workgroups-demote (&optional workgroup)
+  "Move WORKGROUP toward the end of `workgroups-list'."
+  (interactive)
+  (let* ((w (workgroups-smart-get workgroup))
+         (name (workgroups-name w))
+         (wl (workgroups-list)))
+    (when (eq w (car (last wl)))
+      (error "%S is already at the end of the list." name))
+    (workgroups-set-workgroups
+     (workgroups-list-insert w (1+ (position w wl)) (remove w wl)))
+    (message "Demoted %S" name)))
 
 (defun workgroups-next ()
   "Switch to the next workgroup in `workgroups-list'."
   (interactive)
-  (workgroups-bury-workgroup (workgroups-current-workgroup))
-  (workgroups-revert))
+  (workgroups-switch
+   (workgroups-circular-next
+    (workgroups-current) (workgroups-list))))
 
 (defun workgroups-previous ()
   "Switch to the previous workgroup in `workgroups-list'."
   (interactive)
-  (workgroups-raise-workgroup (car (last workgroups-list)))
-  (workgroups-revert))
+  (workgroups-switch
+   (workgroups-circular-prev
+    (workgroups-current) (workgroups-list))))
 
 (defun workgroups-update ()
   "Update workgroup named NAME."
   (interactive)
-  (let ((workgroup (workgroups-current-workgroup)))
-    (if (not workgroup)
-        (call-interactively 'workgroups-add)
-      (workgroups-kill-workgroup workgroup)
-      (workgroups-add-workgroup
-       (workgroups-make-workgroup
-        (workgroups-name workgroup)))
-      (message "Updated workgroup %s"
-               (workgroups-name workgroup)))))
+  (let ((w (workgroups-current)))
+    (setcar (cddr w) (workgroups-make-config))
+    (message "Updated %S" (workgroups-name w))))
 
 (defun workgroups-rename ()
   "Rename the current workgroup. Prompt for new name."
   (interactive)
-  (let* ((workgroup (workgroups-current-workgroup))
-         (oldname (car workgroup))
+  (let* ((w (workgroups-current))
+         (oldname (car w))
          (newname (read-from-minibuffer
                    (format "Rename workgroup from %S to: "
                            oldname))))
-    (workgroups-rename-workgroup workgroup newname)
-    (message "Rename %S to %S." oldname newname)))
+    (workgroups-rename-workgroup w newname)
+    (message "Renamed %S to %S." oldname newname)))
 
 (defun workgroups-show-current ()
-  "Message name of `workgroups-current-workgroup'."
+  "Message name of `workgroups-current'."
   (interactive)
-  (let ((name (workgroups-current-workgroup-name)))
-    (if name
-        (message "Current workgroup: %s" name)
-      (message "No workgroups are currently loaded."))))
-
-
-;;; ido
-
-(defun workgroups-ido-read (&optional bury-first)
-  "Read a workgroup name with `ido-completing-read'."
-  (ido-completing-read "Workgroup: " (workgroups-names bury-first)))
-
-(defun workgroups-ido-add ()
-  "Add to workgroup chosen with `ido-completing-read'."
-  (interactive)
-  (workgroups-add (workgroups-ido-read)))
-
-(defun workgroups-ido-switch ()
-  "Switch to workgroup chosen with `ido-completing-read'."
-  (interactive)
-  (workgroups-switch (workgroups-ido-read t)))
-
-(defun workgroups-ido-kill ()
-  "Kill workgroup chosen with `ido-completing-read'."
-  (interactive)
-  (workgroups-kill (workgroups-ido-read)))
-
-(defun workgroups-ido-raise ()
-  "Raise workgroup chosen with `ido-completing-read'."
-  (interactive)
-  (workgroups-raise (workgroups-ido-read)))
+  (message "Current workgroup: %S"
+           (workgroups-name (workgroups-current))))
 
 
 ;;; mode definition
@@ -539,7 +606,7 @@ Don't restore it, though."
 If ARG is null, toggle workgroups-mode.
 If ARG is a number greater than zero, turn on workgroups-mode.
 Otherwise, turn off workgroups-mode."
-  :lighter     " Workgroups"
+  :lighter     " wg"
   :init-value  nil
   :global      t
   :group       'workgroups
