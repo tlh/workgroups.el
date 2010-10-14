@@ -124,7 +124,7 @@
 ;;  - Switch just the window structure, keeping the current buffers,
 ;;    as far as that is possible with mismatch.
 ;;
-;;  - Multi-frame support
+;;  - Multi-frame support. Need to update mode-line for this, too.
 ;;
 ;;  - clone, kill-workgroup-and-buffers, kill-others
 ;;
@@ -198,12 +198,21 @@ other functions."
 (defvar workgroups-current nil
   "Current workgroup.")
 
+(defvar workgroups-previous nil
+  "Previous workgroup.")
+
 (defvar workgroups-dirty nil
   "Non-nil means workgroups have been added or removed from
 `workgroups-list' since the last save.")
 
 (defvar workgroups-clipboard nil
   "Clipboard to which configs can be copied.")
+
+(defvar workgroups-display-current-workgroup t
+  "Toggles mode-line display.")
+
+(defvar workgroups-mode-line-string "[unset]"
+  "String displayed in the mode-line.")
 
 
 ;;; utils
@@ -259,6 +268,16 @@ Iterative to prevent stack overflow."
         (if wl (workgroups-set-cur (car wl))
           (unless no-error (error "No workgroups defined"))))))
 
+(defun workgroups-set-prev (workgroup)
+  "Set `workgroups-previous' to WORKGROUP."
+  (setq workgroups-previous workgroup))
+
+(defun workgroups-prev (&optional no-error)
+  (or workgroups-previous
+      (let ((wl (workgroups-list)))
+        (if wl (workgroups-set-prev (car wl))
+          (unless no-error (error "No workgroups defined"))))))
+
 (defun workgroups-get-workgroup (name &optional no-error)
   "Return workgroup named NAME if it exists, otherwise nil."
   (or (assoc name (workgroups-list))
@@ -277,6 +296,29 @@ Iterative to prevent stack overflow."
   "Rename WORKGROUP to NEWNAME."
   (setcar workgroup newname))
 
+
+;;; original and working configs
+
+(defun workgroups-base-config (workgroup)
+  ""
+  (nth 2 workgroup))
+
+(defun workgroups-working-config (workgroup)
+  ""
+  (nth 1 workgroup))
+
+(defun workgroups-set-base-config (workgroup &optional config)
+  "Set the base config of WORKGROUP to CONFIG."
+  (setq workgroups-dirty t)
+  (setcar (cddr workgroup) config))
+
+(defun workgroups-set-working-config (workgroup config)
+  "Set the working config of WORKGROUP to CONFIG."
+  (setcar (cdr workgroup) config))
+
+
+;;; saving
+
 (defun workgroups-save-file (&optional query)
   "Save `workgroups-list' to `workgroups-file'."
   (let ((file (if (or query (not workgroups-file))
@@ -291,13 +333,13 @@ Iterative to prevent stack overflow."
     (setq workgroups-file  file
           workgroups-dirty nil)))
 
-
-;;; workgroups-list operations
-
 (defun workgroups-autosave ()
   "`workgroups-save-file' when `workgroups-autosave' is non-nil."
   (when workgroups-autosave
     (workgroups-save-file)))
+
+
+;;; workgroups-list operations
 
 (defun workgroups-add-workgroup (workgroup &optional pos)
   "Add WORKGROUP to the front of `workgroups-list'."
@@ -311,8 +353,9 @@ Iterative to prevent stack overflow."
   "Remove WORKGROUP from `workgroups-list'."
   (let ((wl (workgroups-list)))
     (when (eq workgroup (workgroups-cur))
-      (workgroups-set-cur
-       (workgroups-circular-next workgroup wl)))
+      (workgroups-set-cur nil))
+    (when (eq workgroup (workgroups-prev))
+      (workgroups-set-prev nil))
     (workgroups-set-list (remove workgroup wl))
     (setq workgroups-dirty t)
     (workgroups-autosave)))
@@ -355,20 +398,6 @@ WINOBJ is an Emacs window object."
 `selected-frame'."
   (let ((config (workgroups-make-config frame)))
     (list name config config)))
-
-
-;;; set original and working configs
-
-(defun workgroups-set-working (workgroup &optional config)
-  "Set the working config of WORKGROUP to CONFIG."
-  (setcar (cdr workgroup)
-          (or config (workgroups-make-config))))
-
-(defun workgroups-set-base (workgroup &optional config)
-  "Set the base config of WORKGROUP to CONFIG."
-  (setq workgroups-dirty t)
-  (setcar (cddr workgroup)
-          (or config (workgroups-make-config))))
 
 
 ;;; workgroup restoring
@@ -460,10 +489,15 @@ Uses `ido-completing-read' if ido-mode is loaded and on,
 (defun workgroups-switch (workgroup &optional orig)
   "Switch to workgroup named NAME."
   (interactive (list (workgroups-completing-read) current-prefix-arg))
-  (let ((w (workgroups-cur t))) (when w (workgroups-set-working w)))
+  (let ((prev (workgroups-cur t)))
+    (when prev
+      (workgroups-set-working-config
+       prev (workgroups-make-config))
+      (workgroups-set-prev prev)))
   (workgroups-restore-workgroup workgroup orig)
   (workgroups-set-cur workgroup)
   (run-hooks 'workgroups-switch-hook)
+  (workgroups-mode-line-update)
   (message "Switched to %S." (workgroups-name workgroup)))
 
 (defun workgroups-create (name)
@@ -523,20 +557,26 @@ Add it at the end of `workgroups-list', and switch to it."
   (workgroups-restore-config workgroups-clipboard))
 
 (defun workgroups-update (&optional workgroup)
-  "Update workgroup named NAME."
+  "Set the base config of WORKGROUP to the current config."
   (interactive)
   (let ((w (workgroups-smart-get workgroup)))
-    (workgroups-set-base w)
+    (workgroups-set-working-config
+     w (workgroups-make-config))
+    (workgroups-set-base-config
+     w (workgroups-working-config w))
     (message "Updated %S" (workgroups-name w))))
 
-(defun workgroups-revert ()
-  "Revert to `workgroups-cur'."
+(defun workgroups-revert (&optional workgroup)
+  "Revert to `workgroups-base-config' of WORKGROUP."
   (interactive)
-  (let ((w (workgroups-cur)))
-    (workgroups-switch w t)
+  (let ((w (workgroups-smart-get workgroup)))
+    (workgroups-set-working-config
+     w (workgroups-base-config w))
+    (when (eq w (workgroups-cur))
+      (workgroups-restore-workgroup w t))
     (message "Reverted %S" (workgroups-name w))))
 
-(defun workgroups-jump (&optional n)
+(defun workgroups-jump-to-num (&optional n)
   "Switch to the Nth workgroup (zero-indexed) in `workgroups-list'.
 Try N, then the prefix arg, then prompt for a number."
   (interactive)
@@ -551,15 +591,18 @@ Try N, then the prefix arg, then prompt for a number."
         (error "Argument %s not an integer" n))
       (unless (and (>= n 0) (< n len))
         (error "There are only %s workgroups [0-%s]" len (1- len)))
-      (workgroups-switch (nth n wl)))))
+      (let ((w (nth n wl)))
+        (when (eq w (workgroups-cur))
+          (error "Workgroup %s already selected" n))
+        (workgroups-switch w)))))
 
-(defun workgroups-jump-key ()
+(defun workgroups-jump-to-key ()
   "Call `workgroups-Jump' using `last-command-char'.
 Numbers 1-9 correspond to workgroups 0-8, and 0 corresponds to
 the 9th workgroup."
   (interactive)
   (let ((n (string-to-number (string last-command-char))))
-    (workgroups-jump (if (zerop n) 9 (1- n)))))
+    (workgroups-jump-to-num (if (zerop n) 9 (1- n)))))
 
 (defun workgroups-offset (w offset)
   "OFFSET WORKGROUP's position in `workgroups-list'."
@@ -570,6 +613,8 @@ the 9th workgroup."
     (workgroups-set-list
      (workgroups-list-insert w pos (remove w wl)))
     (message "Moved %S to position %s" name pos)))
+
+;; (defun workgroups-swap
 
 (defun workgroups-promote (&optional workgroup)
   "Move WORKGROUP toward the beginning of `workgroups-list'."
@@ -594,6 +639,11 @@ the 9th workgroup."
   (workgroups-switch
    (workgroups-circular-prev
     (workgroups-cur) (workgroups-list))))
+
+(defun workgroups-toggle ()
+  "Switch to the previous workgroup."
+  (interactive)
+  (workgroups-switch (workgroups-prev)))
 
 (defun workgroups-rename ()
   "Rename the current workgroup. Prompt for new name."
@@ -645,7 +695,7 @@ the 9th workgroup."
     (define-key map (kbd "C-e")    'workgroups-show-current)
     (define-key map (kbd "C-f")    'workgroups-find-file)
     (define-key map (kbd "C-l")    'workgroups-demote)
-    (define-key map (kbd "C-j")    'workgroups-jump)
+    (define-key map (kbd "C-j")    'workgroups-jump-to-num)
     (define-key map (kbd "C-k")    'workgroups-kill)
     (define-key map (kbd "C-h")    'workgroups-promote)
     (define-key map (kbd "C-n")    'workgroups-next)
@@ -653,21 +703,22 @@ the 9th workgroup."
     (define-key map (kbd "C-q")    'workgroups-rename)
     (define-key map (kbd "C-r")    'workgroups-revert)
     (define-key map (kbd "C-s")    'workgroups-save)
+    (define-key map (kbd "C-t")    'workgroups-toggle)
     (define-key map (kbd "C-u")    'workgroups-update)
-    (define-key map (kbd "C-v")    'workgroups-random)
+    (define-key map (kbd "C-v")    'workgroups-toggle)
     (define-key map (kbd "C-y")    'workgroups-yank)
     (define-key map (kbd "C-z")    'workgroups-raise)
     (define-key map (kbd "M-w")    'workgroups-copy-config)
-    (define-key map (kbd "0")      'workgroups-jump-key)
-    (define-key map (kbd "1")      'workgroups-jump-key)
-    (define-key map (kbd "2")      'workgroups-jump-key)
-    (define-key map (kbd "3")      'workgroups-jump-key)
-    (define-key map (kbd "4")      'workgroups-jump-key)
-    (define-key map (kbd "5")      'workgroups-jump-key)
-    (define-key map (kbd "6")      'workgroups-jump-key)
-    (define-key map (kbd "7")      'workgroups-jump-key)
-    (define-key map (kbd "8")      'workgroups-jump-key)
-    (define-key map (kbd "9")      'workgroups-jump-key)
+    (define-key map (kbd "0")      'workgroups-jump-to-key)
+    (define-key map (kbd "1")      'workgroups-jump-to-key)
+    (define-key map (kbd "2")      'workgroups-jump-to-key)
+    (define-key map (kbd "3")      'workgroups-jump-to-key)
+    (define-key map (kbd "4")      'workgroups-jump-to-key)
+    (define-key map (kbd "5")      'workgroups-jump-to-key)
+    (define-key map (kbd "6")      'workgroups-jump-to-key)
+    (define-key map (kbd "7")      'workgroups-jump-to-key)
+    (define-key map (kbd "8")      'workgroups-jump-to-key)
+    (define-key map (kbd "9")      'workgroups-jump-to-key)
     map)
   "workgroups-mode's keymap.")
 
@@ -702,6 +753,37 @@ the 9th workgroup."
 ;;   "Help shown by elscreen-help-mode")
 
 
+;;; mode-line
+
+(defun workgroups-mode-line-update ()
+  "Update the mode-line with current workgroup info."
+  (setq workgroups-mode-line-string
+        (format "[%s]" (workgroups-name (workgroups-cur))))
+  (force-mode-line-update))
+
+(defun workgroups-mode-line-on ()
+  "Turn on workgroups' mode-line display."
+  (set-default 'mode-line-format
+               (workgroups-list-insert
+                '(workgroups-display-current-workgroup
+                  (" " workgroups-mode-line-string))
+                (1+ (position 'mode-line-position mode-line-format))
+                mode-line-format))
+  (force-mode-line-update))
+
+(defun workgroups-mode-line-off ()
+  "Turn off workgroups' mode-line display."
+  (set-default 'mode-line-format
+               (remove (assoc 'workgroups-display-current-workgroup
+                              mode-line-format)
+                       mode-line-format))
+  (force-mode-line-update))
+
+;; (workgroups-mode-line-on)
+;; (force-mode-line-update)
+;; (assoc 'workgroups-current-workgroup mode-line-format)
+;; (set-default 'mode-line-format (remove (assoc 'workgroups-current-workgroup mode-line-format) mode-line-format))
+
 
 ;;; mode definition
 
@@ -720,10 +802,12 @@ the 9th workgroup."
                  'workgroups-query-hook-fn)
                 (when workgroups-default-file
                   (workgroups-find-file workgroups-default-file))
+                (workgroups-mode-line-on)
                 (setq workgroups-mode t))
         (t      (remove-hook
                  'kill-emacs-query-functions
                  'workgroups-query-hook-fn)
+                (workgroups-mode-line-off)
                 (setq workgroups-mode nil))))
 
 ;;;###autoload
