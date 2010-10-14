@@ -703,9 +703,10 @@ Try N, then the prefix arg, then prompt for a number."
   "Swap WORKGROUP toward the beginning of `workgroups-list'."
   (interactive)
   (let* ((w1 (workgroups-smart-get workgroup))
-         (w2 (workgroups-prev-util w1 (workgroups-list))))
-    (unless w2
-      (error "%S is all the way left" (workgroups-name w1)))
+         (name (workgroups-name w1))
+         (w2 (or (workgroups-prev-util w1 (workgroups-list))
+                 (error "%S is all the way left" name))))
+    (unless w2 )
     (workgroups-list-swap w1 w2)
     (workgroups-echo-all)))
 
@@ -713,9 +714,9 @@ Try N, then the prefix arg, then prompt for a number."
   "Move WORKGROUP toward the end of `workgroups-list'."
   (interactive)
   (let* ((w1 (workgroups-smart-get workgroup))
-         (w2 (workgroups-next-util w1 (workgroups-list))))
-    (unless w2
-      (error "%S is all the way right" (workgroups-name w1)))
+         (w2 (workgroups-next-util w1 (workgroups-list)))
+         (name (workgroups-name w1)))
+    (unless w2 (error "%S is all the way right" name))
     (workgroups-list-swap w1 w2)
     (workgroups-echo-all)))
 
@@ -808,9 +809,10 @@ Query for a filename if `current-prefix-arg' is nil."
   "workgroups-mode's keymap.")
 
 
-;;   \\[elscreen-find-and-goto-by-buffer]    Switch to the screen in which specified buffer is displayed
+
 ;;   \\[elscreen-display-last-message]    Show last message
 ;;   \\[elscreen-display-time]    Show time
+;;   \\[elscreen-find-and-goto-by-buffer]    Switch to the screen in which specified buffer is displayed
 ;;   \\[elscreen-find-file]  Create new screen and open file
 ;;   \\[elscreen-find-file-read-only]  Create new screen and open file but don't allow changes
 ;;   \\[elscreen-dired]    Create new screen and run dired
