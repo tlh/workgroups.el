@@ -228,7 +228,7 @@ Iterative to prevent stack overflow."
 (defun workgroups-list-insert (elt n lst)
   "Insert ELT into LST at N."
   (append (workgroups-take lst n)
-          (list elt) (nthcdr n lst)))
+          (cons elt (nthcdr n lst))))
 
 (defun workgroups-window-list (&optional frame)
   "Flatten `window-tree' into a stable list.
@@ -247,12 +247,6 @@ Iterative to prevent stack overflow."
     (setcar l1 elt2)
     (setcar l2 elt1)
     lst))
-
-(defun workgroups-list-swap (w1 w2)
-  "Swap current with previous in the workgroups list."
-  (when (eq w1 w2) (error "It's pointless to swap %S with itself" name))
-  (setq workgroups-list
-        (workgroups-swap-util w1 w2 (workgroups-list))))
 
 
 ;;; general
@@ -348,9 +342,9 @@ Iterative to prevent stack overflow."
 (defun workgroups-delete (workgroup)
   "Remove WORKGROUP from `workgroups-list'."
   (let ((wl (workgroups-list)))
-    (when (eq workgroup (workgroups-current))
+    (when (eq workgroup (workgroups-current t))
       (setq workgroups-current nil))
-    (when (eq workgroup (workgroups-previous))
+    (when (eq workgroup (workgroups-previous t))
       (setq workgroups-previous nil))
     (setq workgroups-list (remove workgroup wl))
     (workgroups-mark-dirty)))
@@ -376,7 +370,7 @@ Iterative to prevent stack overflow."
   (or (nth 1 workgroup)))
 
 
-;;; workgroup making
+;;; window config making
 
 (defun workgroups-wprop (key window)
   "Return value of KEY in workgroups WINDOW, or nil."
@@ -406,35 +400,47 @@ WINOBJ is an Emacs window object."
         ,(position (selected-window) (workgroups-window-list f))
         ,(inner (car (window-tree f)))))))
 
-(defun workgroups-make-workgroup (name &optional frame)
-  "Make a workgroup named NAME from FRAME or `selected-frame'."
-  (let ((config (workgroups-make-config frame)))
-    (list name config config)))
-
-(defun workgroups-make-default-workgroup (name &optional buffer)
-  "Return a new default workgroup named NAME."
+(defun workgroups-make-default-config (&optional buffer)
+  "Return a new default config."
   (save-window-excursion
     (delete-other-windows)
     (switch-to-buffer (or buffer workgroups-default-buffer))
-    (workgroups-make-workgroup name)))
+    (workgroups-make-config)))
 
 
-;;; workgroup restoring
+;;; workgroup making
 
-(defun workgroups-leaf-window-p (window)
+(defun workgroups-make-workgroup (name config &optional working)
+  "Make a workgroup named NAME from FRAME or `selected-frame'."
+  (list name (or working config) config))
+
+(defun workgroups-make-current-workgroup (name)
+  "Return a new workgroup from the current window configuration."
+  (workgroups-make-workgroup
+   name (workgroups-make-config)))
+
+(defun workgroups-make-default-workgroup (name &optional buffer)
+  "Return a new default workgroup named NAME."
+  (workgroups-make-workgroup
+   name (workgroups-make-default-config buffer)))
+
+
+;;; window config restoring
+
+(defun workgroups-window-p (window)
   "t if WINDOW is a workgroups window, nil otherwise."
   (and (consp window) (eq :window (car window))))
 
 (defun workgroups-window-width (window)
   "Return the width of WINDOW."
-  (if (workgroups-leaf-window-p window)
+  (if (workgroups-window-p window)
       (workgroups-wprop :width window)
     (let ((coords (cadr window)))
       (- (nth 2 coords) (nth 0 coords)))))
 
 (defun workgroups-window-height (window)
   "Return the height of WINDOW."
-  (if (workgroups-leaf-window-p window)
+  (if (workgroups-window-p window)
       (workgroups-wprop :height window)
     (let ((coords (cadr window)))
       (- (nth 3 coords) (nth 1 coords)))))
@@ -448,12 +454,13 @@ WINOBJ is an Emacs window object."
     (and fname (file-exists-p fname) (find-file fname))
     (and bname (get-buffer bname) (switch-to-buffer bname))
     (set-window-start (selected-window) wstart t)
-    (goto-char (if (eq point :max) (point-max) point))))
+    (goto-char (if (eq point :max) (point-max) point))
+    (when (>= wstart (point-max)) (recenter))))
 
 (defun workgroups-restore-config (config &optional frame)
   "Restore CONFIG in FRAME or `selected-frame'."
   (flet ((inner (obj)
-                (cond ((workgroups-leaf-window-p obj)
+                (cond ((workgroups-window-p obj)
                        (workgroups-restore-window obj)
                        (other-window 1))
                       (t (dolist (win (cddr obj))
@@ -474,6 +481,9 @@ WINOBJ is an Emacs window object."
         (set-frame-selected-window
          f (nth idx (workgroups-window-list f)))))))
 
+
+;;; workgroup restoring
+
 (defun workgroups-restore (workgroup &optional base? frame)
   "Restore WORKGROUP in FRAME or `selected-frame'."
   (workgroups-restore-config
@@ -490,42 +500,58 @@ WINOBJ is an Emacs window object."
         (format "[%s]" (workgroups-name (workgroups-current))))
   (force-mode-line-update))
 
-(defun workgroups-mode-line-on ()
+(defun workgroups-mode-line-add ()
   "Turn on workgroups' mode-line display."
-  (set-default 'mode-line-format
-               (workgroups-list-insert
-                '(workgroups-mode-line-on
-                  (" " workgroups-mode-line-string))
-                (1+ (position 'mode-line-position mode-line-format))
-                mode-line-format))
-  (force-mode-line-update))
+  (let ((format mode-line-format)
+        (on 'workgroups-mode-line-on))
+    (unless (assoc on format)
+      (set-default 'mode-line-format
+                   (workgroups-list-insert
+                    `(,on (" " workgroups-mode-line-string))
+                    (1+ (position 'mode-line-position format))
+                    format))
+      (force-mode-line-update))))
 
-(defun workgroups-mode-line-off ()
+(defun workgroups-mode-line-remove ()
   "Turn off workgroups' mode-line display."
-  (set-default 'mode-line-format
-               (remove (assoc 'workgroups-mode-line-on
-                              mode-line-format)
-                       mode-line-format))
-  (force-mode-line-update))
+  (let ((elt (assoc 'workgroups-mode-line-on mode-line-format)))
+    (when elt
+      (set-default 'mode-line-format (remove elt mode-line-format))
+      (force-mode-line-update))))
 
 
 ;;; command utils
 
-(defun workgroups-completing-read (&optional noerror)
-  "Read a workgroup name from the minibuffer.
-Uses `ido-completing-read' if ido-mode is loaded and on,
-`completing-read' otherwise."
+(defun workgroups-completing-read (&rest args)
+  "Call `ido-completing-read' or `completing-read'."
+  (apply (if (and (boundp 'ido-mode) ido-mode)
+             'ido-completing-read
+           'completing-read) args))
+
+(defun workgroups-read-workgroup (&optional noerror)
+  "Read a workgroup with `workgroups-completing-read'."
   (workgroups-get-workgroup
-   (funcall (if (and (boundp 'ido-mode) ido-mode)
-                'ido-completing-read
-              'completing-read)
-            "Workgroup: " (workgroups-names noerror))))
+   (workgroups-completing-read
+    "Workgroup: " (workgroups-names noerror)) noerror))
 
 (defun workgroups-smart-get (&optional workgroup noerror)
   "Return a WORKGROUP, one way or another."
   (or workgroup
-      (and current-prefix-arg (workgroups-completing-read noerror))
+      (and current-prefix-arg (workgroups-read-workgroup noerror))
       (workgroups-current noerror)))
+
+(defun workgroups-add-to-kill-ring (config)
+  "Add CONFIG to `workgroups-kill-ring'."
+  (push config workgroups-kill-ring)
+  (let ((wkr workgroups-kill-ring))
+    (when (> (length wkr) workgroups-kill-ring-size)
+      (setq workgroups-kill-ring (butlast wkr)))))
+
+(defun workgroups-list-swap (w1 w2)
+  "Swap current with previous in the workgroups list."
+  (when (eq w1 w2) (error "It's pointless to swap %S with itself" name))
+  (setq workgroups-list
+        (workgroups-swap-util w1 w2 (workgroups-list))))
 
 
 ;;; commands
@@ -543,7 +569,7 @@ Uses `ido-completing-read' if ido-mode is loaded and on,
 
 (defun workgroups-switch (workgroup &optional base?)
   "Switch to workgroup named NAME."
-  (interactive (list (workgroups-completing-read) current-prefix-arg))
+  (interactive (list (workgroups-read-workgroup) current-prefix-arg))
   (let ((name (workgroups-name workgroup))
         (current (workgroups-current t)))
     (when current
@@ -581,17 +607,10 @@ Add it at the end of `workgroups-list', and switch to it."
   (let ((w (workgroups-smart-get workgroup)))
     (when (workgroups-get-workgroup name t)
       (error "A workgroup named %S already exists" name))
-    (let ((new (workgroups-make-workgroup name)))
+    (let ((new (workgroups-make-current-workgroup name)))
       (workgroups-add new)
       (workgroups-switch new)
       (message "Cloned %S to %S" (workgroups-name w) name))))
-
-(defun workgroups-add-to-kill-ring (config)
-  "Add CONFIG to `workgroups-kill-ring'."
-  (push config workgroups-kill-ring)
-  (let ((wkr workgroups-kill-ring))
-    (when (> (length wkr) workgroups-kill-ring-size)
-      (setq workgroups-kill-ring (butlast wkr)))))
 
 (defun workgroups-kill-ring-save ()
   "Copy current config to `workgroups-clipboard'."
@@ -614,21 +633,19 @@ Add it at the end of `workgroups-list', and switch to it."
   (interactive)
   (let* ((w (workgroups-smart-get workgroup))
          (name (workgroups-name w)))
-    ;; confirm:
     (when workgroups-confirm-kill
       (unless (yes-or-no-p (format "Really kill %S?" name))
         (error "Aborted killing %S" name)))
-    ;; add to kill ring:
     (unless nosave
       (workgroups-add-to-kill-ring
        (if (eq w (workgroups-current))
            (workgroups-make-config)
          (workgroups-working-config w))))
-    ;; delete and switch
     (let ((next (workgroups-cnext w (workgroups-list))))
       (workgroups-delete w)
-      (unless (eq next w)
-        (workgroups-switch next)))
+      (if (not (eq w next)) (workgroups-switch next)
+        (workgroups-restore-config
+         (workgroups-make-default-config))))
     (message "Killed %S." name)))
 
 (defun workgroups-kill-workgroup-and-buffers (&optional workgroup)
@@ -744,6 +761,67 @@ Try N, then the prefix arg, then prompt for a number."
     (workgroups-set-name w newname)
     (message "Renamed %S to %S." oldname newname)))
 
+(defun workgroups-toggle-mode-line ()
+  "Toggle workgroups' mode-line display."
+  (interactive)
+  (setq workgroups-mode-line-on (not workgroups-mode-line-on))
+  (force-mode-line-update)
+  (message "mode-line diplay %s"
+           (if workgroups-mode-line-on "on" "off")))
+
+
+;; workgroups-get-by-buffer code
+
+(defun workgroups-get-config-buffers (config)
+  "Return the names of all unique buffers in CONFIG."
+  (let (bufs)
+    (flet ((inner (obj)
+                  (if (not (workgroups-window-p obj))
+                      (mapc 'inner (cddr obj))
+                    (let ((bname (workgroups-wprop :bname obj)))
+                      (when (and bname (not (member bname bufs)))
+                        (push bname bufs))))))
+      (inner config)
+      bufs)))
+
+(defun workgroups-get-workgroup-buffers (workgroup)
+  "Return the names of all unique buffers in WORKGROUP."
+  (let ((bufs (workgroups-get-config-buffers
+               (workgroups-working-config workgroup))))
+    (dolist (buf (workgroups-get-config-buffers
+                  (workgroups-base-config workgroup)) bufs)
+      (unless (member buf bufs) (push buf bufs)))))
+
+(defun workgroups-get-buffers ()
+  "Return the names of all unique buffers in `workgroups-list'."
+  (let (bufs)
+    (dolist (w (workgroups-list) bufs)
+      (dolist (buf (workgroups-get-workgroup-buffers w))
+        (unless (member buf bufs) (push buf bufs))))))
+
+(defun workgroups-get-workgroup-from-buffer (buf)
+  "Return the workgroup and config flag that contains BUF."
+  (catch 'result
+    (dolist (w (workgroups-list))
+      (when (member buf (workgroups-get-config-buffers
+                         (workgroups-working-config w)))
+        (throw 'result (list w)))
+      (when (member buf (workgroups-get-config-buffers
+                         (workgroups-base-config w)))
+        (throw 'result (list w t))))
+    (error "No workgroup contains %S" buf)))
+
+(defun workgroups-get-by-buffer ()
+  "Switch to the workgroup that contains the specified buffer.
+The first workgroup in `workgroups-list' that contains the buffer
+is selected."
+  (interactive)
+  (let ((buf (workgroups-completing-read
+              "Buffer: " (workgroups-get-buffers))))
+    (destructuring-bind (w &rest base)
+        (workgroups-get-workgroup-from-buffer buf)
+      (workgroups-switch w base))))
+
 
 ;; file commands
 
@@ -773,24 +851,26 @@ Query for a filename if `current-prefix-arg' is nil."
 (defvar workgroups-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-a")    'workgroups-create)
-    (define-key map (kbd "C-b")    'workgroups-switch)
+    (define-key map (kbd "C-b")    'workgroups-get-by-buffer)
     (define-key map (kbd "C-c")    'workgroups-clone)
     (define-key map (kbd "C-e")    'workgroups-echo-current)
-    (define-key map (kbd "C-E")    'workgroups-echo-all)
+    (define-key map (kbd "S-C-e")  'workgroups-echo-all)
     (define-key map (kbd "C-f")    'workgroups-load-workgroups)
     (define-key map (kbd "C-l")    'workgroups-right)
-    (define-key map (kbd "C-j")    'workgroups-jump)
     (define-key map (kbd "C-k")    'workgroups-kill)
+    (define-key map (kbd "S-C-k")  'workgroups-delete-other-workgroups)
     (define-key map (kbd "C-h")    'workgroups-left)
+    (define-key map (kbd "C-m")    'workgroups-toggle-mode-line)
     (define-key map (kbd "C-n")    'workgroups-next)
     (define-key map (kbd "C-p")    'workgroups-prev)
     (define-key map (kbd "C-q")    'workgroups-rename)
     (define-key map (kbd "C-r")    'workgroups-revert)
     (define-key map (kbd "C-s")    'workgroups-save-workgroups)
-    (define-key map (kbd "C-t")    'workgroups-swap)
+    (define-key map (kbd "C-t")    'workgroups-toggle)
     (define-key map (kbd "C-u")    'workgroups-update)
-    (define-key map (kbd "C-v")    'workgroups-toggle)
+    (define-key map (kbd "C-v")    'workgroups-switch)
     (define-key map (kbd "C-w")    'workgroups-kill-workgroup-and-buffers)
+    (define-key map (kbd "C-x")    'workgroups-swap)
     (define-key map (kbd "C-y")    'workgroups-yank)
     (define-key map (kbd "M-w")    'workgroups-kill-ring-save)
     (define-key map (kbd "0")      'workgroups-jump-0)
@@ -803,19 +883,18 @@ Query for a filename if `current-prefix-arg' is nil."
     (define-key map (kbd "7")      'workgroups-jump)
     (define-key map (kbd "8")      'workgroups-jump)
     (define-key map (kbd "9")      'workgroups-jump-9)
+    (define-key map (kbd "C-j")    'workgroups-jump)
     (define-key map (kbd "?")      'workgroups-help)
     map)
   "workgroups-mode's keymap.")
 
 
-;;   \\[elscreen-find-and-goto-by-buffer]    Switch to the screen in which specified buffer is displayed
+;;   \\[elscreen-find-file]  Create new screen and open file
 ;;   \\[elscreen-display-last-message]    Show last message
 ;;   \\[elscreen-display-time]    Show time
-;;   \\[elscreen-find-file]  Create new screen and open file
 ;;   \\[elscreen-find-file-read-only]  Create new screen and open file but don't allow changes
 ;;   \\[elscreen-dired]    Create new screen and run dired
 ;;   \\[elscreen-execute-extended-command]  Read function name, then call it with new screen
-;;   \\[elscreen-toggle-display-screen-number]    Show/hide the screen number in the mode line
 ;;   \\[elscreen-toggle-display-tab]    Show/hide the tab at the top of screen
 ;;   \\[elscreen-display-version]    Show ElScreen version
 
@@ -825,6 +904,7 @@ Query for a filename if `current-prefix-arg' is nil."
 (defvar workgroups-help "workgroups keybindings:\n
   \\[workgroups-create]    Create a new workgroup and switch to it
   \\[workgroups-switch]    Switch to a workgroup
+  \\[workgroups-get-by-buffer]    Switch to the workgroup and config which contains the specified buffer
   \\[workgroups-clone]    Clone the current workgroup
   \\[workgroups-kill]    Kill a workgroup
   \\[workgroups-kill-workgroup-and-buffers]    Kill a workgroup and its buffer
@@ -848,6 +928,7 @@ Query for a filename if `current-prefix-arg' is nil."
   \\[workgroups-rename]    Rename a workgroup
   \\[workgroups-echo-current]    Display the name of the current workgroup in the echo area
   \\[workgroups-echo-all]    Display the names of all workgroups in the echo area
+  \\[workgroups-toggle-mode-line]    Toggle workgroups mode-line display
   \\[workgroups-help]    Show this help message"
   "Help shown by elscreen-help-mode")
 
@@ -876,12 +957,12 @@ Query for a filename if `current-prefix-arg' is nil."
                  'workgroups-query-hook-fn)
                 (when workgroups-default-file
                   (workgroups-load-workgroups workgroups-default-file))
-                (workgroups-mode-line-on)
+                (workgroups-mode-line-add)
                 (setq workgroups-mode t))
         (t      (remove-hook
                  'kill-emacs-query-functions
                  'workgroups-query-hook-fn)
-                (workgroups-mode-line-off)
+                (workgroups-mode-line-remove)
                 (setq workgroups-mode nil))))
 
 ;;;###autoload
