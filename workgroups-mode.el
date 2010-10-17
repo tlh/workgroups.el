@@ -5,7 +5,7 @@
 ;; File:      workgroups-mode.el
 ;; Author:    tlh <thunkout@gmail.com>
 ;; Created:   2010-07-22
-;; Version:   1.0
+;; Version:   0.1.0
 ;; Keywords:  window persistence window-configuration
 
 ;; This program is free software; you can redistribute it and/or
@@ -93,7 +93,7 @@
 ;;; TODO:
 ;;
 ;;  - frame support. Need to update mode-line for this, too.
-;;
+;;  - add minibuffer state to configs
 ;;  - generate random window configs?
 ;;
 
@@ -103,25 +103,41 @@
 (require 'cl)
 
 
+;;; consts
+
+(defconst workgroups-version "0.1.7"
+  "Current version number of workgroups.")
+
+(defconst workgroups-fid '-*-workgroups-*-
+  "Symbol identifying a workgroups file.")
+
+
 ;;; customization
 
 (defgroup workgroups nil
   "Workgroup for Windows -- Emacs session manager"
   :group 'convenience
-  :version "1.0")
+  :version workgroups-version)
 
 (defcustom workgroups-default-buffer "*scratch*"
   "Buffer name used in `workgroups-create', and other functions."
   :type 'string
   :group 'workgroups)
 
-(defcustom workgroups-use-faces t
-  "Toggles face usage in various displays."
+(defcustom workgroups-restore-position t
+  "Toggles whether switching to a workgroup restores a frame's
+position."
   :type 'boolean
   :group 'workgroups)
 
-(defcustom workgroups-display-battery t
-  "Toggles inclusion of battery info in time display."
+(defcustom workgroups-restore-size t
+  "Toggles whether switching to a workgroup restores a frame's
+size."
+  :type 'boolean
+  :group 'workgroups)
+
+(defcustom workgroups-use-faces t
+  "Toggles face usage in various displays."
   :type 'boolean
   :group 'workgroups)
 
@@ -153,54 +169,36 @@ Passed to `format-time-string'."
   :type 'string
   :group 'workgroups)
 
+(defcustom workgroups-display-battery t
+  "Toggles inclusion of battery info in time display."
+  :type 'boolean
+  :group 'workgroups)
 
-;;; consts
+(defcustom workgroups-frame-wipe-on t
+  "Toggles frame wipe animation on workgroups switch."
+  :type 'boolean
+  :group 'workgroups)
 
-(defconst workgroups-version "1.0"
-  "Current workgroups version.")
+(defcustom workgroups-frame-wipe-horizontal-factor 25
+  "Windows are enlarged horizontally by this numbers of columns
+during frame wiping."
+  :type 'integer
+  :group 'workgroups)
 
-(defconst workgroups-fid '-*-workgroups-*-
-  "Symbol identifying a workgroups file.")
+(defcustom workgroups-frame-wipe-vertical-factor 8
+  "Windows are enlarged vertically by this numbers of rows during
+frame wiping."
+  :type 'integer
+  :group 'workgroups)
 
-
-;;; non-customizable variables
-
-(defvar workgroups-file nil
-  "Current workgroups file.")
-
-(defvar workgroups-dirty nil
-  "Non-nil when there are unsaved changes.")
-
-(defvar workgroups-list nil
-  "Current list of workgroups.")
-
-(defvar workgroups-current nil
-  "Current workgroup.")
-
-(defvar workgroups-previous nil
-  "Previous workgroup.")
-
-(defvar workgroups-kill-ring nil
-  "List of saved configs.")
-
-(defvar workgroups-kill-ring-pos 0
-  "Position in `workgroups-kill-ring' during sequential yanks.")
-
-(defvar workgroups-mode-line-on t
-  "Toggles workgroups' mode-line display.")
-
-;; FIXME: This will be frame-specific
-(defvar workgroups-mode-line-string "[unset]"
-  "String displayed in the mode-line.")
-
-(defvar workgroups-divider-str "|"
-  "Divider used in workgroups list strings.")
-
-(defvar workgroups-warning-timeout .75
-  "Duration in seconds for minibuffer warnings.")
+(defcustom workgroups-frame-wipe-speed 0.001
+  "Number of seconds to sit between window enlargement calls
+during frame wipe."
+  :type 'integer
+  :group 'workgroups)
 
 
-;;; faces and fontification
+;;; faces
 
 (defface workgroups-operation-face
   '((((class color)) (:foreground "aquamarine")))
@@ -230,7 +228,49 @@ Passed to `format-time-string'."
   "Assoc list mapping face abbreviations to face names.")
 
 
+;;; variables
+
+(defvar workgroups-file nil
+  "Current workgroups file.")
+
+(defvar workgroups-dirty nil
+  "Non-nil when there are unsaved changes.")
+
+(defvar workgroups-list nil
+  "Current list of workgroups.")
+
+(defvar workgroups-frame-table (make-hash-table)
+  "Hash table storing global state for each frame.")
+
+(defvar workgroups-kill-ring nil
+  "List of saved configs.")
+
+(defvar workgroups-kill-ring-pos 0
+  "Position in `workgroups-kill-ring' during sequential yanks.")
+
+(defvar workgroups-mode-line-on t
+  "Toggles workgroups' mode-line display.")
+
+;; FIXME: frame-specific
+(defvar workgroups-mode-line-string "[unset]"
+  "String displayed in the mode-line.")
+
+(defvar workgroups-divider-str "|"
+  "Divider used in workgroups list strings.")
+
+(defvar workgroups-warning-timeout 0.7
+  "Duration in seconds to display invalid input messages when
+  reading from the minibuffer.")
+
+
 ;;; utils
+
+(defmacro workgroups-dohash (bindings &rest body)
+  "do-style wrapper for maphash."
+  (declare (indent defun))
+  (destructuring-bind (key val table &optional ret) bindings
+    `(progn (maphash (lambda (,key ,val) ,@body) ,table)
+            ,ret)))
 
 (defmacro workgroups-aif (test then &rest else)
   "Anaphoric if."
@@ -269,6 +309,10 @@ Passed to `format-time-string'."
 (defun workgroups-linsert (elt n lst)
   "Insert ELT into LST at N."
   (append (workgroups-take lst n) (cons elt (nthcdr n lst))))
+
+(defun workgroups-access (elt alst)
+  "Return the value portion from asoccing ELT in ALST."
+  (cdr (assoc elt alst)))
 
 (defun workgroups-partition (lst n)
   "Return list of contiguous N-length sublists of LST.
@@ -317,10 +361,8 @@ Return nil when ELT1 and ELT2 aren't both present."
     (goto-char (point-min))
     (read (current-buffer))))
 
-
-;;; face utils
-
 (defun workgroups-facify (face str)
+  "Return a copy of STR fontified with FACE."
   (let ((str (format "%s" str)))
     (if (not workgroups-use-faces) str
       (put-text-property
@@ -349,19 +391,48 @@ Return nil when ELT1 and ELT2 aren't both present."
       (unless noerror
         (error "There is no workgroup named %S" name))))
 
-;; FIXME: add frame support
-(defun workgroups-current (&optional noerror)
-  "Return `workgroups-current'."
-  (or workgroups-current
-      (unless noerror
-        (error "No current workgroup."))))
 
-;; FIXME: add frame support
-(defun workgroups-previous (&optional noerror)
+;;; frame state ops
+
+(defmacro workgroups-with-frame-state (frame state &rest body)
+  "Bind FRAME's state to STATE from `workgroups-frame-table'."
+  (declare (indent defun))
+  `(let* ((,frame (or ,frame (selected-frame)))
+          (,state (or (gethash ,frame workgroups-frame-table)
+                      (puthash ,frame nil workgroups-frame-table))))
+     ,@body))
+
+(defun workgroups-set-frame-val (key val frame)
+  "Set KEY to VAL in FRAME's entry in `workgroups-frame-table'."
+  (workgroups-with-frame-state frame state
+    (aif (assoc key state)
+         (setcdr it val)
+         (push (cons key val)
+               (gethash frame workgroups-frame-table)))))
+
+(defun workgroups-current (&optional frame noerror)
+  "Return `workgroups-current'."
+  (workgroups-with-frame-state frame state
+    (or (workgroups-access :current state)
+        (unless noerror
+          (error "No current workgroup.")))))
+
+(defun workgroups-previous (&optional frame noerror)
   "Return `workgroups-previous'."
-  (or workgroups-previous
-      (unless noerror
-        (error "No previous workgroups."))))
+  (workgroups-with-frame-state frame state
+    (or (workgroups-access :previous state)
+        (unless noerror
+          (error "No previous workgroups.")))))
+
+(defun workgroups-set-current (val &optional frame)
+  "Set the :current key to VAL in FRAME's entry in
+`workgroups-frame-table'."
+  (workgroups-set-frame-val :current val frame))
+
+(defun workgroups-set-previous (val &optional frame)
+  "Set the :previous key to VAL in FRAME's entry in
+`workgroups-frame-table'."
+  (workgroups-set-frame-val :previous val frame))
 
 
 ;;; name ops
@@ -387,10 +458,11 @@ Return nil when ELT1 and ELT2 aren't both present."
 (defun workgroups-delete (workgroup)
   "Remove WORKGROUP from `workgroups-list'."
   (let ((wl (workgroups-list)))
-    (when (eq workgroup (workgroups-current t))
-      (setq workgroups-current nil))
-    (when (eq workgroup (workgroups-previous t))
-      (setq workgroups-previous nil))
+    (workgroups-dohash (frame state workgroups-frame-table)
+      (when (eq workgroup (workgroups-access :current state))
+        (workgroups-set-frame-state :current nil frame))
+      (when (eq workgroup (workgroups-access :previous state))
+        (workgroups-set-frame-state :previous nil frame)))
     (setq workgroups-list (remove workgroup wl)
           workgroups-dirty t)))
 
@@ -442,7 +514,7 @@ Overwrites a workgroup with the same name, if it exists."
 
 (defun workgroups-wprop (key window)
   "Return value of KEY in workgroups WINDOW, or nil."
-  (cdr (assoc key (cdr window))))
+  (workgroups-access key (cdr window)))
 
 (defun workgroups-make-window (winobj)
   "Make a workgroups window object from WINOBJ.
@@ -545,9 +617,10 @@ WINOBJ is an Emacs window object."
                            (inner win))))))
     (let ((f (or frame (selected-frame))))
       (destructuring-bind ((x y w h) idx wtree) config
-        (set-frame-position f x y)
-        (set-frame-width f w)
-        (set-frame-height f h)
+        (when workgroups-restore-position (set-frame-position f x y))
+        (when workgroups-restore-size
+          (set-frame-width f w)
+          (set-frame-height f h))
         (delete-other-windows)
         (inner wtree)
         (set-frame-selected-window
@@ -607,10 +680,10 @@ WINOBJ is an Emacs window object."
 
 ;;; mode-line
 
-(defun workgroups-mode-line-update ()
+(defun workgroups-mode-line-update (frame)
   "Update the mode-line with current workgroup info."
   (setq workgroups-mode-line-string
-        (format "[%s]" (workgroups-awhen (workgroups-current t)
+        (format "[%s]" (workgroups-awhen (workgroups-current frame t)
                          (workgroups-name it))))
   (force-mode-line-update))
 
@@ -679,9 +752,9 @@ WINOBJ is an Emacs window object."
 
 ;;; command utils
 
-(defun workgroups-current-updated (&optional noerror)
+(defun workgroups-current-updated (&optional frame noerror)
   "Return current workgroup after updating its working config."
-  (workgroups-awhen (workgroups-current noerror)
+  (workgroups-awhen (workgroups-current frame noerror)
     (workgroups-set-working-config
      it (workgroups-make-current-config))))
 
@@ -692,7 +765,7 @@ Otherwise read a workgroup from the minibuffer.  If REVERSE is
 non-nil, `current-prefix-arg''s begavior is reversed."
   (if (if reverse (not current-prefix-arg) current-prefix-arg)
       (workgroups-read-workgroup noerror)
-    (workgroups-current-updated noerror)))
+    (workgroups-current-updated (selected-frame) noerror)))
 
 (defun workgroups-add-to-kill-ring (config)
   "Add CONFIG to `workgroups-kill-ring'."
@@ -714,29 +787,6 @@ non-nil, `current-prefix-arg''s begavior is reversed."
 
 ;;; frame-wipe
 
-(defcustom workgroups-frame-wipe-on t
-  "Toggles frame wipe animation on workgroups switch."
-  :type 'boolean
-  :group 'workgroups)
-
-(defcustom workgroups-frame-wipe-horizontal-factor 25
-  "Windows are enlarged horizontally by this numbers of columns
-during frame wiping."
-  :type 'integer
-  :group 'workgroups)
-
-(defcustom workgroups-frame-wipe-vertical-factor 8
-  "Windows are enlarged vertically by this numbers of rows during
-frame wiping."
-  :type 'integer
-  :group 'workgroups)
-
-(defcustom workgroups-frame-wipe-speed 0.001
-  "Number of seconds to sit between window enlargement calls
-during frame wipe."
-  :type 'integer
-  :group 'workgroups)
-
 (defun workgroups-frame-wipe (&optional window)
   "Frame-wipe animation."
   (when window (set-frame-selected-window window))
@@ -750,19 +800,19 @@ during frame wipe."
 
 ;;; commands
 
-(defun workgroups-switch (workgroup &optional base)
+(defun workgroups-switch (workgroup &optional base frame)
   "Switch to WORKGROUP.
 If BASE is non-nil, restore WORKGROUP's base config.  Otherwise
 restore its working config."
   (interactive (list (workgroups-read-workgroup) current-prefix-arg))
-  (let ((current (workgroups-current-updated t)))
+  (let ((current (workgroups-current-updated frame t)))
     (when (eq workgroup current)
       (error "Already on %S" (workgroups-name workgroup)))
-    (setq workgroups-previous current
-          workgroups-current workgroup)
+    (workgroups-set-previous current)
+    (workgroups-set-current  workgroup)
     (when workgroups-frame-wipe-on (workgroups-frame-wipe))
     (workgroups-restore workgroup base)
-    (workgroups-mode-line-update)
+    (workgroups-mode-line-update frame)
     (run-hooks 'workgroups-switch-hook)
     (message "%s %s" (workgroups-facify 'op "Switched to:")
              (workgroups-name workgroup t))))
@@ -930,11 +980,10 @@ beginning of `workgroups-kill-ring'."
 (defun workgroups-rename (workgroup newname)
   "Rename WORKGROUP to NEWNAME."
   (interactive (list (workgroups-arg) (workgroups-read-name "New name: ")))
-  (let ((oldname (workgroups-name workgroup)))
+  (let ((oldname (workgroups-name workgroup )))
     (workgroups-set-name workgroup newname)
-    (message "%s %s to %s" (workgroups-facify 'op "Renamed:")
-             (workgroups-facify 'name oldname)
-             (workgroups-facify 'name newname))))
+    (message "%s %s to %s" (workgroups-facify 'op "Renamed:") oldname
+             (workgroups-name workgroup t))))
 
 
 ;;; file commands
@@ -1036,6 +1085,12 @@ is non-nil, use `workgroups-file'. Otherwise read a filename."
                  (workgroups-facify 'name (battery)))
       (message "%s %s" op time))))
 
+(defun workgroups-version ()
+  "Echo the current version number."
+  (interactive)
+  (message "%s %s" (workgroups-facify 'op "Workgroups version:")
+           (workgroups-facify 'name workgroups-version)))
+
 
 ;;; keymap
 
@@ -1095,6 +1150,7 @@ is non-nil, use `workgroups-file'. Otherwise read a filename."
    "A"          'workgroups-rename
    "C-s"        'workgroups-save
    "C-l"        'workgroups-load
+   "V"          'workgroups-version
    "?"          'workgroups-help)
   "workgroups-mode's keymap.")
 
