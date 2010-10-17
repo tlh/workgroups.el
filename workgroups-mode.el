@@ -116,7 +116,12 @@
   :group 'workgroups)
 
 (defcustom workgroups-use-faces t
-  "Controls whether workgroups uses faces for various displays."
+  "Toggles face usage in various displays."
+  :type 'boolean
+  :group 'workgroups)
+
+(defcustom workgroups-display-battery t
+  "Toggles inclusion of battery info in time display."
   :type 'boolean
   :group 'workgroups)
 
@@ -191,23 +196,38 @@ Passed to `format-time-string'."
 (defvar workgroups-divider-str "|"
   "Divider used in workgroups list strings.")
 
+(defvar workgroups-warning-timeout .75
+  "Duration in seconds for minibuffer warnings.")
+
 
 ;;; faces and fontification
 
-(defface workgroups-message-face
-  '((((class color)) (:foreground "light sky blue")))
-  "Face used for selections."
+(defface workgroups-operation-face
+  '((((class color)) (:foreground "aquamarine")))
+  "Face used for operation names."
   :group 'workgroups)
 
-(defface workgroups-prompt-face
-  '((((class color)) (:foreground "aquamarine")))
-  "Face used for prompts."
+(defface workgroups-name-face
+  '((((class color)) (:foreground "light sky blue")))
+  "Face used for names."
+  :group 'workgroups)
+
+(defface workgroups-message-face
+  '((((class color)) (:foreground "pale turquoise")))
+  "Face used for messages."
   :group 'workgroups)
 
 (defface workgroups-divider-face
   '((((class color)) (:foreground "light slate blue")))
   "Face used for dividers."
   :group 'workgroups)
+
+(defvar workgroups-face-abbrevs
+  '((op   . workgroups-operation-face)
+    (name . workgroups-name-face)
+    (msg  . workgroups-message-face)
+    (div  . workgroups-divider-face))
+  "Assoc list mapping face abbreviations to face names.")
 
 
 ;;; utils
@@ -300,23 +320,13 @@ Return nil when ELT1 and ELT2 aren't both present."
 
 ;;; face utils
 
-(defun workgroups-add-face (str face)
+(defun workgroups-facify (face str)
   (let ((str (format "%s" str)))
     (if (not workgroups-use-faces) str
-      (put-text-property 0 (length str) 'face face str)
+      (put-text-property
+       0 (length str) 'face (assoc face workgroups-face-abbrevs)
+       str)
       str)))
-
-(defun workgroups-prompt (str)
-  (workgroups-add-face str 'workgroups-prompt-face))
-
-(defun workgroups-add-message-face (str)
-  (workgroups-add-face str 'workgroups-message-face))
-
-(defun workgroups-add-divider-face (str)
-  (workgroups-add-face str 'workgroups-divider-face))
-
-(defun workgroups-divider ()
-  (workgroups-add-face workgroups-divider-str 'workgroups-divider-face))
 
 
 ;;; global getters
@@ -360,7 +370,7 @@ Return nil when ELT1 and ELT2 aren't both present."
   "Return the name of WORKGROUP."
   (let ((name (car workgroup)))
     (if (not face) name
-      (workgroups-add-face name 'workgroups-message-face))))
+      (workgroups-facify 'name name))))
 
 (defun workgroups-names (&optional noerror)
   "Return list of workgroups names."
@@ -623,7 +633,7 @@ WINOBJ is an Emacs window object."
     (force-mode-line-update)))
 
 
-;;; reading from the minibuffer
+;;; minibuffer reading
 
 (defun workgroups-completing-read (prompt choices &rest args)
   "Call `ido-completing-read' or `completing-read'."
@@ -639,19 +649,26 @@ WINOBJ is an Emacs window object."
 
 (defun workgroups-read-name (&optional prompt)
   "Read a non-empty name from the minibuffer."
-  (let ((prompt (or prompt "Name: ")) name)
-    (while (equal "" (setq name (read-from-minibuffer prompt)))
-      (setq prompt "Please specify a non-empty name: "))
+  (let ((prompt (or prompt "Name: "))
+        (warning (workgroups-facify 'msg "Name must be non-empty"))
+        (name nil))
+    (while (and (setq name (read-from-minibuffer prompt))
+                (equal name ""))
+      (message warning)
+      (sit-for workgroups-warning-timeout))
     name))
 
-(defun workgroups-read-idx ()
+(defun workgroups-read-idx (&optional prompt)
   "Read and return a valid workgroup index."
-  (let* ((l (1- (length (workgroups-list)))) (i nil)
-         (prompt (format "Workgroup index [0-%d]: " l)))
+  (let* ((l (1- (length (workgroups-list))))
+         (prompt (or prompt (format "Workgroup index [0-%d]: " l)))
+         (warning (workgroups-facify
+                   'msg (format "Please enter an integer [0-%d]" l)))
+         (i nil))
     (while (and (setq i (read-from-minibuffer prompt nil nil t))
                 (or (not (integerp i)) (< i 0) (>= i l)))
-      (message "Please enter an integer between 0 and %d" l)
-      (sit-for .5))
+      (message warning)
+      (sit-for workgroups-warning-timeout))
     i))
 
 (defun workgroups-read-buffer ()
@@ -685,26 +702,53 @@ non-nil, `current-prefix-arg''s begavior is reversed."
                          workgroups-kill-ring-size)))
 
 (defun workgroups-list-string ()
-  (let ((cur (workgroups-current)) (div (workgroups-divider)))
-    (format "%s %s %s" div
+  "Return a string of the names of all workgroups."
+  (let ((cur (workgroups-current))
+        (div (workgroups-facify 'div workgroups-divider-str)))
+    (format "%s %s %s"
+            (workgroups-facify 'div "(")
             (mapconcat (lambda (w) (workgroups-name w (eq w cur)))
                        (workgroups-list) (concat " " div " "))
-            div)))
+            (workgroups-facify 'div ")"))))
+
+
+;;; frame-wipe
+
+(defcustom workgroups-frame-wipe-on t
+  "Toggles frame wipe animation on workgroups switch."
+  :type 'boolean
+  :group 'workgroups)
+
+(defcustom workgroups-frame-wipe-horizontal-factor 25
+  "Windows are enlarged horizontally by this numbers of columns
+during frame wiping."
+  :type 'integer
+  :group 'workgroups)
+
+(defcustom workgroups-frame-wipe-vertical-factor 8
+  "Windows are enlarged vertically by this numbers of rows during
+frame wiping."
+  :type 'integer
+  :group 'workgroups)
+
+(defcustom workgroups-frame-wipe-speed 0.001
+  "Number of seconds to sit between window enlargement calls
+during frame wipe."
+  :type 'integer
+  :group 'workgroups)
+
+(defun workgroups-frame-wipe (&optional window)
+  "Frame-wipe animation."
+  (when window (set-frame-selected-window window))
+  (while (> (length (window-list)) 1)
+    (enlarge-window-horizontally
+     workgroups-frame-wipe-horizontal-factor)
+    (enlarge-window
+     workgroups-frame-wipe-vertical-factor)
+    (sit-for workgroups-frame-wipe-speed)))
 
 
 ;;; commands
-
-(defun workgroups-echo-current ()
-  "Display the name of the current workgroup in the echo area."
-  (interactive)
-  (message "%s %s" (workgroups-prompt "Current:")
-           (workgroups-name (workgroups-current) t)))
-
-(defun workgroups-echo-all ()
-  "Display the names of all workgroups in the echo area."
-  (interactive)
-  (message "%s %s" (workgroups-prompt "Workgroups:")
-           (workgroups-list-string)))
 
 (defun workgroups-switch (workgroup &optional base)
   "Switch to WORKGROUP.
@@ -716,28 +760,32 @@ restore its working config."
       (error "Already on %S" (workgroups-name workgroup)))
     (setq workgroups-previous current
           workgroups-current workgroup)
+    (when workgroups-frame-wipe-on (workgroups-frame-wipe))
     (workgroups-restore workgroup base)
     (workgroups-mode-line-update)
     (run-hooks 'workgroups-switch-hook)
-    (message "%s %s" (workgroups-prompt "Switched to:")
+    (message "%s %s" (workgroups-facify 'op "Switched to:")
              (workgroups-name workgroup t))))
+
+(defun workgroups-add-and-switch (workgroup)
+  "Add WORKGROUP to `workgroups-list' and swtich to it."
+  (workgroups-add workgroup)
+  (workgroups-switch workgroup))
 
 (defun workgroups-create (name)
   "Create and add a workgroup named NAME."
   (interactive (list (workgroups-read-name)))
   (let ((new (workgroups-make-default name)))
-    (workgroups-add new)
-    (workgroups-switch new)
-    (message "%s %s" (workgroups-prompt "Created:")
+    (workgroups-add-and-switch new)
+    (message "%s %s" (workgroups-facify 'op "Created:")
              (workgroups-name new t))))
 
 (defun workgroups-clone (workgroup name)
   "Create and add a clone of WORKGROUP named NAME."
   (interactive (list (workgroups-arg) (workgroups-read-name)))
   (let ((new (workgroups-copy-workgroup workgroup name)))
-    (workgroups-add new)
-    (workgroups-switch new)
-    (message "%s %s to %s" (workgroups-prompt "Cloned:")
+    (workgroups-add-and-switch new)
+    (message "%s %s to %s" (workgroups-facify 'op "Cloned:")
              (workgroups-name workgroup t)
              (workgroups-name new t))))
 
@@ -752,15 +800,15 @@ The working config of WORKGROUP is saved to
     (if (eq next workgroup)
         (workgroups-restore-default-config)
       (workgroups-switch next))
-    (message "%s %s" (workgroups-prompt "Killed:")
+    (message "%s %s" (workgroups-facify 'op "Killed:")
              (workgroups-name workgroup t))))
 
 (defun workgroups-kill-ring-save (workgroup)
   "Save WORKGROUP's working config to `workgroups-kill-ring'."
   (interactive (list (workgroups-arg)))
   (workgroups-add-to-kill-ring (workgroups-working-config workgroup))
-  (message "%s %s" (workgroups-prompt "Saved:")
-           (workgroups-add-name-face "working config")))
+  (message "%s %s" (workgroups-facify 'op "Saved:")
+           (workgroups-facify 'msg "working config")))
 
 (defun workgroups-yank ()
   "Restore a config from `workgroups-kill-ring'.
@@ -772,8 +820,8 @@ beginning of `workgroups-kill-ring'."
                  (mod (1+ workgroups-kill-ring-pos) (length it)))))
       (setq workgroups-kill-ring-pos pos)
       (workgroups-restore-config (nth pos it))
-      (message "%s %s" (workgroups-prompt "Yanked:")
-               (workgroups-add-message-face (format "%d" pos))))
+      (message "%s %s" (workgroups-facify 'op "Yanked:")
+               (workgroups-facify 'msg (format "%d" pos))))
     (error "Workgroups' kill-ring is empty")))
 
 (defun workgroups-kill-workgroup-and-buffers (workgroup)
@@ -784,7 +832,8 @@ beginning of `workgroups-kill-ring'."
                 (mapcar 'window-buffer (window-list)))))
     (workgroups-kill workgroup)
     (mapc 'kill-buffer bufs)
-    (message "%s %s and its buffers" (workgroups-prompt "Killed:")
+    (message "%s %s and its buffers"
+             (workgroups-facify 'op "Killed:")
              (workgroups-name workgroup t))))
 
 (defun workgroups-delete-other-workgroups (workgroup)
@@ -793,7 +842,7 @@ beginning of `workgroups-kill-ring'."
   (let ((cur (workgroups-current)))
     (mapc 'workgroups-delete (remove workgroup (workgroups-list)))
     (unless (eq workgroup cur) (workgroups-switch workgroup))
-    (message "%s All workgroups but %s" (workgroups-prompt "Deleted:")
+    (message "%s All workgroups but %s" (workgroups-facify 'op "Deleted:")
              (workgroups-name workgroup t))))
 
 (defun workgroups-update (workgroup)
@@ -801,7 +850,7 @@ beginning of `workgroups-kill-ring'."
   (interactive (list (workgroups-arg)))
   (workgroups-set-base-config
    workgroup (workgroups-working-config workgroup))
-  (message "%s %s" (workgroups-prompt "Updated:")
+  (message "%s %s" (workgroups-facify 'op "Updated:")
            (workgroups-name workgroup t)))
 
 (defun workgroups-revert (workgroup)
@@ -811,7 +860,7 @@ beginning of `workgroups-kill-ring'."
    workgroup (workgroups-base-config workgroup))
   (when (eq workgroup (workgroups-current))
     (workgroups-restore workgroup t))
-  (message "%s %s" (workgroups-prompt "Reverted:")
+  (message "%s %s" (workgroups-facify 'op "Reverted:")
            (workgroups-name workgroup t)))
 
 (defun workgroups-jump (n)
@@ -853,15 +902,18 @@ beginning of `workgroups-kill-ring'."
   (interactive)
   (let ((cur (workgroups-current)) (prev (workgroups-previous)))
     (workgroups-list-swap cur prev)
-    (message "%s %s with %s" (workgroups-prompt "Swapped:")
-             (workgroups-name cur t) (workgroups-name prev t))))
+    (message "%s %s with %s  -  %s" (workgroups-facify 'op "Swapped")
+             (workgroups-name cur t)
+             (workgroups-name prev t)
+             (workgroups-list-string))))
 
 (defun workgroups-transpose-left (workgroup)
   "Swap WORKGROUP toward the beginning of `workgroups-list'."
   (interactive (list (workgroups-arg)))
   (workgroups-aif (workgroups-lprev workgroup (workgroups-list))
     (progn (workgroups-list-swap workgroup it)
-           (workgroups-echo-all))
+           (message "%s %s" (workgroups-facify 'op "Transposed:")
+                    (workgroups-list-string)))
     (error "Can't transpose %s any further."
            (workgroups-name workgroup))))
 
@@ -870,7 +922,8 @@ beginning of `workgroups-kill-ring'."
   (interactive (list (workgroups-arg)))
   (workgroups-aif (workgroups-lnext workgroup (workgroups-list))
     (progn (workgroups-list-swap workgroup it)
-           (workgroups-echo-all))
+           (message "%s %s" (workgroups-facify 'op "Transposed:")
+                    (workgroups-list-string)))
     (error "Can't transpose %s any further."
            (workgroups-name workgroup))))
 
@@ -879,25 +932,9 @@ beginning of `workgroups-kill-ring'."
   (interactive (list (workgroups-arg) (workgroups-read-name "New name: ")))
   (let ((oldname (workgroups-name workgroup)))
     (workgroups-set-name workgroup newname)
-    (message "%s %s to %s" (workgroups-prompt "Renamed:")
-             (workgroups-add-message-face oldname)
-             (workgroups-name workgroup t))))
-
-(defun workgroups-toggle-mode-line ()
-  "Toggle workgroups' mode-line display."
-  (interactive)
-  (setq workgroups-mode-line-on (not workgroups-mode-line-on))
-  (force-mode-line-update)
-  (message "%s %s" (workgroups-prompt "mode-line:")
-           (workgroups-add-message-face
-            (if workgroups-mode-line-on "on" "off"))))
-
-(defun workgroups-get-by-buffer (buf)
-  "Switch to the workgroup that contains BUF."
-  (interactive (list (workgroups-read-buffer)))
-  (workgroups-aif (workgroups-find-buffer buf)
-    (apply 'workgroups-switch it)
-    (error "No workgroup contains %S" buf)))
+    (message "%s %s to %s" (workgroups-facify 'op "Renamed:")
+             (workgroups-facify 'name oldname)
+             (workgroups-facify 'name newname))))
 
 
 ;;; file commands
@@ -913,8 +950,8 @@ is nil, read a filename.  Otherwise use `workgroups-file'."
   (workgroups-save-sexp-to-file
    (cons workgroups-fid (workgroups-list)) file)
   (setq workgroups-dirty nil workgroups-file file)
-  (message "%s %s" (workgroups-prompt "Wrote:")
-           (workgroups-add-message-face file)))
+  (message "%s %s" (workgroups-facify 'op "Wrote:")
+           (workgroups-facify 'name file)))
 
 (defun workgroups-load (file)
   "Load workgroups from FILE.
@@ -934,8 +971,8 @@ is non-nil, use `workgroups-file'. Otherwise read a filename."
   (workgroups-awhen (workgroups-list t)
     (and workgroups-switch-on-load
          (workgroups-switch (car it))))
-  (message "%s %s" (workgroups-prompt "Loaded:")
-           (workgroups-add-message-face file)))
+  (message "%s %s" (workgroups-facify 'op "Loaded:")
+           (workgroups-facify 'name file)))
 
 (defun workgroups-find-file (file)
   "Create a new workgroup and find file FILE in it."
@@ -949,6 +986,13 @@ is non-nil, use `workgroups-file'. Otherwise read a filename."
   (workgroups-create (file-name-nondirectory file))
   (find-file-read-only file))
 
+(defun workgroups-get-by-buffer (buf)
+  "Switch to the workgroup that contains BUF."
+  (interactive (list (workgroups-read-buffer)))
+  (workgroups-aif (workgroups-find-buffer buf)
+    (apply 'workgroups-switch it)
+    (error "No workgroup contains %S" buf)))
+
 (defun workgroups-dired (dirname &optional switches)
   "Create a new workgroup and dired with DIRNAME and SWITCHES."
   (interactive (list (read-directory-name "Dired: ")
@@ -959,12 +1003,38 @@ is non-nil, use `workgroups-file'. Otherwise read a filename."
 
 ;;; misc commands
 
-(defun workgroups-display-time ()
+(defun workgroups-echo-current ()
+  "Display the name of the current workgroup in the echo area."
+  (interactive)
+  (message "%s %s" (workgroups-facify 'op "Current:")
+           (workgroups-name (workgroups-current) t)))
+
+(defun workgroups-echo-all ()
+  "Display the names of all workgroups in the echo area."
+  (interactive)
+  (message "%s %s" (workgroups-facify 'op "Workgroups:")
+           (workgroups-list-string)))
+
+(defun workgroups-toggle-mode-line ()
+  "Toggle workgroups' mode-line display."
+  (interactive)
+  (setq workgroups-mode-line-on (not workgroups-mode-line-on))
+  (force-mode-line-update)
+  (message "%s %s" (workgroups-facify 'op "mode-line:")
+           (workgroups-facify
+            'name (if workgroups-mode-line-on "on" "off"))))
+
+(defun workgroups-echo-time ()
   "Echo the current time."
   (interactive)
-  (message "%s %s" (workgroups-prompt "Current time:")
-           (workgroups-add-message-face
-            (format-time-string workgroups-time-format))))
+  (let ((op (workgroups-facify 'op "Current time:"))
+        (time (workgroups-facify
+               'name (format-time-string workgroups-time-format))))
+    (if (and workgroups-display-battery (fboundp 'battery))
+        (message "%s %s\n%s %s" op time
+                 (workgroups-facify 'op "Battery:")
+                 (workgroups-facify 'name (battery)))
+      (message "%s %s" op time))))
 
 
 ;;; keymap
@@ -1020,8 +1090,8 @@ is non-nil, use `workgroups-file'. Otherwise read a filename."
    "S-C-f"      'workgroups-find-file-read-only
    "d"          'workgroups-dired
    "C-i"        'workgroups-toggle-mode-line
-   "C-t"        'workgroups-display-time
-   "t"          'workgroups-display-time
+   "C-t"        'workgroups-echo-time
+   "t"          'workgroups-echo-time
    "A"          'workgroups-rename
    "C-s"        'workgroups-save
    "C-l"        'workgroups-load
