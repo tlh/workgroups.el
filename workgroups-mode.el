@@ -92,10 +92,10 @@
 
 ;;; TODO:
 ;;
-;;  - frame support. Need to update mode-line for this, too.
-;;  - add minibuffer state to configs
-;;  - generate random window configs?
 ;;  - change goddam "workgroups" to something else
+;;  - add minibuffer state to configs
+;;  - undo/redo?
+;;  - generate random window configs?
 ;;
 
 
@@ -752,25 +752,25 @@ WINOBJ is an Emacs window object."
 
 ;;; mode-line
 
-;; FIXME: frame support
-(defun workgroups-mode-line-update ()
+(defun workgroups-mode-line-string ()
   "Update the mode-line with current workgroup info."
-  (setq workgroups-mode-line-string
-        (format "[%s]" (workgroups-awhen (workgroups-current t)
-                         (workgroups-name it))))
-  (force-mode-line-update))
+  (let ((cur (workgroups-current t)))
+    (concat (workgroups-facify 'div "(")
+            (workgroups-facify
+             'op (format "%s" (position cur (workgroups-list t))))
+            (workgroups-facify 'div ":")
+            (workgroups-facify 'name (workgroups-name cur))
+            (workgroups-facify 'div ")"))))
 
 (defun workgroups-mode-line-add ()
   "Turn on workgroups' mode-line display."
-  (let ((format mode-line-format)
-        (on 'workgroups-mode-line-on))
-    (unless (assoc on format)
-      (set-default 'mode-line-format
-                   (workgroups-linsert
-                    `(,on (" " workgroups-mode-line-string))
-                    (1+ (position 'mode-line-position format))
-                    format))
-      (force-mode-line-update))))
+  (unless (assoc 'workgroups-mode-line-on mode-line-format)
+    (set-default 'mode-line-format
+                 (workgroups-linsert
+                  `(workgroups-mode-line-on
+                    (:eval (workgroups-mode-line-string)))
+                  (1+ (position 'mode-line-position mode-line-format))
+                  mode-line-format))))
 
 (defun workgroups-mode-line-remove ()
   "Turn off workgroups' mode-line display."
@@ -1136,19 +1136,7 @@ is non-nil, use `workgroups-file'. Otherwise read a filename."
   (dired dirname switches))
 
 
-;;; misc commands
-
-(defun workgroups-echo-current ()
-  "Display the name of the current workgroup in the echo area."
-  (interactive)
-  (message "%s %s" (workgroups-facify 'op "Current:")
-           (workgroups-facified-name (workgroups-current))))
-
-(defun workgroups-echo-all ()
-  "Display the names of all workgroups in the echo area."
-  (interactive)
-  (message "%s %s" (workgroups-facify 'op "Workgroups:")
-           (workgroups-list-string)))
+;;; toggle commands
 
 (defun workgroups-toggle-mode-line ()
   "Toggle workgroups' mode-line display."
@@ -1167,6 +1155,21 @@ is non-nil, use `workgroups-file'. Otherwise read a filename."
            (workgroups-facify
             'name (if workgroups-frame-wipe-on "on" "off"))))
 
+
+;;; echo commands
+
+(defun workgroups-echo-current ()
+  "Display the name of the current workgroup in the echo area."
+  (interactive)
+  (message "%s %s" (workgroups-facify 'op "Current:")
+           (workgroups-facified-name (workgroups-current))))
+
+(defun workgroups-echo-all ()
+  "Display the names of all workgroups in the echo area."
+  (interactive)
+  (message "%s %s" (workgroups-facify 'op "Workgroups:")
+           (workgroups-list-string)))
+
 (defun workgroups-echo-time ()
   "Echo the current time."
   (interactive)
@@ -1179,7 +1182,7 @@ is non-nil, use `workgroups-file'. Otherwise read a filename."
                  (workgroups-facify 'name (battery)))
       (message "%s %s" op time))))
 
-(defun workgroups-version ()
+(defun workgroups-echo-version ()
   "Echo the current version number."
   (interactive)
   (message "%s %s" (workgroups-facify 'op "Workgroups version:")
@@ -1245,7 +1248,7 @@ is non-nil, use `workgroups-file'. Otherwise read a filename."
    "A"          'workgroups-rename
    "C-s"        'workgroups-save
    "C-l"        'workgroups-load
-   "V"          'workgroups-version
+   "V"          'workgroups-echo-version
    "?"          'workgroups-help)
   "workgroups-mode's keymap.")
 
