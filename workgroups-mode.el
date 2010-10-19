@@ -91,9 +91,10 @@
 
 ;;; TODO:
 ;;
+;;  - add fringe persistence
 ;;  - change goddam "workgroups" to something else. "frameup"?
-;;  - add minibuffer state to configs
-;;  - undo/redo?
+;;  - undo/redo
+;;  - add minibuffer persistence
 ;;
 
 
@@ -365,7 +366,17 @@ list display."
   (declare (indent defun))
   `(workgroups-aif ,test (progn ,@body)))
 
-(defmacro workgroups-abind (alst keylist &rest body)
+;; (defmacro workgroups-abind (alst keylist &rest body)
+;;   "Bind keys in KEYLIST to their values in ALST, then eval BODY.
+;; Requires that all keys in ALST are bindable symbols."
+;;   (declare (indent defun))
+;;   (let ((asym (gensym)))
+;;     `(let* ((,asym ,alst)
+;;             ,@(mapcar (lambda (key) `(,key (cdr (assoc ',key ,asym))))
+;;                       keylist))
+;;        ,@body)))
+
+(defmacro workgroups-abind (keylist alst &rest body)
   "Bind keys in KEYLIST to their values in ALST, then eval BODY.
 Requires that all keys in ALST are bindable symbols."
   (declare (indent defun))
@@ -651,15 +662,17 @@ If a workgroup with the same name exists, query to overwrite it."
 WINOBJ is an Emacs window object."
   (with-current-buffer (window-buffer winobj)
     (let ((p (point)) (edges (window-edges winobj)))
-      `((width  .  ,(- (nth 2 edges) (nth 0 edges)))
-        (height .  ,(window-height winobj))
-        (bname  .  ,(buffer-name))
-        (fname  .  ,(buffer-file-name))
-        (point  .  ,(if (eq p (point-max)) :max p))
-        (mark   .  ,(mark))
-        (markx  .  ,mark-active)
-        (wstart .  ,(window-start winobj))
-        (sbars  .  ,(window-scroll-bars winobj))))))
+      `((width   .  ,(- (nth 2 edges) (nth 0 edges)))
+        (height  .  ,(window-height winobj))
+        (bname   .  ,(buffer-name))
+        (fname   .  ,(buffer-file-name))
+        (point   .  ,(if (eq p (point-max)) :max p))
+        (mark    .  ,(mark))
+        (markx   .  ,mark-active)
+        (wstart  .  ,(window-start winobj))
+        (sbars   .  ,(window-scroll-bars winobj))
+        (margins .  ,(window-margins winobj))
+        (fringes .  ,(window-fringes winobj))))))
 
 (defun workgroups-make-window-tree (wtree)
   "Return a workgroups window tree from WTREE."
@@ -674,16 +687,16 @@ WINOBJ is an Emacs window object."
   (workgroups-bind-frame frame
     (let ((wl (workgroups-window-list frame)))
       (flet ((fparam (param) (frame-parameter frame param)))
-        `((left   . ,(fparam 'left))
-          (top    . ,(fparam 'top))
-          (width  . ,(fparam 'width))
-          (height . ,(fparam 'height))
-          (sbars  . ,(fparam 'vertical-scroll-bars))
-          (sbwid  . ,(fparam 'scroll-bar-width))
-          (swin   . ,(position (frame-selected-window frame) wl))
+        `((left    . ,(fparam 'left))
+          (top     . ,(fparam 'top))
+          (width   . ,(fparam 'width))
+          (height  . ,(fparam 'height))
+          (sbars   . ,(fparam 'vertical-scroll-bars))
+          (sbwid   . ,(fparam 'scroll-bar-width))
+          (swin    . ,(position (frame-selected-window frame) wl))
           (mbswidx . ,(position minibuffer-scroll-window wl))
-          (wtree  . ,(workgroups-make-window-tree
-                      (car (window-tree frame)))))))))
+          (wtree   . ,(workgroups-make-window-tree
+                       (car (window-tree frame)))))))))
 
 ;; (let ((f (selected-frame))) (position (frame-selected-window f) (workgroups-window-list f)))
 ;; (frame-parameter (selected-frame) 'vertical-scroll-bars)
@@ -737,20 +750,23 @@ WINOBJ is an Emacs window object."
 (defun workgroups-restore-window (window winobj)
   "Restore WINDOW's state in `selected-window'."
   (workgroups-abind
-    window (fname bname point mark markx wstart sbars)
+    (fname bname point mark markx wstart sbars fringes margins) window
     (destructuring-bind (w c v h) sbars
       (set-window-scroll-bars winobj w v h))
-    (set-window-start winobj wstart t)
-    (let ((buf (if (and fname (file-exists-p fname))
-                   (find-file-noselect fname)
-                 (or (get-buffer bname) workgroups-default-buffer))))
-      (set-window-buffer winobj buf)
-      (with-current-buffer buf
-        (rename-buffer bname)
-        (goto-char (if (eq point :max) (point-max) point))
-        (set-mark mark)
-        (unless markx (deactivate-mark))
-        (when (>= wstart (point-max)) (recenter))))))
+    (with-current-buffer
+        (or (and fname (file-exists-p fname) (find-file-noselect fname))
+            (get-buffer bname) workgroups-default-buffer)
+      (unless (equal (buffer-name) workgroups-default-buffer)
+        (rename-buffer bname))
+      (set-window-buffer winobj (current-buffer))
+      (set-window-start winobj wstart t)
+      (set-window-margins winobj (car margins) (cdr margins))
+      (destructuring-bind (lwid rwid outside) fringes
+        (set-window-fringes winobj lwid rwid outside))
+      (goto-char (if (eq point :max) (point-max) point))
+      (set-mark mark)
+      (unless markx (deactivate-mark))
+      (when (>= wstart (point-max)) (recenter)))))
 
 (defun workgroups-restore-window-tree (wtree frame)
   "Restore the window layout specified by WTREE."
@@ -769,7 +785,7 @@ WINOBJ is an Emacs window object."
   (workgroups-bind-frame frame
     (flet ((set-fparam (par val) (set-frame-parameter frame par val)))
       (workgroups-abind
-        config (left top width height sbars sbwid swin mbswidx wtree)
+        (left top width height sbars sbwid swin mbswidx wtree) config
         (when workgroups-restore-position
           (set-fparam 'left left)
           (set-fparam 'top  top))
