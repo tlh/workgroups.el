@@ -1,12 +1,12 @@
-;;; workgroups-mode.el --- workgroups for windows
+;;; workgroups.el --- workgroups for windows (for Emacs)
 
 ;; Copyright (C) 2010 tlh <thunkout@gmail.com>
 
-;; File:     workgroups-mode.el
+;; File:     workgroups.el
 ;; Author:   tlh <thunkout@gmail.com>
 ;; Created:  2010-07-22
-;; Version   0.1.9
-;; Keywords: session manager window-configuration persistence
+;; Version   0.2.0
+;; Keywords: session management window-configuration persistence
 
 ;; This program is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -25,7 +25,7 @@
 
 ;;; Commentary:
 ;;
-;;  workgroups-mode.el is a session management package for GNU Emacs.
+;;  workgroups.el is a session management package for GNU Emacs.
 ;;  It allows you to store and restore window configurations, save
 ;;  them to a file, load them from a file, and perform various other
 ;;  operations on them.
@@ -33,42 +33,49 @@
 ;;  Here's what the Elisp info docs have to say about window
 ;;  configurations (info "(Elisp)Window Configurations"):
 ;;
-;;      "A 'window configuration' records the entire layout of one
-;;       frame--all windows, their sizes, which buffers they contain,
-;;       how those buffers are scrolled, and their values of point and
-;;       the mark; also their fringes, margins, and scroll bar
-;;       settings.  It also includes the value of
-;;       `minibuffer-scroll-window'.  As a special exception, the
-;;       window configuration does not record the value of point in
-;;       the selected window for the current buffer.  Also, the window
-;;       configuration does not record the values of window
-;;       parameters; see *Note Window Parameters::."
+;;     "A 'window configuration' records the entire layout of one
+;;      frame--all windows, their sizes, which buffers they contain,
+;;      how those buffers are scrolled, and their values of point and
+;;      the mark; also their fringes, margins, and scroll bar
+;;      settings.  It also includes the value of
+;;      `minibuffer-scroll-window'.  As a special exception, the
+;;      window configuration does not record the value of point in the
+;;      selected window for the current buffer.  Also, the window
+;;      configuration does not record the values of window parameters;
+;;      see *Note Window Parameters::."
 ;;
-;;  The problem with Emacs' window-configuration objects is that
-;;  they're opaque, meaning you can't peer inside them.  To get at the
-;;  information in a window-configuration, you must restore it in a
-;;  frame, then access that frame's parameters.
+;;  The problem with Emacs' window-configurations is that they're
+;;  opaque: you can't peer inside them.  To get at the information in
+;;  a window-configuration, you must restore it in a frame, then
+;;  access that frame's parameters.
 ;;
-;;  Workgroups solves this problem by implementing its own complete
-;;  window-configuration system in parallel to Emacs' -- one that is
-;;  fully translucent and serializable.  Workgroups window
-;;  configurations contain all the settings listed above, and in some
-;;  ways more.
+;;  Here's what the same info node has to say about
+;;  window-configuration opacity:
+;;
+;;     "Other primitives to look inside of window configurations would
+;;      make sense, but are not implemented because we did not need
+;;      them."
+;;
+;;  Greeeeat.  Workgroups solves this problem by implementing a
+;;  completely independent window-configuration system -- one that is
+;;  translucent, frobbable and serializable.  Workgroups window
+;;  configurations save all the settings listed above, and more.  For
+;;  instance, if a region is highlighted in transient-mark-mode, and
+;;  you then save a workgroup, that region will still be highlighted
+;;  after restarting Emacs.  And workgroups can be constructed on the
+;;  fly, without the need to first restore them in a frame, allowing
+;;  things like from-morphing and other manipulations.
 ;;
 ;;  Workgroups tracks the window configuration lazily: it doesn't
 ;;  update the current workgroup for when changes are made to the
 ;;  frame.  It only updates the workgroup when the current config is
 ;;  accesses, or when it's specifically requested.
 ;;
-;;  workgroups is so thorough, that if you transient-mark-mode
-;;  selections will still be highlighted after restarting Emacs.
-;;
 ;;  If you save workgroups that include things like erc or gnus
 ;;  buffers, you should launch those applications and buffers again in
 ;;  your next session before restoring the workgroup that includes
-;;  them. Nothing bad will happen otherwise, of course.
-;;  workgroups-mode will just default to a buffer that already exists,
-;;  like *scratch*.
+;;  them. Nothing bad will happen otherwise, of course.  workgroups
+;;  will just default to a buffer that already exists, like *scratch*.
 ;;
 ;;  `workgroups-list' contains all the currently available workgroups.
 ;;  You can switch to workgroups (i.e. restore window configurations),
@@ -84,55 +91,168 @@
 
 ;;; Installation:
 ;;
-;;   - Put `workgroups-mode.el' somewhere on your emacs load path
+;;   - Put `workgroups.el' somewhere on your emacs load path
+;;
+;;   - M-x byte-compile-file RET <path-to-workgroups.el> RET
+;;     This isn't required, but it'll speed things up.
 ;;
 ;;   - Add this line to your .emacs file:
 ;;
-;;     (require 'workgroups-mode)
+;;     (require 'workgroups)
+;;
+;;   - The prefix key for workgroups commands defaults to "C-z", which
+;;     elscreen users may be used to.  You could set it to "C-c a"
+;;     like this:
+;;
+;;     (setq wg-prefix-key (kbd "C-c a"))
+;;
+;;     workgroups saves the current key definition when it's enabled,
+;;     and restores it when it's disabled, so you don't have to worry
+;;     about stomping keydefs if you want to try different ones out.
+;;
+;;   - There are many other customizable options.  See the
+;;     customization section in the source for details, or use:
+;;
+;;     C-u M-x customize-mode RET workgroups RET
 ;;
 
-;;; Configuration:
+;;; Usage:
 ;;
-;;   To turn on workgroups-mode, either issue the command:
+;;   Once you have it installed, turn it on either by issuing the
+;;   command:
 ;;
-;;     M-x workgroups-mode
+;;     M-x workgroups RET
 ;;
-;;   Or put this in your .emacs file:
+;;   or by evaluating this form, which you can put in .emacs:
 ;;
-;;     (workgroups-mode t)
+;;     (workgroups 1)
 ;;
-;;   To start off, you should add a few workgroups.  When your frame
-;;   is in a state that you'd like to save, run the command
-;;   `workgroups-create', and give the workgroup a name when prompted.
-;;   Once you've added a few workgroups with `workgroups-create', you
-;;   should save them to a file with `workgroups-save'.  You can
-;;   designate this file to be automatically loaded when
-;;   workgroups-mode is started by setting `workgroups-default-file'
-;;   like so:
+;;   You can turn it off again by issuing the same command, or by
+;;   evaluating this form:
 ;;
-;;     (setq workgroups-default-file "/path/to/workgroups/file")
+;;     (workgroups 0)
 ;;
-;;   With these two options set, workgroups mode will automatically
-;;   load the default file and switch to the first workgroup in it at
-;;   emacs startup.
+;;   From here on out, all keys are listed with "C-z" as the prefix,
+;;   like "C-z c".  You should substitute your prefix key for "C-z" if
+;;   you've changed it.
 ;;
-;;   Check the documentation of the customizable variables below for
-;;   more configuration options.
+;;
+;;; Workgroup Creation:
+;;
+;;   To start off, add a few workgroups.  Hit "C-z c" to issue the
+;;   command `wg-create-workgroup', enter a name, and a new blank
+;;   workgroup is created.  Maybe split the screen a few times with
+;;   "C-x 2" and "C-x 3", and switch to different buffers in some of
+;;   the windows to make it unique.  Repeat this a few times to create
+;;   some different workgroups.
+;;
+;;
+;;; Workgroup Switching:
+;;
+;;   "C-z v" issues the command `wg-switch-to-workgroup'.  This will
+;;   do a completing-read (with ido if it's available) on the
+;;   available workgroup names, and switch to the workgroup with that
+;;   name.  "C-z C-n" will switch to workgroup rightward in the
+;;   workgroups list from the current workgroup, and "C-z C-p" will
+;;   switch to the one leftward.  "C-z 0" through "C-z 9" switch to
+;;   the workgroup at index in the workgroups list.
+;;
+;;
+;;; Base and Working Configs:
+;;
+;;   Window configs drift through use. Windows get resized, different
+;;   buffers get selected, point and mark change, and so on.  When you
+;;   switch from one workgroup to another, then back to the first, you
+;;   want it to be in the same state that you left it in, so you don't
+;;   lose your place.  At the same time, it's convenient to be able to
+;;   revert a window config to a base state when it gets hoplessly
+;;   mangled.  For this reason, every workgroup actually consists of
+;;   two configs: a base config and a working config [1].  The base
+;;   config is the pristine config you'd like to be able to revert
+;;   back to, and the working config is whatever the frame happens to
+;;   look like now.  You set the base config to the working config
+;;   with "C-z u" -- `wg-update-workgroup', and you set the working
+;;   config to the base config with "C-z r" -- `wg-revert-workgroup'.
+;;   So the two commands are mirror images of each other: the former
+;;   sets the base to the working, and the latter sets the working to
+;;   the base.  You can update all workgroups' base configs with their
+;;   working configs with "C-z U" -- `wg-update-all-workgroups', and
+;;   you can revert all workgroups' working configs to their base
+;;   configs with "C-z R" -- `wg-revert-all-workgroups'.  Update all
+;;   your workgroups with "C-z U" now.
+;;
+;;   [1] That's not entirely true: Working configs are actually
+;;   properties of frames.  Every frame has its own working config for
+;;   each base config.  This is because when working with multiple
+;;   frames, one expects the working config for that frame to remain
+;;   the same -- not to change when it's changed in another frame.
+;;   This may seem a little complicated, but in practice it's very
+;;   natural.  Base configs are the same across all frames, though.
+;;
+;;
+;;; Saving and Loading:
+;;
+;;   You can save all your workgroups to a file with "C-z C-s" --
+;;   `wg-save', and you can load a workgroups file with "C-z C-l" --
+;;   `wg-load'.  Save your workgroups to a file now.
+;;
+;;   Once you have a file of saved workgroups, it's convenient to load
+;;   it on Emacs startup.  To do so you can add a line like this to
+;;   your .emacs:
+;;
+;;     (wg-load "/path/to/saved/workgroups")
+;;
+;;   So the final setup in your .emacs may look something like this:
+;;
+;;     (add-to-list 'load-path "/path/to/workgroups.el")
+;;     (require 'workgroups)
+;;     (setq wg-prefix-key (kbd "C-c a"))
+;;     (workgroups 1)
+;;     (wg-load "/path/to/saved/workgroups")
+;;
+;;
+;;; Killing and Yanking:
+;;
+;;   WRITE ME
+;;
+;;
+;;; Cloning Workgroups:
+;;
+;;   WRITE ME
+;;
+;;
+;;; Offsetting and Swapping Workgroups:
+;;
+;;   WRITE ME
+;;
+;;
+;;; Switching to Buffers:
+;;
+;;   WRITE ME
+;;
+;;
+;;; Messaging:
+;;
+;;   WRITE ME
+;;
+;;
+;;; Frame Morph:
+;;
+;;   WRITE ME
+;;
+;;
+;;; Help:
+;;
+;;   To bring up a help buffer listing all the commands and their
+;;   bindings, hit "C-z ?" -- `wg-help'.
+;;
 ;;
 
 ;;; TODO:
 ;;
-;;  - Maybe don't clear the screen on workgroup creation - it's annoying
-;;  - fix frame-morph slide issue
-;;  - cleanup frame-morph
-;;  - figure out how temporarily enable truncate lines during restore
-;;  - frame-morph stepping
-;;  - documentation
-;;  - fix wg-arg
+;;  - maybe don't clear the screen on workgroup creation
+;;  - enable truncate lines during restore
 ;;  - split and join
-;;  - fix set-prefix-key
-;;  - undo/redo
-;;  - add minibuffer persistence
 ;;
 
 
@@ -157,14 +277,19 @@
   :group 'convenience
   :version wg-version)
 
+(defcustom workgroups-hook nil
+  "Hook run when workgroups is turned on."
+  :type 'hook
+  :group 'workgroups)
+
 (defcustom wg-prefix-key (kbd "C-z")
   "Workgroups' prefix key."
   :type 'string
   :group 'workgroups
   :set (lambda (sym val)
          (when (boundp 'wg-prefix-key)
-           (wg-set-prefix-key val)
-           (custom-set-default sym val))))
+           (custom-set-default sym val)
+           (wg-set-prefix-key))))
 
 (defcustom wg-switch-hook nil
   "Hook run whenever a workgroup is switched to."
@@ -233,7 +358,7 @@ unsaved changes."
   :type 'boolean
   :group 'workgroups)
 
-(defcustom wg-query-for-save-on-mode-exit t
+(defcustom wg-query-for-save-on-workgroups-exit t
   "Non-nil means query for save before exiting when there are
 unsaved changes."
   :type 'boolean
@@ -242,7 +367,7 @@ unsaved changes."
 (defcustom wg-no-confirm nil
   "Non-nil means don't request confirmation before various
 destructive operations.  This doesn't modify query-for-save
-behavior.  Use `wg-query-for-save-on-mode-exit' and
+behavior.  Use `wg-query-for-save-on-workgroups-exit' and
 `wg-query-for-save-on-emacs-exit' for that."
   :type 'boolean
   :group 'workgroups)
@@ -956,7 +1081,7 @@ WIN should be a window, and WT should be a wtree."
            (wg-aget wt 'wlist))))
 
 (defun wg-trim-wtree (w)
-  "Return a wtree from W with all subwins within W's bounds.
+  "Return a new wtree from W with all subwins within W's bounds.
 Windows that begin outside of W's bounds are removed. W should be
 a window or a wtree."
   (if (wg-window-p w) w
@@ -972,9 +1097,11 @@ a window or a wtree."
                    (wg-set-bounds sw dir ls1 hs1 low hi)))))))))))
 
 (defun wg-wipe-wtree (w win)
-  "Grow W's windows and wtrees one step toward WIN.
-This eventually wipes its components, leaving only a window.  W
-should be window or a wtree, and WIN should be a window."
+  "Grow the first window of W and its subtrees one step toward WIN.
+Shrink windows and wtrees that aren't first in a wlist.  This
+eventually wipes the rest of W's components, leaving only a
+window.  W should be window or a wtree, and WIN should be a
+window."
   (if (wg-window-p w) (wg-step-wins w win t)
     (wg-make-wtree
      (wg-aget w 'dir)
@@ -1737,19 +1864,6 @@ The string is passed through a format arg to escape %'s."
 
 ;;; keymap
 
-(defun wg-unset-prefix-key ()
-  "Restore the original definition of `wg-prefix-key'."
-  (let ((key wg-prefix-key))
-    (when (eq wg-map (lookup-key global-map key))
-      (global-set-key key (get 'wg-set-prefix-key :original)))))
-
-(defun wg-set-prefix-key (key)
-  "Define KEY as `wg-map' in `global-map'."
-  (wg-unset-prefix-key)
-  (put 'wg-set-prefix-key :original (lookup-key global-map key))
-  (setq wg-prefix-key key)
-  (global-set-key key wg-map))
-
 (defvar wg-map
   (wg-fill-keymap (make-sparse-keymap)
     "C-c"        'wg-create-workgroup
@@ -1929,6 +2043,22 @@ The string is passed through a format arg to escape %'s."
 
 ;;; mode definition
 
+(defun wg-unset-prefix-key ()
+  "Restore the original definition of `wg-prefix-key'."
+  (wg-awhen (get 'wg-prefix-key :original)
+    (wg-dbind (key . def) it
+      (when (eq wg-map (lookup-key global-map key))
+        (global-set-key key def))
+      (put 'wg-prefix-key :original nil))))
+
+(defun wg-set-prefix-key ()
+  "Define `wg-prefix-key' as `wg-map' in `global-map'."
+  (wg-unset-prefix-key)
+  (let ((key wg-prefix-key))
+    (put 'wg-prefix-key :original (cons key (lookup-key global-map key)))
+    (global-set-key key wg-map)
+    key))
+
 (defun wg-query-for-save ()
   "Query for save when `wg-dirty' is non-nil."
   (and wg-dirty
@@ -1942,40 +2072,42 @@ The string is passed through a format arg to escape %'s."
   t)
 
 (defun wg-enable (enable)
-  "Enable `wg-mode' when ENABLE is non-nil.
+  "Enable `workgroups' when ENABLE is non-nil.
 Disable otherwise."
   (cond (enable
          (add-hook 'kill-emacs-query-functions 'wg-query-hook)
          (add-hook 'delete-frame-functions 'wg-delete-frame-hook)
-         (wg-set-prefix-key wg-prefix-key)
+         ;; (wg-set-prefix-key wg-prefix-key)
+         (wg-set-prefix-key)
          (wg-mode-line-display-add)
-         (setq workgroups-mode t))
+         (setq workgroups t))
         (t
-         (when wg-query-for-save-on-mode-exit
+         (when wg-query-for-save-on-workgroups-exit
            (wg-query-for-save))
          (remove-hook 'kill-emacs-query-functions 'wg-query-hook)
          (remove-hook 'delete-frame-functions 'wg-delete-frame-hook)
          (wg-unset-prefix-key)
          (wg-mode-line-display-remove)
-         (setq workgroups-mode nil))))
+         (setq workgroups nil))))
 
-(define-minor-mode workgroups-mode
-  "This toggles workgroups-mode.
-If ARG is null, toggle workgroups-mode.
-If ARG is a number greater than zero, turn on workgroups-mode.
-Otherwise, turn off workgroups-mode."
+(define-minor-mode workgroups
+  "This turns `workgroups' on and off.
+If ARG is null, toggle workgroups.
+If ARG is an integer greater than zero, turn on `workgroups'.
+If ARG is an integer less one, turn off `workgroups'.
+If ARG is anything else, turn on `workgroups'."
   :lighter     " wg"
   :init-value  nil
   :global      t
   :group       'workgroups
-  (cond (noninteractive   (wg-enable nil))
-        (workgroups-mode  (wg-enable t))
-        (t                (wg-enable nil))))
+  (wg-enable workgroups))
+
+;; (workgroups -0.1)
 
 
 ;;; provide
 
-(provide 'workgroups-mode)
+(provide 'workgroups)
 
 
-;;; workgroups-mode.el ends here
+;;; workgroups.el ends here
