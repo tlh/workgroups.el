@@ -5,7 +5,7 @@
 ;; File:     workgroups.el
 ;; Author:   tlh <thunkout@gmail.com>
 ;; Created:  2010-07-22
-;; Version   0.2.0
+;; Version   0.1.9
 ;; Keywords: session management window-configuration persistence
 
 ;; This program is free software; you can redistribute it and/or
@@ -23,33 +23,31 @@
 ;; Software Foundation, Inc., 59 Temple Place, Suite 330, Boston,
 ;; MA 02111-1307 USA
 
-;;; Commentary:
+;; Commentary, Installation, Usage:
 ;;
-;;  See the file README.md in the workgroups directory
-;;
-;;; Installation:
-;;
-;;; Usage:
+;;  You should have received a copy of README.md along with this
+;;  program; if not, return it for a full refund.
 ;;
 
-;;; TODO:
+;; TODO:
 ;;
-;;  - split and join
+;; - possibly add separate step variables for frame-morph in terminals
 ;;
 
 
 ;;; Code:
+
 
 (require 'cl)
 
 
 ;;; consts
 
-(defconst wg-version "0.2.0"
+(defconst wg-version "0.1.9"
   "Current version number of workgroups.")
 
 (defconst wg-persisted-workgroups-tag '-*-workgroups-*-
-  "Should be car of any list containing persisted workgroups.")
+  "This should be car of any list of persisted workgroups.")
 
 
 ;;; customization
@@ -81,8 +79,9 @@
 
 (defcustom wg-no-confirm nil
   "Non-nil means don't request confirmation before various
-destructive operations.  This doesn't modify query-for-save
-behavior.  Use `wg-query-for-save-on-workgroups-mode-exit' and
+destructive operations, like `wg-reset'.  This doesn't modify
+query-for-save behavior.  Use
+`wg-query-for-save-on-workgroups-mode-exit' and
 `wg-query-for-save-on-emacs-exit' for that."
   :type 'boolean
   :group 'workgroups)
@@ -109,24 +108,22 @@ behavior.  Use `wg-query-for-save-on-workgroups-mode-exit' and
 ;; save and load customization
 
 (defcustom wg-switch-on-load t
-  "Non-nil means automatically switch to the first workgroup in a
-file when the file is loaded."
+  "Non-nil means switch to the first workgroup when a file is loaded."
   :type 'boolean
   :group 'workgroups)
 
 (defcustom wg-query-for-save-on-emacs-exit t
-  "Non-nil means query for save before exiting Emacs when there
-are unsaved changes.  Exiting workgroups removes its
-`kill-emacs-query-functions' hook, so if you set this to nil, you
-may want to set `wg-query-for-save-on-workgroups-exit' to t."
+  "Non-nil means query to save unsaved changes before exiting Emacs.
+Exiting workgroups removes its `kill-emacs-query-functions' hook,
+so if you set this to nil, you may want to set
+`wg-query-for-save-on-workgroups-exit' to t."
   :type 'boolean
   :group 'workgroups)
 
 (defcustom wg-query-for-save-on-workgroups-mode-exit t
-  "Non-nil means query for save before exiting workgroups when
-there are unsaved changes. Exiting workgroups removes its
-`kill-emacs-query-functions' hook, which is why this variable
-exists."
+  "Non-nil means query to save unsaved changes before exiting workgroups-mode.
+Exiting workgroups removes its `kill-emacs-query-functions' hook,
+which is why this variable exists."
   :type 'boolean
   :group 'workgroups)
 
@@ -134,20 +131,17 @@ exists."
 ;; workgroup restoration customization
 
 (defcustom wg-default-buffer "*scratch*"
-  "Buffer to switch to when a new workgroup is created.
-Also used when a workgroup's window's buffer can't be retrieved."
+  "Buffer used when a workgroup is created, or its buffer can't be found."
   :type 'string
   :group 'workgroups)
 
 (defcustom wg-restore-position nil
-  "Non-nil means restore the frame's position on workgroup
-restore."
+  "Non-nil means restore frame position on workgroup restore."
   :type 'boolean
   :group 'workgroups)
 
 (defcustom wg-restore-scroll-bars t
-  "Non-nil means restore scroll-bar settings on workgroup
-restore."
+  "Non-nil means restore scroll-bar settings on workgroup restore."
   :type 'boolean
   :group 'workgroups)
 
@@ -161,22 +155,18 @@ restore."
   :type 'boolean
   :group 'workgroups)
 
-(defcustom wg-restore-selected-window t
-  "Non-nil means restore `selected-window' on workgroup restore."
-  :type 'boolean
-  :group 'workgroups)
-
 (defcustom wg-restore-mbs-window t
-  "Non-nil means restore `minibuffer-scroll-window' on workgroup
-restore."
+  "Non-nil means restore `minibuffer-scroll-window' on workgroup restore."
   :type 'boolean
   :group 'workgroups)
 
 (defcustom wg-restore-point-max t
-  "Non-nil means when point is at `point-max' when a wconfig is
-created, put point at `point-max' when the wconfig is restored,
-even if `point-max' has changed.  This is useful in for instance
-irc buffers where `point-max' is constantly increasing."
+  "Non-nil means put `point' at `point-max', even if `point-max' has increased.
+If `point' is at `point-max' when a wconfig is created, put
+`point' back at `point-max' when the wconfig is restored, even if
+`point-max' has increased in the meantime.  This is useful in,
+for instance, irc buffers where `point-max' is constantly
+increasing."
   :type 'boolean
   :group 'workgroups)
 
@@ -184,31 +174,29 @@ irc buffers where `point-max' is constantly increasing."
 ;; frame morph customization
 
 (defcustom wg-frame-morph-on t
-  "Non-nil means use the frame wipe animation when switching to a
-workgroup."
+  "Non-nil means use frame-morph when restoring wconfigs."
   :type 'boolean
   :group 'workgroups)
 
-(defcustom wg-frame-morph-hsteps 15
-  "Windows are enlarged horizontally in increments of this number
-of columns during frame morphing.  This shouldn't be set any
-lower than 2."
+(defcustom wg-frame-morph-hsteps 7
+  "Columns/step when enlarging windows during frame-morph.
+This shouldn't be set any lower than 2."
   :type 'integer
   :group 'workgroups)
 
-(defcustom wg-frame-morph-vsteps 5
-  "Windows are enlarged vertically in increments of this number
-of rows during frame morphing.  This shouldn't be set any lower
-than 2."
+(defcustom wg-frame-morph-vsteps 2
+  "Rows/step when enlarging windows during frame-morph.
+This shouldn't be set any lower than 2."
   :type 'integer
   :group 'workgroups)
 
 (defcustom wg-frame-morph-truncate-lines t
-  "Bound to `truncate-partial-width-windows' during frame-morph.
-Non-nil, this prevents weird-looking continuation line behavior,
-and can speed up frame-morphing some, but causes lines jump back
-to their wrapped status on completion."
-  :type 'integer
+  "Non-nil means truncate lines during frame-morph.
+Bound to `truncate-partial-width-windows' and/or `truncate-lines'
+during frame-morph.  This prevents weird-looking continuation
+line behavior, and can speed up frame-morphing a little.  Lines
+jump back to their wrapped status when frame-morph is complete."
+  :type 'boolean
   :group 'workgroups)
 
 
@@ -294,7 +282,7 @@ Passed to `format-time-string'."
   "List of currently defined workgroups.")
 
 (defvar wg-frame-table (make-hash-table)
-  "Hash table keyed by frame storing that frame's state.")
+  "Hash table keyed on frame, storing that frame's state.")
 
 (defvar wg-dirty nil
   "Non-nil when there are unsaved changes.")
@@ -302,29 +290,38 @@ Passed to `format-time-string'."
 (defvar wg-kill-ring nil
   "Kill ring of saved configs.")
 
-(defvar wg-face-abbrevs nil
-  "Assoc list mapping face abbreviations to face names.")
+(defvar wg-window-min-width 2
+  "Bound to `window-min-width' when restoring wconfigs. ")
 
-(defvar wg-restore-size t
-  "Bound to nil during frame-morph.")
+(defvar wg-window-min-height 1
+  "Bound to `window-min-height' when restoring wconfigs.")
 
-(defvar wg-window-min-width 2 ;; 4
-  "Bound to `window-min-width' when restoring configs. ")
-
-(defvar wg-window-min-height 1 ;; 3
-  "Bound to `window-min-height' when restoring configs.")
-
-(defvar wg-window-pad 2
+(defvar wg-window-split-pad 2
   "Added to the window-mins to prevent split size errors.")
 
-(defvar wg-max-frame-morph-iterations 200
-  "Max frame-morph iterations before exiting without finishing.")
+(defvar wg-min-hsplit (+ wg-window-min-width wg-window-split-pad)
+  "Minimum width when splitting windows horizontally.")
+
+(defvar wg-min-vsplit (+ wg-window-min-height wg-window-split-pad)
+  "Minimum height when splitting windows vertically.")
+
+(defvar wg-frame-morph-max-iterations 200
+  "Maximum frame-morph iterations before forcing exit.")
+
+(defvar wg-frame-morph-debug-mode nil
+  "nil means catch window split errors during frame morph.")
+
+(defvar wg-null-edges '(0 0 0 0)
+  "Null edge list")
 
 (defvar wg-last-message nil
   "Holds the last message workgroups sent to the echo area.")
 
 (defvar wg-selected-window nil
   "Used during wconfig restoration to hold the selected window.")
+
+(defvar wg-face-abbrevs nil
+  "Assoc list mapping face abbreviations to face names.")
 
 
 ;;; faces
@@ -415,12 +412,12 @@ Passed to `format-time-string'."
 (defmacro wg-when-let (binds &rest body)
   "Like `let*', but only eval BODY when all BINDS are non-nil."
   (declare (indent 1))
-  (let ((bind (car binds)))
+  (wg-dbind (bind . rest) binds
     (when (consp bind)
       `(let (,bind)
          (when ,(car bind)
-           ,(if (not (cdr binds)) `(progn ,@body)
-              `(wg-when-let ,(cdr binds) ,@body)))))))
+           ,(if (not rest) `(progn ,@body)
+              `(wg-when-let ,rest ,@body)))))))
 
 (defmacro wg-until (test &rest body)
   "`while' not."
@@ -440,9 +437,20 @@ Passed to `format-time-string'."
 (defmacro wg-aand (&rest args)
   "Anaphoric `and'."
   (declare (indent defun))
-  (cond ((null args)        t)
-        ((null (cdr args))  (car args))
+  (cond ((null args) t)
+        ((null (cdr args)) (car args))
         (t `(aif ,(car args) (aand ,@(cdr args))))))
+
+(defun wg-step-to (n m step)
+  "Increment or decrement N toward M by STEP."
+  (cond ((= n m) n)
+        ((< n m) (min (+ n step) m))
+        ((> n m) (max (- n step) m))))
+
+(defun wg-within (num lo hi &optional hi-inclusive)
+  "Return t when NUM is within bounds LO and HI.
+INCLUSIVE non-nil means the HI bound is inclusive."
+  (and (>= num lo) (if hi-inclusive (<= num hi) (< num hi))))
 
 (defun wg-last1 (list)
   "Return the last element of LIST."
@@ -468,7 +476,7 @@ Iterative to prevent stack overflow."
 (defun wg-insert-elt (elt list &optional pos)
   "Insert ELT into LIST at POS or the end."
   (let* ((len (length list)) (pos (or pos len)))
-    (when (and (>= pos 0) (<= pos len))
+    (when (wg-within pos 0 len t)
       (append (wg-take list pos) (cons elt (nthcdr pos list))))))
 
 (defun wg-move-elt (elt list pos)
@@ -498,15 +506,21 @@ Return nil when ELT1 and ELT2 aren't both present."
   "Return the value of KEY in ALIST. Uses `assq'."
   (cdr (assq key alist)))
 
-(defun wg-aput (alist key val)
-  "Return a copy of ALIST with a KEY VAL pair added.
-First removes KEY's previous key-value-pair if it's present."
-  (cons (cons key val) (remove (assq key alist) alist)))
+(defun wg-acopy (alist)
+  "Return a copy of ALIST's cons structure."
+  (wg-docar (kvp alist) (cons (car kvp) (cdr kvp))))
 
 (defun wg-aset (alist key val)
-  "Set KEY's value to VAL in ALIST.
-Error if KEY doesn't exist in ALIST."
-  (setcdr (assq key alist) val))
+  "Destructively set KEY's value to VAL in ALIST."
+  (wg-aif (assq key alist) (progn (setcdr it val) alist)
+    (cons (cons key val) alist)))
+
+(defun wg-aput (alist &rest key-value-pairs)
+  "Add all KEY-VALUE-PAIRS to a copy of ALIST, and return the copy."
+  (flet ((rec (alist kvps) (if (not kvps) alist
+                             (wg-dbind (k v . rest) kvps
+                               (wg-aset (rec alist rest) k v)))))
+    (rec (wg-acopy alist) key-value-pairs)))
 
 (defun wg-get-alist (key val alist-list)
   "Return the first alist in ALIST-LIST containing KEY and VAL."
@@ -523,26 +537,19 @@ cadr is the key."
   (declare (indent 2))
   (let ((asym (gensym)))
     `(let* ((,asym ,alist)
-            ,@(mapcar (lambda (bind)
-                        (let ((c (consp bind)))
-                          `(,(if c (car bind) bind)
-                            (wg-aget ,asym ',(if c (cadr bind) bind)))))
-                      binds))
+            ,@(wg-docar (bind binds)
+                (let ((c (consp bind)))
+                  `(,(if c (car bind) bind)
+                    (wg-aget ,asym ',(if c (cadr bind) bind))))))
        ,@body)))
 
-(defun wg-step-to (n m step)
-  "Increment or decrement N toward M by STEP."
-  (cond ((= n m) n)
-        ((< n m) (min (+ n step) m))
-        ((> n m) (max (- n step) m))))
-
 (defmacro wg-fill-keymap (keymap &rest binds)
-  "Fill KEYMAP with BINDS."
+  "Define in KEYMAP all the keybindings in BINDS, and return KEYMAP."
   (declare (indent 1))
   (let ((km (gensym)))
     `(let ((,km ,keymap))
-       ,@(mapcar (lambda (b) `(define-key ,km (kbd ,(car b)) ,(cadr b)))
-                 (wg-partition binds 2))
+       ,@(wg-docar (b (wg-partition binds 2))
+           `(define-key ,km (kbd ,(car b)) ,(cadr b)))
        ,km)))
 
 (defun wg-save-sexp-to-file (sexp file)
@@ -552,29 +559,17 @@ cadr is the key."
     (write-file file)))
 
 (defun wg-read-sexp-from-file (file)
-  "Read and s-expression from FILE."
+  "Read and return an sexp from FILE."
   (with-temp-buffer
     (insert-file-contents file)
     (goto-char (point-min))
     (read (current-buffer))))
 
-(defun wg-fullscreen-p (&optional frame)
-  "Return t if FRAME or `selected-frame' is fullscreen, nil otherwise."
-  (and (= (frame-pixel-width)  (x-display-pixel-width))
-       (= (frame-pixel-height) (x-display-pixel-height))))
-
 
 ;;; workgroups utils
 
-(defun wg-resignal (err &optional no-suppress)
-  "Resignal ERR if `after-init-time' or NO-SUPPRESS in non-nil.
-Otherwise send an error message to the echo area and *messages*."
-  (if (or after-init-time no-suppress)
-      (signal (car err) (cdr err))
-    (message "*** workgroups error *** %s" err)))
-
 (defun wg-type-of (obj)
-  "Return the (workgroups) type of OBJ."
+  "Return workgroups' object type of OBJ."
   (wg-aget obj 'type))
 
 (defun wg-type-p (type obj)
@@ -616,42 +611,23 @@ FACEKEY must be a key in `wg-face-abbrevs'."
 (defmacro wg-fontify (&rest format)
   "A small fontification DSL."
   `(concat
-    ,@(mapcar
-       (lambda (spec)
-         (typecase spec
-           (cons (if (keywordp (car spec))
-                     `(wg-add-face
-                       ,(car spec)
-                       ,(if (stringp (cadr spec))
-                            (cadr spec)
-                          `(format "%s" ,(cadr spec))))
-                   `(progn ,spec)))
-           (string `(progn ,spec))
-           (atom `(format "%s" ,spec))))
-       format)))
-
-
-;;; workgroups errors
-
-(defun wg-make-errsym (symbol message &rest conditions)
-  "Make SYMBOL and error symbol, with MESSAGE and CONDITIONS."
-  (put symbol 'error-message message)
-  (put symbol 'error-conditions
-       (append (list 'error 'workgroups-errors symbol)
-               conditions)))
-
-(wg-make-errsym
- 'minibuffer-active-error
- "Workgroups can't make wconfigs while the minibuffer is active")
-
-(wg-make-errsym
- 'set-frame-param-error
- "Error setting frame parameter")
+    ,@(wg-docar (spec format)
+        (typecase spec
+          (cons (if (keywordp (car spec))
+                    `(wg-add-face
+                      ,(car spec)
+                      ,(if (stringp (cadr spec))
+                           (cadr spec)
+                         `(format "%s" ,(cadr spec))))
+                  `(progn ,spec)))
+          (string `(progn ,spec))
+          (atom `(format "%s" ,spec))))))
 
 (defun wg-check-minibuffer-active ()
-  "Signal an error when the minibuffer is active."
+  "Throw an error when the minibuffer is active."
   (when (active-minibuffer-window)
-    (signal 'minibuffer-active-error nil)))
+    (error "Workgroup operations aren't permitted while the \
+minibuffer is active.")))
 
 
 ;;; type predicates
@@ -675,83 +651,65 @@ FACEKEY must be a key in `wg-face-abbrevs'."
 
 ;; window config utils
 
-(defun wg-min-hsplit ()
-  "Return the sum of `wg-window-pad' and `wg-window-min-width'.
-This is the minimum width when splitting."
-  (+ wg-window-pad wg-window-min-width))
+;; Common field accessors:
+(defun wg-dir   (w) (wg-aget w 'dir))
+(defun wg-edges (w) (wg-aget w 'edges))
+(defun wg-wlist (w) (wg-aget w 'wlist))
+(defun wg-wtree (w) (wg-aget w 'wtree))
 
-(defun wg-min-vsplit ()
-  "Return the sum of `wg-window-pad' and `wg-window-min-height'.
-This is the minimum height when splitting."
-  (+ wg-window-pad wg-window-min-height))
-
-(defun wg-min-split (dir)
-  "Return the minimum split size in direction DIR."
-  (if dir (wg-min-vsplit) (wg-min-hsplit)))
-
-(defvar wg-min-win
-  `((type . window)
-    (edges 0 0 ,(wg-min-hsplit) ,(wg-min-vsplit)))
-  "The smallest possible window.")
-
-(defun wg-edges (w)
-  "Return the edges list of W.
-W should be a window or a wtree."
-  (wg-aget w 'edges))
+(defun wg-min-size (dir)
+  "Return the minimum window size in split direction DIR."
+  (if dir wg-window-min-height wg-window-min-width))
 
 (defmacro wg-with-edges (w spec &rest body)
   "Bind W's edge list to SPEC and eval BODY."
   (declare (indent 2))
-  `(wg-dbind ,spec (wg-aget ,w 'edges) ,@body))
+  `(wg-dbind ,spec (wg-edges ,w) ,@body))
 
-(defun wg-put-edges (w edges)
+(defun wg-put-edges (w left top right bottom)
   "Set the edges of W to EDGES."
-  (wg-aput w 'edges edges))
-
-(defun wg-equal-edges (w1 w2)
-  "Return t when W1's edges `equal' W2's, nil otherwise.
-W1 and W2 should be windows or wtrees."
-  (equal (wg-edges w1) (wg-edges w2)))
-
-(defun wg-scale-edges (w scale)
-  "Return a copy of W with its edges list scaled by SCALE."
-  (wg-put-edges
-   w (mapcar (lambda (n) (truncate (* n scale)))
-             (wg-edges w))))
+  (wg-aput w 'edges (list left top right bottom)))
 
 (defun wg-bounds (w dir)
   "Return the edges of W in bounds-form from direction DIR.
-W should be a window or a wtree."
+
+\"Bounds\" are a generic way to handle edge-lists.  A bounds-list
+consists of a low-side, a high-side, a low-bound and a
+high-bound.  Given a direction DIR, the \"sides\" are in the
+direction perpendicular to DIR, and the \"bounds\" are in the
+direction of DIR.  So if DIR is t, the left and right edge are
+low and high side, respectively, and the top and bottom edge are
+the low and high bound, and vice-versa if DIR is nil.  Using
+bounds avoids a lot of conditional edge-list code."
   (wg-with-edges w (l1 t1 r1 b1)
     (if dir (list l1 r1 t1 b1) (list t1 b1 l1 r1))))
 
 (defmacro wg-with-bounds (w dir spec &rest body)
-  "Bind SPEC to W's bounds in DIR, and eval BODY."
+  "Bind SPEC to W's bounds in DIR, and eval BODY.
+See `wg-bounds'."
   (declare (indent 3))
   `(wg-dbind ,spec (wg-bounds ,w ,dir) ,@body))
 
-(defun wg-set-bounds (w dir ls hs lb hb)
+(defun wg-put-bounds (w dir ls hs lb hb)
   "Set W's edges in bounds-form to LS HS LB HB in direction DIR.
 W should be a window or a wtree."
-  (wg-put-edges w (if dir (list ls lb hs hb) (list lb ls hb hs))))
+  (if dir (wg-put-edges w ls lb hs hb) (wg-put-edges w lb ls hb hs)))
 
-(defun wg-first-window (w)
+(defun wg-first-win (w)
   "Return the first actual window in W.
 W should be a window or a wtree."
-  (if (wg-window-p w) w
-    (wg-first-window (car (wg-aget w 'wlist)))))
+  (if (wg-window-p w) w (wg-first-win (car (wg-wlist w)))))
 
 (defun wg-wsize (w &optional height)
   "Return the width or height of W, calculated from its edge list.
 W should be a window or a wtree."
-  (wg-dbind (ls hs lb hb) (wg-bounds w height)
-    (- hb lb)))
+  (wg-dbind (ls hs lb hb) (wg-bounds w height) (- hb lb)))
 
 (defun wg-reduce-wsize (dir op wins)
-  "Reuce the sizes of WINS by OP in DIR."
+  "Reduce the sizes of WINS by OP (+, -, *, /, etc.) in DIR."
   (let ((win (car wins)))
     (wg-with-bounds win dir (ls hs lb hb)
-      (wg-set-bounds
+      (wg-put-bounds
        win dir ls hs lb
        (+ lb (reduce op wins :key (lambda (w) (wg-wsize w dir))))))))
 
@@ -763,87 +721,95 @@ W should be a window or a wtree."
   "Add the sizes of WINS in DIR."
   (wg-reduce-wsize dir '+ wins))
 
+(defun wg-adjust-wsize (w width-fn height-fn &optional new-left new-top)
+  "Adjust W's width and height with WIDTH-FN and HEIGHT-FN.
+W should be a window or a wtree."
+  (wg-with-edges w (left top right bottom)
+    (let ((left (or new-left left)) (top (or new-top top)))
+      (wg-put-edges w left top
+                    (+ left (funcall width-fn (- right left)))
+                    (+ top (funcall height-fn (- bottom top)))))))
+
+(defun wg-scale-wsize (w width-scale height-scale)
+  "Scale W's size by WIDTH-SCALE and HEIGHT-SCALE.
+W should be a window or a wtree."
+  (wg-adjust-wsize w (lambda (width) (truncate (* width width-scale)))
+                   (lambda (height) (truncate (* height height-scale)))))
+
 (defun wg-equal-wtrees (w1 w2)
   "Return t when W1 and W2 have equal structure.
 W1 and W2 should be windows or wtrees."
   (cond ((and (wg-window-p w1) (wg-window-p w2))
-         (wg-equal-edges w1 w2))
+         (equal (wg-edges w1) (wg-edges w2)))
         ((and (wg-wtree-p w1) (wg-wtree-p w2))
-         (and (eq (wg-aget w1 'dir) (wg-aget w2 'dir))
+         (and (eq (wg-dir w1) (wg-dir w2))
               (equal (wg-edges w1) (wg-edges w2))
-              (every 'wg-equal-wtrees
-                     (wg-aget w1 'wlist) (wg-aget w2 'wlist))))))
+              (every 'wg-equal-wtrees (wg-wlist w1) (wg-wlist w2))))))
 
-(defmacro wg-map-wtree (binds &rest body)
-  "Prettifies mapping the window list of a wtree."
-  (declare (indent 1))
-  (wg-dbind (subw wtree &optional mapfn) binds
-    (let ((wl (gensym)))
-      `(let ((,wl (remove nil (,(or mapfn 'mapcar) (lambda (,subw) ,@body)
-                               (wg-aget ,wtree 'wlist)))))
-         (if (not (cdr ,wl)) (car ,wl)
-           (wg-aput ,wtree 'wlist ,wl))))))
+(defun wg-normalize-wtree (wtree)
+  "Clean up and return a new wtree from WTREE.
+Recalculate the edge lists of all subwins, and remove subwins
+outside of WTREE's bounds.  If there's only one element in the
+new wlist, return it instead of a new wtree."
+  (if (wg-window-p wtree) wtree
+    (wg-abind wtree (dir wlist)
+      (wg-with-bounds wtree dir (ls1 hs1 lb1 hb1)
+        (let ((max (- hb1 1 (wg-min-size dir)))
+              (lastw (wg-last1 wlist)))
+          (flet ((mapwl
+                  (wl)
+                  (wg-dbind (sw . rest) wl
+                    (cons (wg-normalize-wtree
+                           (wg-put-bounds
+                            sw dir ls1 hs1 lb1
+                            (setq lb1 (if (eq sw lastw) hb1
+                                        (let ((hb2 (+ lb1 (wg-wsize sw dir))))
+                                          (if (>= hb2 max) hb1 hb2))))))
+                          (when (< lb1 max) (mapwl rest))))))
+            (let ((new (mapwl wlist)))
+              (if (cdr new) (wg-aput wtree 'wlist new)
+                (car new)))))))))
 
-(defun wg-set-frame-param (param val &optional noerror frame)
-  "Set FRAME's PARAM to VAL, or signal an error."
-  (set-frame-parameter frame param val)
-  (unless (or noerror (equal val (frame-parameter frame param)))
-    (signal 'set-frame-param-error (list param val))))
+(defun wg-scale-wtree (wtree wscale hscale)
+  "Scale WTREE's dimensions by WSCALE and HSCALE.
+Return a copy WTREE with all its subwins' widths scaled by
+WSCALE, and its subwins' heights scaled by HSCALE."
+  (let ((scaled (wg-scale-wsize wtree wscale hscale)))
+    (if (wg-window-p wtree) scaled
+      (wg-aput scaled
+               'wlist (wg-docar (sw (wg-wlist scaled))
+                        (wg-scale-wtree sw wscale hscale))))))
 
-(defun wg-set-frame-min-width (new-width)
-  "Set the width `selected-frame' to NEW-WIDTH.
-Throw an error if the width isn't at least NEW-WIDTH."
-  (let ((old-width (frame-width)))
-    (condition-case err
-        (wg-set-frame-param 'width new-width)
-      (set-frame-param-error
-       (unless (>= (frame-width) new-width)
-         (set-frame-parameter nil 'width old-width)
-         (error "The frame isn't wide enough"))))))
+(defun wg-scale-wconfig (wconfig new-width new-height)
+  "Scale WCONFIG's dimensions with NEW-WIDTH and NEW-HEIGHT.
+Return a copy WCONFIG with its wtree scaled with `wg-scale-wtree'
+by the ratio or NEW-WIDTH to WCONFIG's width, and NEW-HEIGHT to
+WCONFIG's height."
+  (wg-aput wconfig 'width new-width 'height new-height
+           'wtree (wg-normalize-wtree
+                   (wg-scale-wtree
+                    (wg-wtree wconfig)
+                    (/ (float new-width)  (wg-aget wconfig 'width))
+                    (/ (float new-height) (wg-aget wconfig 'height))))))
 
-(defun wg-set-frame-min-height (new-height)
-  "Set the height `selected-frame' to NEW-HEIGHT.
-Throw an error if the height isn't at least NEW-HEIGHT."
-  (let ((old-height (frame-height)))
-    (condition-case err
-        (wg-set-frame-param 'height new-height)
-      (set-frame-param-error
-       (unless (>= (frame-height) new-height)
-         (set-frame-parameter nil 'height old-height)
-         (error "The frame isn't tall enough"))))))
+(defun wg-set-frame-size-from-wconfig (wconfig &optional frame)
+  "Set FRAME's size to that of WCONFIG, scaling WCONFIG if necessary.
+If the size was set correctly, return WCONFIG unchanged.  If it
+wasn't, return a copy of WCONFIG with its dimensions scaled to
+fit the frame-geometry as it exists."
+  (let ((frame (or frame (selected-frame))))
+    (wg-abind wconfig ((wcwidth width) (wcheight height))
+      (when window-system (set-frame-size frame wcwidth wcheight))
+      (let ((fwidth  (frame-parameter frame 'width))
+            (fheight (frame-parameter frame 'height)))
+        (if (and (= wcwidth fwidth) (= wcheight fheight)) wconfig
+          (wg-scale-wconfig wconfig fwidth fheight))))))
 
-(defun wg-trim-wtree (w)
-  "Return a new wtree from W with all subwins within W's bounds.
-Windows that begin outside of W's bounds are removed. W should be
-a window or a wtree."
-  (if (wg-window-p w) w
-    (wg-abind w (dir wlist)
-      (wg-with-bounds w dir (ls1 hs1 lb1 hb1)
-        (let ((lastwin (wg-last1 wlist))
-              (limit (- hb1 (wg-min-split dir))))
-          (wg-map-wtree (sw w)
-            (when (< lb1 limit)
-              (wg-trim-wtree
-               (let* ((hb2 (+ lb1 (wg-wsize sw dir)))
-                      (hb2 (if (or (eq sw lastwin) (>= hb2 limit)) hb1 hb2)))
-                 (wg-set-bounds sw dir ls1 hs1 lb1 (setq lb1 hb2)))))))))))
-
-(defun wg-scale-wtree (wtree scale)
-  "Scale the edges of WTREE and all its subwins by SCALE.
-Return a new wtree."
-  (flet ((inner (w) (let ((new-w (wg-scale-edges w scale)))
-                      (if (wg-window-p new-w) new-w
-                        (wg-aput new-w 'wlist
-                                 (mapcar 'inner (wg-aget new-w 'wlist)))))))
-    (wg-trim-wtree (inner wtree))))
-
-;; cases:
-;; ------
-;; handled - frame morph during startup
-;; startup in terminal
-;; startup in gui
-;; frame morph in terminal
-;; frame morph in gui
+(defun wg-set-frame-position-from-wconfig (wconfig &optional frame)
+  "Sets FRAME's left and top to WCONFIG's left and top."
+  (wg-abind wconfig (left top)
+    (when (and left top)
+      (set-frame-position (or frame (selected-frame)) left top))))
 
 
 ;;; wconfig making
@@ -866,6 +832,7 @@ EWIN should be an Emacs window object."
       (mark     .  ,(mark))
       (markx    .  ,mark-active)
       (wstart   .  ,(window-start ewin))
+      (hscroll  .  ,(window-hscroll ewin))
       (sbars    .  ,(window-scroll-bars ewin))
       (margins  .  ,(window-margins ewin))
       (fringes  .  ,(window-fringes ewin))
@@ -879,14 +846,17 @@ EWIN should be an Emacs window object."
     (edges  .  ,edges)
     (wlist  .  ,wlist)))
 
-(defun wg-ewtree->wtree (ewtree)
-  "Return a new wtree from EWTREE.
-EWTREE should be the car of `window-tree'."
-  (etypecase ewtree
-    (window (wg-ewin->window ewtree))
-    (cons (wg-dbind (dir edges . wins) ewtree
-            (wg-make-wtree
-             dir edges (mapcar 'wg-ewtree->wtree wins))))))
+(defun wg-ewtree->wtree (&optional ewtree)
+  "Return a new wtree from EWTREE or `window-tree'.
+If specified, EWTREE should be an Emacs `window-tree'."
+  (flet ((inner (ewt) (if (windowp ewt) (wg-ewin->window ewt)
+                        (wg-dbind (dir edges . wins) ewt
+                          (wg-make-wtree
+                           dir edges (mapcar 'inner wins))))))
+    (let ((ewt (car (or ewtree (window-tree)))))
+      (when (and (windowp ewt) (window-minibuffer-p ewt))
+        (error "Workgroups can't operate on minibuffer-only frames."))
+      (inner ewt))))
 
 (defun wg-make-wconfig ()
   "Return a wconfig from the state of `selected-frame'."
@@ -899,11 +869,11 @@ EWTREE should be the car of `window-tree'."
     (height  .  ,(frame-parameter nil 'height))
     (sbars   .  ,(frame-parameter nil 'vertical-scroll-bars))
     (sbwid   .  ,(frame-parameter nil 'scroll-bar-width))
-    (wtree   .  ,(wg-ewtree->wtree (car (window-tree))))))
+    (wtree   .  ,(wg-ewtree->wtree))))
 
 (defun wg-make-blank-wconfig (&optional buffer)
-  "Return a new default config.
-The config displays BUFFER or `wg-default-buffer'."
+  "Return a new blank wconfig.
+The wconfig displays BUFFER or `wg-default-buffer'."
   (save-window-excursion
     (delete-other-windows)
     (switch-to-buffer (or buffer wg-default-buffer))
@@ -912,74 +882,76 @@ The config displays BUFFER or `wg-default-buffer'."
 
 ;;; wconfig restoring
 
-(defun wg-find-file-or-buffer (file-name buffer-name)
-  "Switch to a buffer determined from FILE-NAME and BUFFER-NAME."
-  (cond ((and file-name (file-exists-p file-name))
-         (find-file file-name)
-         (unless (equal (buffer-name) buffer-name)
-           (rename-buffer buffer-name)))
-        ((wg-awhen (get-buffer buffer-name)
-           (switch-to-buffer it)))
-        (t (switch-to-buffer wg-default-buffer))))
+(defun wg-switch-to-window-buffer (win)
+  "Switchq to WIN's buffer, which is determined from its fname and bname.
+Return the buffer if it was found, nil otherwise."
+  (wg-abind win (fname bname)
+    (cond ((and fname (file-exists-p fname))
+           (find-file fname)
+           (rename-buffer bname)
+           (current-buffer))
+          ((wg-awhen (get-buffer bname) (switch-to-buffer it)))
+          (t (switch-to-buffer wg-default-buffer) nil))))
 
-(defun wg-restore-window (window)
-  "Restore WINDOW's state in `selected-window'."
-  (wg-abind window (fname bname point mark markx wstart
-                          sbars fringes margins selwin mbswin)
-    (wg-find-file-or-buffer fname bname)
-    (when wg-restore-scroll-bars
-      (wg-dbind (width cols vtype htype) sbars
-        (set-window-scroll-bars nil width vtype htype)))
-    (when wg-restore-fringes
-      (wg-dbind (lwid rwid outside) fringes
-        (set-window-fringes nil lwid rwid outside)))
-    (when wg-restore-margins
-      (wg-dbind (left . right) margins
-        (set-window-margins nil left right)))
-    (set-window-start nil wstart t)
-    (goto-char (if (eq point :max) (point-max) point))
-    (set-mark mark)
-    (unless markx (deactivate-mark))
-    (when (>= wstart (point-max)) (recenter))
-    (when selwin (setq wg-selected-window (selected-window)))
-    (when mbswin (setq minibuffer-scroll-window (selected-window)))))
+(defun wg-restore-window (win)
+  "Restore WIN's state in `selected-window'."
+  (wg-abind win (point mark markx wstart hscroll sbars
+                       fringes margins selwin mbswin)
+    (let ((sw (selected-window)))
+      (when selwin (setq wg-selected-window sw))
+      (when (wg-switch-to-window-buffer win)
+        (when (and wg-restore-mbs-window mbswin)
+          (setq minibuffer-scroll-window sw))
+        (when wg-restore-scroll-bars
+          (wg-dbind (width cols vtype htype) sbars
+            (set-window-scroll-bars sw width vtype htype)))
+        (when wg-restore-fringes
+          (wg-dbind (lwid rwid outside) fringes
+            (set-window-fringes sw lwid rwid outside)))
+        (when wg-restore-margins
+          (wg-dbind (left . right) margins
+            (set-window-margins sw left right)))
+        (set-window-start sw wstart t)
+        (set-window-hscroll sw hscroll)
+        (goto-char (if (eq point :max) (point-max) point))
+        (set-mark mark)
+        (unless markx (deactivate-mark))
+        (when (>= wstart (point-max)) (recenter))))))
 
-(defun wg-restore-wtree (wt)
-  "Restore the wtree WT in FRAME."
-  (cond ((wg-window-p wt)
-         (wg-restore-window wt)
-         (other-window 1))
-        ((wg-wtree-p wt)
-         (let* ((v (wg-aget wt 'dir))
-                (wlist (wg-aget wt 'wlist))
-                (lastw (wg-last1 wlist)))
-           (dolist (w wlist)
-             (or (eq w lastw) (split-window nil (wg-wsize w v) (not v)))
-             (wg-restore-wtree w))))))
-
-(defun wg-restore-wconfig (wconfig)
-  "Restore WCONFIG."
-  (wg-check-minibuffer-active)
-  (let ((window-min-width  wg-window-min-width)
-        (window-min-height wg-window-min-height))
-    (wg-abind wconfig (left top width height sbars sbwid swidx mbswidx wtree)
-      (when wg-restore-position
-        (wg-set-frame-param 'left left t)
-        (wg-set-frame-param 'top  top  t))
-      (when wg-restore-size
-        (wg-set-frame-min-width  width)
-        (wg-set-frame-min-height height))
-      (when wg-restore-scroll-bars
-        (wg-set-frame-param 'vertical-scroll-bars sbars t)
-        (wg-set-frame-param 'scroll-bar-width sbwid t))
+(defun wg-restore-wtree (wtree)
+  "Restore WTREE in `selected-frame'."
+  (flet ((inner (w) (if (wg-wtree-p w)
+                        (wg-abind w ((d dir) wlist)
+                          (let ((lastw (wg-last1 wlist)))
+                            (dolist (sw wlist)
+                              (unless (eq sw lastw)
+                                (split-window nil (wg-wsize sw d) (not d)))
+                              (inner sw))))
+                      (wg-restore-window w)
+                      (other-window 1))))
+    (let ((window-min-width  wg-window-min-width)
+          (window-min-height wg-window-min-height))
       (delete-other-windows)
       (setq wg-selected-window nil)
-      (wg-restore-wtree wtree)
-      (when wg-restore-selected-window
-        (wg-aand wg-selected-window (select-window it))))))
+      (inner wtree)
+      (wg-awhen wg-selected-window (select-window it)))))
+
+(defun wg-restore-wconfig (wconfig)
+  "Restore WCONFIG in `selected-frame'."
+  (wg-check-minibuffer-active)
+  (and wg-frame-morph-on (wg-frame-morph wconfig))
+  (let ((frame (selected-frame)))
+    (wg-abind (wg-set-frame-size-from-wconfig wconfig frame)
+        (sbars sbwid wtree)
+      (when wg-restore-position
+        (wg-set-frame-position-from-wconfig wconfig frame))
+      (when wg-restore-scroll-bars
+        (set-frame-parameter frame 'vertical-scroll-bars sbars)
+        (set-frame-parameter frame 'scroll-bar-width sbwid))
+      (wg-restore-wtree wtree))))
 
 (defun wg-restore-blank-wconfig ()
-  "Restore the default config."
+  "Restore a new blank wconfig."
   (wg-restore-wconfig (wg-make-blank-wconfig)))
 
 
@@ -990,117 +962,123 @@ The config displays BUFFER or `wg-default-buffer'."
 W1 and W2 can be either windows or wtrees."
   (wg-with-edges w1 (l1 t1 r1 b1)
     (wg-with-edges w2 (l2 t2 r2 b2)
-      (let* ((h wg-frame-morph-hsteps)
-             (v wg-frame-morph-vsteps)
+      (let* ((h (max wg-frame-morph-hsteps wg-window-min-width))
+             (v (max wg-frame-morph-vsteps wg-window-min-height))
              (l3 (wg-step-to l1 l2 h))
              (t3 (wg-step-to t1 t2 v)))
         (list l3 t3
               (+ l3 (wg-step-to (- r1 l1) (- r2 l2) h))
               (+ t3 (wg-step-to (- b1 t1) (- b2 t2) v)))))))
 
-(defun wg-step-windows (w1 w2 &optional swap)
+(defun wg-step-win (w1 w2 &optional swap)
   "Return a copy of W1 with its edges stepped toward W2.
 When SWAP is non-nil, return a copy of W2 instead."
-  (wg-put-edges (if swap w2 w1) (wg-step-edges w1 w2)))
+  (wg-aput (if swap w2 w1) 'edges (wg-step-edges w1 w2)))
 
-(defun wg-minify-window (win)
+(defun wg-minify-win (win)
   "Return a copy of WIN with the smallest allowable dimensions."
-  (wg-put-edges
-   win (wg-with-edges win (left top right bottom)
-         (list left top
-               (+ left (wg-min-hsplit))
-               (+ top  (wg-min-vsplit))))))
+  (let* ((edges (wg-edges win))
+         (left (car edges))
+         (top (cadr edges)))
+    (wg-put-edges win left top
+                  (+ left wg-min-hsplit)
+                  (+ top wg-min-vsplit))))
 
-(defun wg-minify-first-window (w)
+(defun wg-minify-first-win (w)
   "Minify the first actual window in W.
 W should be a wtree or a window."
-  (wg-minify-window (wg-first-window w)))
+  (wg-minify-win (wg-first-win w)))
 
-(defun wg-window->wtree (win wt)
+(defun wg-win->wtree (win wt)
   "Return a new wtree from WIN with WT's toplevel structure.
 WIN should be a window, and WT should be a wtree."
   (wg-make-wtree
-   (wg-aget wt 'dir)
+   (wg-dir wt)
    (wg-step-edges win wt)
-   (mapcar (lambda (w) (wg-minify-first-window w))
-           (wg-leave (wg-aget wt 'wlist) 2))))
+   (wg-docar (w (wg-leave (wg-wlist wt) 2))
+     ;; step wins due the size subtraction in `wg-wtree->wtree':
+     (wg-step-win (wg-minify-first-win w) wt))))
 
-(defun wg-wtree->window (wt win)
+(defun wg-wtree->win (wt win)
   "Grow the first window of WT and its subtrees one step toward WIN.
 Shrink windows and wtrees that aren't first in a wlist.  This
 eventually wipes the rest of WT's components, leaving only a
 window.  WT should be a wtree, and WIN should be a window."
-  (if (wg-window-p wt) (wg-step-windows wt win t)
+  (if (wg-window-p wt) (wg-step-win wt win t)
     (wg-make-wtree
-     (wg-aget wt 'dir)
+     (wg-dir wt)
      (wg-step-edges wt win)
-     (wg-dbind (fwin . wins) (wg-aget wt 'wlist)
-       (cons (wg-wtree->window fwin win)
+     (wg-dbind (fwin . wins) (wg-wlist wt)
+       (cons (wg-wtree->win fwin win)
              (wg-docar (sw wins)
                (if (wg-window-p sw) sw
-                 (wg-wtree->window sw win))))))))
+                 (wg-wtree->win sw win))))))))
 
 (defun wg-wtree->wtree (wt1 wt2)
   "Return a new wtree morphed one step from WT1 to WT2.
-Mutually recursive with `wg-frame-morph-dispatch' to traverse the
+Mutually recursive with `wg-morph-wtree' to traverse the
 structures of WT1 and WT2 looking for discrepancies.  WT1 and WT2
 should be wtrees."
   (wg-abind wt1 ((d1 dir) (wl1 wlist))
     (wg-abind wt2 ((d2 dir) (wl2 wlist))
       (wg-make-wtree
        d2 (wg-step-edges wt1 wt2)
-       (if (not (eq d1 d2)) (list (wg-minify-first-window wt2) wt1)
+       (if (not (eq d1 d2))
+           (list (wg-minify-first-win wt2) wt1)
          (let ((l1 (length wl1))  (l2 (length wl2)))
-           (cond ((< l1 l2)
-                  (let ((new (wg-minify-first-window (nth (- l2 l1 1) wl2))))
-                    (setq wl1 `(,new ,(wg-win-- d2 (car wl1) new)
-                                     ,@(cdr wl1)))))
-                 ((> l1 l2)
-                  (let ((temp (nthcdr (1- l2) wl1)))
-                    (setq wl1 (append (wg-take wl1 (1- l2))
-                                      (list (wg-make-wtree
-                                             d1 (wg-edges (car temp))
-                                             temp)))))))
-           (mapcar* 'wg-frame-morph-dispatch wl1 wl2)))))))
+           (mapcar*
+            'wg-morph-wtree
+            (cond ((= l1 l2) wl1)
+                  ((< l1 l2)
+                   (let ((new (wg-minify-first-win (nth (- l2 l1 1) wl2))))
+                     `(,new ,(wg-win-- d2 (car wl1) new) ,@(cdr wl1))))
+                  ((> l1 l2)
+                   `(,@(wg-take wl1 (1- l2))
+                     ,(wg-make-wtree d1 wg-null-edges (nthcdr (1- l2) wl1)))))
+            wl2)))))))
 
-(defun wg-frame-morph-dispatch (w1 w2)
+(defun wg-morph-wtree (w1 w2)
   "Return a wtree morphed one step from W1 toward W2.
 W1 and W2 should be windows or wtrees.  Dispatch on each possible
 combination of types."
   (cond ((and (wg-window-p w1) (wg-window-p w2))
-         (wg-step-windows w1 w2 t))
+         (wg-step-win w1 w2 t))
         ((and (wg-wtree-p w1) (wg-wtree-p w2))
          (wg-wtree->wtree  w1 w2))
         ((and (wg-window-p w1) (wg-wtree-p w2))
-         (wg-window->wtree w1 w2))
+         (wg-win->wtree w1 w2))
         ((and (wg-wtree-p w1) (wg-window-p w2))
-         (wg-wtree->window w1 w2))))
+         (wg-wtree->win w1 w2))))
 
-(defun wg-frame-morph (to-wconfig)
-  "Morph the current window config into TO-WCONFIG.
-TO-WCONFIG should be a wconfig."
-  (wg-abind to-wconfig (left top width height (to-wt wtree))
-    (wg-set-frame-param 'left left)
-    (wg-set-frame-param 'top  top)
-    (wg-set-frame-min-width  width)
-    (wg-set-frame-min-height height)
-    (let* ((from-wconfig (wg-make-wconfig))
-           (from-wt (wg-aget from-wconfig 'wtree))
-           (wg-restore-size              nil)
-           (wg-restore-margins           nil)
-           (wg-restore-fringes           nil)
-           (wg-restore-scroll-bars       nil)
-           (wg-restore-mbs-window        nil)
-           ;; (truncate-lines wg-frame-morph-truncate-lines)
-           (truncate-partial-width-windows
-            wg-frame-morph-truncate-lines)
-           (watchdog 0))
-      (wg-until (or (wg-equal-wtrees from-wt to-wt)
-                    (> (incf watchdog) wg-max-frame-morph-iterations))
-        (setq from-wt (wg-trim-wtree (wg-frame-morph-dispatch from-wt to-wt)))
-        (wg-aset from-wconfig 'wtree from-wt)
-        (wg-restore-wconfig from-wconfig)
-        (redisplay t)))))
+(defun wg-frame-morph-check-frame-size (&optional frame)
+  "Return t when FRAME is large enough to `wg-frame-morph', nil otherwise.
+The multiplier of 4 was determined empirically."
+  (let ((frame (or frame (selected-frame))))
+    (and (>= (frame-width frame)  (* 4 wg-min-hsplit))
+         (>= (frame-height frame) (* 4 wg-min-vsplit)))))
+
+(defun wg-frame-morph (wconfig)
+  "Morph the current wconfig into WCONFIG.
+WCONFIG should be a wconfig."
+  (let ((frame (selected-frame)))
+    (when (wg-frame-morph-check-frame-size frame)
+      (let ((wt2 (wg-aget (wg-set-frame-size-from-wconfig wconfig frame) 'wtree)) ;; FIXME: return a wtree
+            (wt1 (wg-ewtree->wtree))
+            (wg-restore-scroll-bars nil)
+            (wg-restore-fringes nil)
+            (wg-restore-margins nil)
+            (truncate-partial-width-windows wg-frame-morph-truncate-lines)
+            (watchdog 0))
+        (when wg-restore-position
+          (wg-set-frame-position-from-wconfig wconfig frame))
+        (condition-case err
+            (wg-until (or (wg-equal-wtrees wt1 wt2)
+                          (> (incf watchdog) wg-frame-morph-max-iterations))
+              (setq wt1 (wg-normalize-wtree (wg-morph-wtree wt1 wt2)))
+              (wg-restore-wtree wt1)
+              (redisplay t))
+          (error (if wg-frame-morph-debug-mode (debug nil err)
+                   (message "*** `wg-frame-morph' error *** %s" err))))))))
 
 
 ;;; global error wrappers
@@ -1167,7 +1145,7 @@ FRAME's value in `wg-frame-table'."
 (defun wg-set-workgroup-prop (prop val workgroup &optional nodirty)
   "Set PROP to VAL in WORKGROUP."
   (wg-type-check 'workgroup workgroup)
-  (wg-aset workgroup prop val)
+  (setcdr (assq prop workgroup) val)
   (unless nodirty (setq wg-dirty t)))
 
 (defun wg-uid (workgroup)
@@ -1271,11 +1249,10 @@ If WORKGROUP is the current workgroup, update it first."
   (wg-make-workgroup
    nil name (wg-make-blank-wconfig buffer)))
 
-(defun wg-restore-workgroup (wg &optional base)
-  "Restore workgroup WG."
-  (let ((c (if base (wg-base-config wg) (wg-working-config wg))))
-    (and wg-frame-morph-on after-init-time (wg-frame-morph c))
-    (wg-restore-wconfig c)))
+(defun wg-restore-workgroup (workgroup &optional base)
+  "Restore WORKGROUP."
+  (wg-restore-wconfig
+   (if base (wg-base-config workgroup) (wg-working-config workgroup))))
 
 
 ;;; workgroups list ops
@@ -1335,8 +1312,8 @@ Query to overwrite if a workgroup with the same name exists."
             (cond ((wg-window-p win)
                    (pushnew (wg-aget win 'bname) bufs :test 'equal))
                   ((wg-wtree-p win)
-                   (mapc 'inner (wg-aget win 'wlist))))))
-      (inner (wg-aget wconfig 'wtree))
+                   (mapc 'inner (wg-wlist win))))))
+      (inner (wg-wtree wconfig))
       bufs)))
 
 (defun wg-workgroup-buffer-list (workgroup)
@@ -1417,13 +1394,14 @@ Query to overwrite if a workgroup with the same name exists."
       (sit-for wg-warning-timeout))
     name))
 
-(defun wg-read-idx (low high &optional prompt)
-  "Read and return a valid workgroup index."
-  (let ((prompt (or prompt (format "[%d-%d]: " low high))) i
+(defun wg-read-idx (lo hi &optional prompt)
+  "Read and return an integer within LO and HI."
+  (let ((prompt (or prompt (format "[%d-%d]: " lo hi))) i
         (warning (wg-fontify
-                  :msg (format "Enter an integer [%d-%d]" low high))))
-    (while (and (setq i (eval-minibuffer prompt))
-                (or (not (integerp i)) (< i low) (> i high)))
+                  (:msg (format "Enter an integer [%d-%d]" lo hi)))))
+    (wg-until (and (setq i (read-number prompt))
+                   (integerp i)
+                   (wg-within i lo hi t))
       (message warning)
       (sit-for wg-warning-timeout))
     i))
@@ -1707,8 +1685,8 @@ Worgroups are updated with their working configs in the
 
 (defun wg-reset (&optional force)
   "Reset workgroups.
-Deletes saved state in `wg-frame-table' and nulls out
-`wg-list', `wg-file' and `wg-kill-ring'."
+Deletes saved state in `wg-frame-table' and nulls out `wg-list',
+`wg-file' and `wg-kill-ring'."
   (interactive "P")
   (unless (or force wg-no-confirm (y-or-n-p "Are you sure? "))
     (error "Canceled"))
@@ -1745,11 +1723,10 @@ is non-nil, use `wg-file'. Otherwise read a filename."
       (error "%S is not a workgroups file." file))
     (wg-reset t)
     (setq wg-list workgroups wg-file file))
-  (when wg-switch-on-load
-    (wg-awhen (wg-list t)
-      (condition-case err
-          (wg-switch-to-workgroup (car it))
-        (error (wg-resignal err)))))
+  (let (wg-frame-morph-on)
+    (when wg-switch-on-load
+      (wg-awhen (wg-list t)
+        (wg-switch-to-workgroup (car it)))))
   (wg-fontified-msg (:cmd "Loaded: ") (:file file)))
 
 (defun wg-find-file (file)
@@ -1778,7 +1755,7 @@ is non-nil, use `wg-file'. Otherwise read a filename."
   (dired dir switches))
 
 
-;;; toggle commands
+;;; mode-line commands
 
 (defun wg-toggle-mode-line ()
   "Toggle workgroups' mode-line display."
@@ -1788,12 +1765,51 @@ is non-nil, use `wg-file'. Otherwise read a filename."
   (wg-fontified-msg
     (:cmd "mode-line: ") (:msg (if wg-mode-line-on "on" "off"))))
 
+
+;;; frame-morph commands
+
 (defun wg-toggle-frame-morph ()
   "Toggle frame morphing."
   (interactive)
   (setq wg-frame-morph-on (not wg-frame-morph-on))
   (wg-fontified-msg
     (:cmd "Frame morph: ") (:msg (if wg-frame-morph-on "on" "off"))))
+
+;; FIXME:
+(defun wg-inc-frame-morph-hsteps ()
+  "Increment `wg-frame-morph-hsteps' by 1.
+This only sets it temporarily -- it doesn't customize the
+default."
+  (interactive)
+  (let ((new (incf wg-frame-morph-hsteps)))
+    (wg-fontified-msg (:cmd "hsteps: ") (:msg new))))
+
+;; FIXME:
+(defun wg-dec-frame-morph-hsteps ()
+  "Decrement `wg-frame-morph-hsteps' by 1.
+This only sets it temporarily -- it doesn't customize the
+default."
+  (interactive)
+  (let ((new (decf wg-frame-morph-hsteps)))
+    (wg-fontified-msg (:cmd "hsteps: ") (:msg new))))
+
+;; FIXME:
+(defun wg-inc-frame-morph-vsteps ()
+  "Increment `wg-frame-morph-vsteps' by 1.
+This only sets it temporarily -- it doesn't customize the
+default."
+  (interactive)
+  (let ((new (incf wg-frame-morph-vsteps)))
+    (wg-fontified-msg (:cmd "vsteps: ") (:msg new))))
+
+;; FIXME:
+(defun wg-dec-frame-morph-vsteps ()
+  "Decrement `wg-frame-morph-vsteps' by 1.
+This only sets it temporarily -- it doesn't customize the
+default."
+  (interactive)
+  (let ((new (decf wg-frame-morph-vsteps)))
+    (wg-fontified-msg (:cmd "vsteps: ") (:msg new))))
 
 
 ;;; echo commands
@@ -1884,6 +1900,15 @@ The string is passed through a format arg to escape %'s."
     "C-x"        'wg-swap-workgroups
     "C-,"        'wg-offset-left
     "C-."        'wg-offset-right
+    "C-w"        'wg-toggle-frame-morph
+    "<left>"     'wg-dec-frame-morph-hsteps
+    "<right>"    'wg-inc-frame-morph-hsteps
+    "<up>"       'wg-inc-frame-morph-vsteps
+    "<down>"     'wg-dec-frame-morph-vsteps
+    "C-<left>"   'wg-dec-frame-morph-hsteps
+    "C-<right>"  'wg-inc-frame-morph-hsteps
+    "C-<up>"     'wg-inc-frame-morph-vsteps
+    "C-<down>"   'wg-dec-frame-morph-vsteps
     "C-e"        'wg-echo-all-workgroups
     "e"          'wg-echo-all-workgroups
     "S-C-e"      'wg-echo-current-workgroup
@@ -1899,7 +1924,6 @@ The string is passed through a format arg to escape %'s."
     "S-C-f"      'wg-find-file-read-only
     "d"          'wg-dired
     "C-i"        'wg-toggle-mode-line
-    "C-w"        'wg-toggle-frame-morph
     "!"          'wg-reset
     "?"          'wg-help)
   "Workgroups' keymap.")

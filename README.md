@@ -19,9 +19,9 @@ configurations `(info "(Elisp)Window Configurations")`:
 > *Note Window Parameters::."
 
 The problem with Emacs' window configurations is that they're opaque C
-types: you can't peer inside them in Emacs.  To get at the information
-in a window configuration, you must restore it in a frame, then access
-that frame's parameters.
+types: you can't peer inside them.  To get at the information in a
+window configuration, you must restore it in a frame, then access that
+frame's parameters.
 
 Here's what the same info node has to say about window configuration
 opacity:
@@ -126,48 +126,51 @@ workgroups list.  Try switching between your workgroups now.
 
 ### Base and Working Configs
 
-Window configs drift through use. Windows get resized, different
-buffers get selected, point and mark change, and so on.  When you
+Window configs drift through use. Windows get resized; different
+buffers get selected; point and mark change, and so on.  When you
 switch from one workgroup to another, then back to the first, you want
 it to be in the same state that you left it in so you don't lose your
-place.  At the same time, it's convenient to be able to revert a
-workgroup to a known-good state when it gets hoplessly mangled.  For
-this reason, every workgroup actually consists of two wconfigs: a base
-config and a working config [1].  The base config is the pristine
-wconfig you'd like to be able to revert back to, and the working
-config is whatever the frame happens to look like while you're using
-it [2].  You set the base config to the working config with `<prefix>
-u` -- `wg-update-workgroup` -- and you set the working config to the
-base config with `<prefix> r` -- `wg-revert-workgroup`.  The two
-commands are mirror images of each other: the former sets the base to
-the working, and the latter sets the working to the base.  You can
-update all workgroups' base configs to their working configs with
-`<prefix> U` -- `wg-update-all-workgroups` -- and you can revert all
-workgroups' working configs to their base configs with `<prefix> R` --
-`wg-revert-all-workgroups`.  Update all your workgroups with `<prefix>
-U` now.
+place.  At the same time, it can be tedious getting the window
+configuration just the way one likes it, and it sucks when it gets
+irrevocably mangled.  So it'd be nice to be able to revert it back to
+a known-good state at any time.  For this reason, every workgroup
+actually consists of two wconfigs: a base config and a working config
+[1].  The base config is the pristine original wconfig.  It only gets
+altered explicitly, and you can revert back to it at any time.  And
+the working config is whatever the frame happens to look like while
+you're using it [2].  You set the base config to the working config
+with `<prefix> u` (`wg-update-workgroup`), and you set the working
+config to the base config with `<prefix> r` (`wg-revert-workgroup`).
+The two commands are mirror images of each other: the former sets the
+base to the working, and the latter sets the working to the base.  You
+can update all workgroups' base configs to their working configs with
+`<prefix> U` (`wg-update-all-workgroups`), and you can revert all
+workgroups' working configs to their base configs with `<prefix> R`
+(`wg-revert-all-workgroups`).  Update all your workgroups with
+`<prefix> U` now.
 
 [1] That's not entirely true: working configs are actually properties
-of frames.  Every frame has its own working config for each workgroup.
-This is because when working with multiple frames, one expects the
-working config for that frame to remain the same.  If you move to
-another frame and modify a workgroup's working config, then switch
-back to the first frame, it doesn't feel right when the working config
-changed while you were gone.  This may seem complicated, but in
-practice it's very natural.  Base configs are the same across all
-frames, though.
+of frames, so every frame has its own working config for each
+workgroup.  This is because when working with multiple frames, one
+expects the working config for that frame to remain the same.  If you
+move to another frame and modify a workgroup's working config, then
+switch back to the first frame, it doesn't feel right when the working
+config has changed while you were gone.  This may seem complicated,
+but in practice it's very natural.  There's only one base config per
+workgroup, though, so they're the same across all frames.
 
 [2] Workgroups tracks working configs lazily: it doesn't update the
 working config every time changes are made to the frame -- only when
-the working config is requested by a function.
+the working config is requested by a function.  This produces the same
+behavior, but much simpler code.
 
 
 ### Saving and Loading
 
 Saving and loading was the original motivation for writing Workgroups.
-You can save your workgroups to a file with `<prefix> C-s` --
-`wg-save` -- and you can load workgroups from a file with `<prefix>
-C-l` -- `wg-load`.  Save your workgroups now.
+You can save your workgroups to a file with `<prefix> C-s` (`wg-save`)
+and you can load workgroups from a file with `<prefix> C-l`
+(`wg-load`).  Save your workgroups now.
 
 Once you have a file of saved workgroups, it's convenient to load
 it on Emacs startup.  To do so you can add a line like this to
@@ -184,10 +187,10 @@ So your final `.emacs` setup may look something like this:
     (wg-load "/path/to/saved/workgroups")
 
 The customization variable `wg-switch-on-load` controls whether to
-automatically switch to the first workgroup when a file is loaded.  It
-defaults to `t`, so when you add the above to your `.emacs` file, the
-first workgroup in the file will automatically be switched to on Emacs
-startup.
+automatically switch to the first workgroup in a file when the file is
+loaded.  It defaults to `t`, so when you add the above to your
+`.emacs` file, the first workgroup in the file will automatically be
+switched to on Emacs startup.
 
 
 ### Killing and Yanking
@@ -223,8 +226,7 @@ WRITE ME
 ### Help
 
 To bring up a help buffer listing all the commands and their bindings,
-hit `<prefix> ?` -- `wg-help`.
-
+hit `<prefix> ?` (`wg-help`).
 
 
 ## FAQ
@@ -236,9 +238,10 @@ hit `<prefix> ?` -- `wg-help`.
   manipulated.  Elscreen has "screens", which works well.  I couldn't
   call them "window configurations" because it's too long, and Emacs
   already uses that for something else.  It'd be misleading, too,
-  since a workgroup is actually a named set of multiple wconfigs (a
-  base config and a working config for each frame).  So "Workgroups"
-  it is.  I'll have to do something special for the 3.11 release.
+  since a workgroup is actually a named set of multiple wconfigs (one
+  base config, and then a working config for each frame).  So
+  "Workgroups" it is.  I'll have to do something special for the 3.11
+  release.
 
 **Q:** Why should I use Workgroups instead of Elscreen?
 
@@ -246,14 +249,14 @@ hit `<prefix> ?` -- `wg-help`.
   frame-morphing and other chrome, and cleaner code.  And it's
   maintained.
 
-**Q:** What's difference between a window configuration, a wconfig and
-a workgroup?
+**Q:** What's the difference between a "window configuration", a
+  "wconfig" and a "workgroup"?
 
-**A:** A "Window configuration" is Emacs' opaque internal
-  representation of frame state.  "wconfigs" are Workgroups' own
-  independent window configuration type.  And "workgroups" are a named
-  set of multiple wconfigs (a base config and a working config for
-  each frame).
+**A:** A "window configuration" is Emacs' opaque internal
+  representation of frame state.  A "wconfig" is Workgroups' own
+  independent window configuration type.  And a "workgroup" is a named
+  set of multiple wconfigs (one base config, and then a working config
+  for each frame).
 
 
 ## A Note On Application Buffers
