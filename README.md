@@ -220,6 +220,10 @@ WRITE ME
 
 ### Frame Morph
 
+- `wg-frame-morph-hsteps` and `wg-frame-morph-vsteps` in local
+  terminal frames can usually be set much lower, as redisplay is
+  significantly faster.
+
 WRITE ME
 
 
