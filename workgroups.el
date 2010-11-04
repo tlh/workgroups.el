@@ -191,13 +191,13 @@ increasing."
   :type 'boolean
   :group 'workgroups)
 
-(defcustom wg-morph-hsteps 6
+(defcustom wg-morph-hsteps 9
   "Columns/step when enlarging windows during `wg-morph'.
 Values lower than 1 are invalid."
   :type 'integer
   :group 'workgroups)
 
-(defcustom wg-morph-vsteps 2
+(defcustom wg-morph-vsteps 3
   "Rows/step when enlarging windows during `wg-morph'.
 Values lower than 1 are invalid."
   :type 'integer
@@ -347,7 +347,7 @@ Passed to `format-time-string'."
 (defvar wg-morph-max-iterations 200
   "Maximum morph iterations before forcing exit.")
 
-(defvar wg-morph-noerror t
+(defvar wg-morph-no-error t
   "Non-nil means ignore errors during `wg-morph'.
 The error message is sent to *messages* instead.  This was added
 when `wg-morph' was unstable, so the screen wouldn't be
@@ -871,12 +871,6 @@ dimensions scaled to fit the frame-geometry as it exists."
             (wg-wtree wconfig)
           (wg-scale-wconfigs-wtree wconfig fwidth fheight))))))
 
-(defun wg-set-frame-position-from-wconfig (wconfig &optional frame)
-  "Sets FRAME's left and top to WCONFIG's left and top."
-  (wg-abind wconfig (left top)
-    (when (and left top)
-      (set-frame-position (or frame (selected-frame)) left top))))
-
 
 ;;; wconfig making
 
@@ -1001,19 +995,26 @@ Return the buffer if it was found, nil otherwise."
       (inner wtree)
       (wg-awhen wg-selected-window (select-window it)))))
 
+(defun wg-set-frame-position-from-wconfig (wconfig &optional frame)
+  "Sets FRAME's left and top to WCONFIG's left and top."
+  (wg-abind wconfig (left top)
+    (when (and left top)
+      (set-frame-position (or frame (selected-frame)) left top))))
+
 (defun wg-restore-wconfig (wconfig)
   "Restore WCONFIG in `selected-frame'."
   (wg-check-minibuffer-active)
   (let ((f (selected-frame)) wt)
-    (when wg-restore-position
-      (wg-set-frame-position-from-wconfig wconfig f))
-    (setq wt (w-set-frame-size-and-scale-wtree wconfig f))
-    (when (and wg-morph-on after-init-time)
-      (wg-morph wt))
-    (wg-restore-wtree wt)
-    (when wg-restore-scroll-bars
-      (set-frame-parameter f 'vertical-scroll-bars (wg-aget wconfig 'sbars))
-      (set-frame-parameter f 'scroll-bar-width (wg-aget wconfig 'sbwid)))))
+    (wg-abind wconfig (left top sbars sbwid)
+      (setq wt (w-set-frame-size-and-scale-wtree wconfig f))
+      (when (and wg-restore-position left top)
+        (set-frame-position f left top))
+      (when (and wg-morph-on after-init-time)
+        (wg-morph wt))
+      (wg-restore-wtree wt)
+      (when wg-restore-scroll-bars
+        (set-frame-parameter f 'vertical-scroll-bars sbars)
+        (set-frame-parameter f 'scroll-bar-width sbwid)))))
 
 (defun wg-restore-blank-wconfig ()
   "Restore a new blank wconfig."
@@ -1133,7 +1134,7 @@ Assumes TO fits to `selected-frame'.  TO should be a wtree."
           (redisplay t)
           (unless (zerop wg-morph-sit-for-seconds)
             (sit-for wg-morph-sit-for-seconds t)))
-      (error (if wg-morph-noerror (message "%S" err)
+      (error (if wg-morph-no-error (message "%S" err)
                (error "%S" err))))))
 
 
