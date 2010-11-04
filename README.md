@@ -1,9 +1,10 @@
 # Workgroups for Windows (for Emacs)
 
-Workgroups is a session management package for GNU Emacs.  It allows
-you to store and restore window configurations (called "workgroups"
-because it's shorter and funnier), save them to and load them from
-disk, morph between them and perform various other operations on them.
+Workgroups is a session management package for GNU Emacs (it has
+nothing to do with Microsoft Windows).  It allows you to store and
+restore window configurations (called "workgroups" because it's
+shorter and funnier), save them to and load them from disk, morph
+between them and perform various other operations on them.
 
 Here's what the Elisp info docs have to say about window
 configurations `(info "(Elisp)Window Configurations")`:
@@ -35,10 +36,10 @@ frobbable and serializable.  Workgroups' window configurations (called
 "wconfigs") save all the settings listed above, and more.  For
 instance, if a region is highlighted in `transient-mark-mode`, that
 region will still be highlighted after restarting Emacs and restoring
-that wconfig.  And wconfigs can be constructed programatically,
-without the need to manipulate a live frame, vastly simplifying things
-like frame morphing, window moving, frame reversing and other
-operations.
+that wconfig.  They also save frame position and size.  And wconfigs
+can be constructed programatically, without the need to manipulate a
+live frame, vastly simplifying things like frame morphing, window
+moving, frame reversing and other operations.
 
 
 ## Getting Workgroups
@@ -76,6 +77,10 @@ running:
   worry about stomping keydefs if you want to try out different
   prefixes.
 
+  Most commands are bound to both `<key>` and `C-<key>` for
+  convenience.  See the definition of `wg-map` in the source for a
+  complete list of bindings.
+
 - There are many other customization options.  See the customization
   section in the source for details, or use:
 
@@ -110,6 +115,9 @@ and `C-x 3`, and switch to different buffers in some of the windows to
 make it unique.  Repeat this process a few times to create some
 different workgroups.
 
+Every workgroup must have a unique name.  You can rename workgroups
+after they've been created with `<prefix> A` (`wg-rename-workgroup`).
+
 
 ### Workgroup Switching
 
@@ -122,6 +130,32 @@ in the workgroups list from the current workgroup, and `<prefix> p`
 will switch to the one leftward in the list.  `<prefix> 0` through
 `<prefix> 9` switch to the workgroup at that position in the
 workgroups list.  Try switching between your workgroups now.
+
+
+### Morph
+
+After you've switched between workgroups, you'll notice that
+Workgroups displays an animation when switching between wconfigs,
+called "morph".  Morph reuses whatever window-tree structure the two
+configs have in common, sliding in or wiping subwindows as necessary
+to complete the transformation.  You can toggle it off and on with
+`<prefix> w` (`wg-toggle-morph`), or you can set the value of
+`wg-morph-on` to t or nil to turn it on or off permenently.
+
+There are a couple variables that determine the morphing speed.
+`wg-morph-hsteps` and `wg-morph-vsteps` control the number of columns
+and lines respectively that window boundaries move for each step of
+the morph animation.  The defaults for these are a little low so you
+see what the morph is doing, so set them higher if you wish.  Values
+less than 1 are invalid.
+
+`wg-morph-terminal-hsteps` and `wg-morph-terminal-vsteps` control the
+horizontal and vertical stepping in terminal frames.  They are
+separate from the first two because Emacs' `redisplay` is usually
+significanly faster on local terminal frames, so the morph can happen
+too fast to see at values appropriate for GUI frames.  If they are
+set, their values are used in terminal frames.  If they are nil, the
+step values default to `wg-morph-hsteps` and `wg-morph-vsteps`.
 
 
 ### Base and Working Configs
@@ -195,36 +229,56 @@ switched to on Emacs startup.
 
 ### Killing and Yanking
 
-WRITE ME
+You can kill workgroups with `<prefix> k` (`wg-kill-workgroup`).
+Killing a workgroup deletes it from the list of workgroups, and copies
+its working config to the kill ring.  You can yank killed wconfigs
+into the current frame with `<prefix> y` (`wg-yank-config`).  If the
+last command was `wg-yank-config`, calling it again will yank the
+*next* config in the kill ring, and so on, much like Emacs' own kill
+ring.
+
+You can also save a wconfig to the kill ring without killing its
+workgroup.  `<prefix> M-w` (`wg-kill-ring-save-working-config`) saves
+the working config to the kill ring, and `<prefix> M-W`
+(`wg-kill-ring-save-base-config`) saves the base config to the kill
+ring.
 
 
 ### Cloning
 
-WRITE ME
+Cloning a workgroup creates a new workgroup under a different name
+with the a copy of the current workgroup's base and working configs.
+`<prefix> C` (`wg-clone-workgroup`) will clone the current workgroup.
 
 
 ### Offsetting and Swapping
 
-WRITE ME
+You can move a workgroup leftward or rightward in the workgroups list
+with `<prefix> ,` (`wg-offset-left`) and `<prefix> .`
+(`wg-offset-right`) respectively.  These commands work cyclically, so
+when you offset a workgroup leftward or rightward that's already on
+the far left or right of the list, it will wrap around to the other
+side.
+
+`<prefix> x` (`wg-swap-workgroups`) will swap the position in the
+workgroups list of the previously selected workgroup with that of the
+current workgroup.
 
 
 ### Switching to Buffers
 
-WRITE ME
+You can switch to workgroups based on the buffers they're visiting
+with `<prefix> b` (`wg-get-by-buffer`).  Workgroups constructs the
+list of available buffers from the existing workgroups, so you can
+switch to buffers even if they don't exist yet.
 
 
 ### Messaging
 
-WRITE ME
-
-
-### Frame Morph
-
-- `wg-frame-morph-hsteps` and `wg-frame-morph-vsteps` in local
-  terminal frames can usually be set much lower, as redisplay is
-  significantly faster.
-
-WRITE ME
+Workgroups has commands to display various bits of information in the
+echo-area, like the current workgroup name, the list of workgroups,
+the current time, etc.  The help buffer has a complete list (see the
+Help section below).
 
 
 ### Help

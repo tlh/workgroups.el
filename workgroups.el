@@ -101,7 +101,7 @@ query-for-save behavior.  Use
          (force-mode-line-update)))
 
 (defcustom wg-kill-ring-size 20
-  "Maximum length of the workgroups kill-ring."
+  "Maximum length of the `wg-kill-ring'."
   :type 'integer
   :group 'workgroups)
 
@@ -542,7 +542,7 @@ If ELT is not present is LIST, return nil."
     (nth (mod (+ pos n) (length list)) list)))
 
 (defun wg-util-swap (elt1 elt2 list)
-  "Return a copy of LIST with ELT1 with ELT2 swapped.
+  "Return a copy of LIST with ELT1 and ELT2 swapped.
 Return nil when ELT1 and ELT2 aren't both present."
   (wg-when-let ((p1 (position elt1 list))
                 (p2 (position elt2 list)))
@@ -631,11 +631,8 @@ cadr is the key."
 (defun wg-frame-offset (&optional n frame)
   "Return the frame N frames away from FRAME cyclically.
 N defaults to 1, and FRAME defaults to `selected-frame'."
-  (let ((fl (frame-list)))
-    (nth (mod (+ (position (or frame (selected-frame)) fl)
-                 (or n 1))
-              (length fl))
-         fl)))
+  (wg-cyclic-nth-from-elt
+   (or frame (selected-frame)) (frame-list) (or n 1)))
 
 (defun wg-window-list (&optional frame)
   "Flatten `window-tree' into a stable list.
@@ -654,10 +651,10 @@ FACEKEY must be a key in `wg-face-abbrevs'."
       (put-text-property 0 (length str) 'face face str)
       str)))
 
-(defmacro wg-fontify (&rest format)
+(defmacro wg-fontify (&rest specs)
   "A small fontification DSL."
   `(concat
-    ,@(wg-docar (spec format)
+    ,@(wg-docar (spec specs)
         (typecase spec
           (cons (if (keywordp (car spec))
                     `(wg-add-face
@@ -1114,7 +1111,7 @@ combination of types."
 
 (defun wg-morph (to)
   "Morph from the current wtree to TO.
-Assumes TO fits to `selected-frame'.  TO should be a wtree."
+Assumes TO will fit in `selected-frame'.  TO should be a wtree."
   (let ((from (wg-ewtree->wtree))
         (wg-morph-hsteps (wg-morph-determine-hsteps))
         (wg-morph-vsteps (wg-morph-determine-vsteps))
