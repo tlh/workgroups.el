@@ -5,7 +5,7 @@
 ;; File:     workgroups.el
 ;; Author:   tlh <thunkout@gmail.com>
 ;; Created:  2010-07-22
-;; Version   0.1.9
+;; Version   0.2.0
 ;; Keywords: session management window-configuration persistence
 
 ;; This program is free software; you can redistribute it and/or
@@ -49,7 +49,7 @@
 
 ;;; consts
 
-(defconst wg-version "0.1.9"
+(defconst wg-version "0.2.0"
   "Current version number of workgroups.")
 
 (defconst wg-persisted-workgroups-tag '-*-workgroups-*-

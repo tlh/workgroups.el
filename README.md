@@ -77,9 +77,9 @@ running:
   worry about stomping keydefs if you want to try out different
   prefixes.
 
-  Most commands are bound to both `<key>` and `C-<key>` for
-  convenience.  See the definition of `wg-map` in the source for a
-  complete list of bindings.
+  Most commands are bound to both `<prefix> <key>` and
+  `<prefix> C-<key>` for convenience.  See the definition of `wg-map`
+  in the source for a complete list of bindings.
 
 - There are many other customization options.  See the customization
   section in the source for details, or use:
