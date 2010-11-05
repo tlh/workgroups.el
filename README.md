@@ -297,9 +297,11 @@ hit `<prefix> ?` (`wg-help`).
   call them "window configurations" because it's too long, and Emacs
   already uses that for something else.  It'd be misleading, too,
   since a workgroup is actually a named set of multiple wconfigs (one
-  base config, and then a working config for each frame).  So
-  "Workgroups" it is.  I'll have to do something special for the 3.11
-  release.
+  base config, and then a working config for each frame).  A
+  "workgroup" seems like a good name for such a collection of window
+  configurations, and thanks to MS, the word "workgroups" is also
+  associated with the word "windows".  So "Workgroups" it is.  I'll
+  have to do something special for the 3.11 release.
 
 **Q:** Why should I use Workgroups instead of Elscreen?
 

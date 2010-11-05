@@ -73,10 +73,10 @@
   :type 'string
   :group 'workgroups
   :set (lambda (sym val)
-         (when (boundp 'wg-prefix-key)
-           (custom-set-default sym val)
-           (wg-set-prefix-key)
-           val)))
+         (custom-set-default sym val)
+         (when (fboundp 'wg-set-prefix-key)
+           (wg-set-prefix-key))
+         val))
 
 (defcustom wg-switch-hook nil
   "Hook run whenever a workgroup is switched to."
@@ -795,9 +795,9 @@ W should be a window or a wtree."
 (defun wg-scale-wsize (w width-scale height-scale)
   "Scale W's size by WIDTH-SCALE and HEIGHT-SCALE.
 W should be a window or a wtree."
-  (wg-adjust-wsize w
-                   (lambda (width)  (truncate (* width  width-scale)))
-                   (lambda (height) (truncate (* height height-scale)))))
+  (flet ((wscale (width)  (truncate (* width  width-scale)))
+         (hscale (height) (truncate (* height height-scale))))
+    (wg-adjust-wsize w 'wscale 'hscale)))
 
 (defun wg-equal-wtrees (w1 w2)
   "Return t when W1 and W2 have equal structure.
@@ -878,7 +878,7 @@ dimensions scaled to fit the frame-geometry as it exists."
         :max p)))
 
 (defun wg-ewin->window (ewin)
-  "Return a new window from EWIN.
+  "Return a new workgroups window from EWIN.
 EWIN should be an Emacs window object."
   (with-current-buffer (window-buffer ewin)
     `((type     .   window)
@@ -897,14 +897,14 @@ EWIN should be an Emacs window object."
       (mbswin   .  ,(eq ewin minibuffer-scroll-window)))))
 
 (defun wg-make-wtree (dir edges wlist)
-  "Return a new wtree from DIR EDGES and WLIST."
+  "Return a new workgroups wtree from DIR EDGES and WLIST."
   `((type   .   wtree)
     (dir    .  ,dir)
     (edges  .  ,edges)
     (wlist  .  ,wlist)))
 
 (defun wg-ewtree->wtree (&optional ewtree)
-  "Return a new wtree from EWTREE or `window-tree'.
+  "Return a new workgroups wtree from EWTREE or `window-tree'.
 If specified, EWTREE should be an Emacs `window-tree'."
   (flet ((inner (ewt) (if (windowp ewt) (wg-ewin->window ewt)
                         (wg-dbind (dir edges . wins) ewt
@@ -916,7 +916,7 @@ If specified, EWTREE should be an Emacs `window-tree'."
       (inner ewt))))
 
 (defun wg-make-wconfig ()
-  "Return a wconfig from the state of `selected-frame'."
+  "Return a new workgroups window config from `selected-frame'."
   (wg-check-minibuffer-active)
   (message nil)
   `((type    .   wconfig)
@@ -1103,7 +1103,7 @@ combination of types."
   (cond ((and (wg-window-p w1) (wg-window-p w2))
          (wg-morph-win->win w1 w2 t))
         ((and (wg-wtree-p w1) (wg-wtree-p w2))
-         (wg-morph-wtree->wtree  w1 w2))
+         (wg-morph-wtree->wtree w1 w2))
         ((and (wg-window-p w1) (wg-wtree-p w2))
          (wg-morph-win->wtree w1 w2))
         ((and (wg-wtree-p w1) (wg-window-p w2))
