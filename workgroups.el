@@ -1715,13 +1715,13 @@ Worgroups are updated with their working configs in the
   (wg-fontified-msg (:cmd "Swapped ") (wg-disp)))
 
 (defun wg-offset-left (workgroup &optional n)
-  "Offset WORKGROUP leftward cyclically."
+  "Offset WORKGROUP leftward in `wg-list' cyclically."
   (interactive (list (wg-arg) current-prefix-arg))
   (wg-cyclic-offset-workgroup workgroup (or n -1))
   (wg-fontified-msg (:cmd "Offset left: ") (wg-disp)))
 
 (defun wg-offset-right (workgroup &optional n)
-  "Offset WORKGROUP rightward cyclically."
+  "Offset WORKGROUP rightward in `wg-list' cyclically."
   (interactive (list (wg-arg) current-prefix-arg))
   (wg-cyclic-offset-workgroup workgroup (or n 1))
   (wg-fontified-msg (:cmd "Offset right: ") (wg-disp)))
@@ -1829,6 +1829,7 @@ is non-nil, use `wg-file'. Otherwise read a filename."
 
 ;;; echo commands
 
+
 (defun wg-echo-current-workgroup ()
   "Display the name of the current workgroup in the echo area."
   (interactive)
@@ -1863,134 +1864,37 @@ The string is passed through a format arg to escape %'s."
   (message "%s" wg-last-message))
 
 
-;;; keymap
-
-(defvar wg-map
-  (wg-fill-keymap (make-sparse-keymap)
-    "C-c"        'wg-create-workgroup
-    "c"          'wg-create-workgroup
-    "C-'"        'wg-switch-to-workgroup
-    "'"          'wg-switch-to-workgroup
-    "C-v"        'wg-switch-to-workgroup
-    "v"          'wg-switch-to-workgroup
-    "C"          'wg-clone-workgroup
-    "C-k"        'wg-kill-workgroup
-    "k"          'wg-kill-workgroup
-    "C-y"        'wg-yank-config
-    "y"          'wg-yank-config
-    "M-W"        'wg-kill-ring-save-base-config
-    "M-w"        'wg-kill-ring-save-working-config
-    "M-k"        'wg-kill-workgroup-and-buffers
-    "K"          'wg-delete-other-workgroups
-    "C-r"        'wg-revert-workgroup
-    "r"          'wg-revert-workgroup
-    "C-S-r"      'wg-revert-all-workgroups
-    "R"          'wg-revert-all-workgroups
-    "C-u"        'wg-update-workgroup
-    "u"          'wg-update-workgroup
-    "C-S-u"      'wg-update-all-workgroups
-    "U"          'wg-update-all-workgroups
-    "C-s"        'wg-save
-    "C-l"        'wg-load
-    "A"          'wg-rename-workgroup
-    "C-p"        'wg-switch-left
-    "p"          'wg-switch-left
-    "C-n"        'wg-switch-right
-    "n"          'wg-switch-right
-    "M-p"        'wg-switch-left-other-frame
-    "M-n"        'wg-switch-right-other-frame
-    "C-a"        'wg-switch-to-previous-workgroup
-    "a"          'wg-switch-to-previous-workgroup
-    "C-j"        'wg-switch-to-index
-    "0"          'wg-switch-to-index-0
-    "1"          'wg-switch-to-index-1
-    "2"          'wg-switch-to-index-2
-    "3"          'wg-switch-to-index-3
-    "4"          'wg-switch-to-index-4
-    "5"          'wg-switch-to-index-5
-    "6"          'wg-switch-to-index-6
-    "7"          'wg-switch-to-index-7
-    "8"          'wg-switch-to-index-8
-    "9"          'wg-switch-to-index-9
-    "C-x"        'wg-swap-workgroups
-    "C-,"        'wg-offset-left
-    "C-."        'wg-offset-right
-    "C-w"        'wg-toggle-morph
-    "<left>"     'wg-dec-morph-hsteps
-    "<right>"    'wg-inc-morph-hsteps
-    "<up>"       'wg-inc-morph-vsteps
-    "<down>"     'wg-dec-morph-vsteps
-    "C-<left>"   'wg-dec-morph-hsteps
-    "C-<right>"  'wg-inc-morph-hsteps
-    "C-<up>"     'wg-inc-morph-vsteps
-    "C-<down>"   'wg-dec-morph-vsteps
-    "C-e"        'wg-echo-all-workgroups
-    "e"          'wg-echo-all-workgroups
-    "S-C-e"      'wg-echo-current-workgroup
-    "E"          'wg-echo-current-workgroup
-    "C-t"        'wg-echo-time
-    "t"          'wg-echo-time
-    "V"          'wg-echo-version
-    "C-m"        'wg-echo-last-message
-    "m"          'wg-echo-last-message
-    "C-b"        'wg-get-by-buffer
-    "b"          'wg-get-by-buffer
-    "C-f"        'wg-find-file
-    "S-C-f"      'wg-find-file-read-only
-    "d"          'wg-dired
-    "C-i"        'wg-toggle-mode-line
-    "!"          'wg-reset
-    "?"          'wg-help)
-  "Workgroups' keymap.")
-
-
 ;;; help
 
 (defvar wg-help
-  '("\\[wg-create-workgroup]"
-    "Create a new workgroup and switch to it"
-    "\\[wg-switch-to-workgroup]"
+  '("\\[wg-switch-to-workgroup]"
     "Switch to a workgroup"
+    "\\[wg-create-workgroup]"
+    "Create a new workgroup and switch to it"
     "\\[wg-clone-workgroup]"
     "Create a clone of the current workgroug and switch to it"
     "\\[wg-kill-workgroup]"
     "Kill a workgroup"
-    "\\[wg-yank-config]"
-    "Set the working config to a config from the kill ring"
+    "\\[wg-kill-ring-save-base-config]"
+    "Save the current workgroup's base config to the kill ring"
     "\\[wg-kill-ring-save-working-config]"
-    "Save the current config to the kill ring"
+    "Save the current workgroup's working config to the kill ring"
+    "\\[wg-yank-config]"
+    "Yank a config from the kill ring into the current frame"
     "\\[wg-kill-workgroup-and-buffers]"
-    "Kill a workgroup and its buffer"
+    "Kill a workgroup and all buffers visible in it"
     "\\[wg-delete-other-workgroups]"
     "Delete all but the specified workgroup"
-    "\\[wg-revert-workgroup]"
-    "Set a workgroup's working config to its base config"
     "\\[wg-update-workgroup]"
-    "Set a workgroup's base config to its working config"
-    "\\[wg-save]"
-    "Save workgroups to a file"
-    "\\[wg-load]"
-    "Load workgroups from a file"
-    "\\[wg-rename-workgroup]"
-    "Rename a workgroup"
-    "\\[wg-switch-left]"
-    "Cycle leftward in the workgroups list"
-    "\\[wg-switch-right]"
-    "Cycle rightward in the workgroups list"
-    "\\[wg-switch-left-other-frame]"
-    "Cycle leftward in the workgroups list in another frame"
-    "\\[wg-switch-right-other-frame]"
-    "Cycle rightward in the workgroups list in another frame"
-    "\\[wg-offset-left]"
-    "Offset a workgroup leftward cyclically"
-    "\\[wg-offset-right]"
-    "Offset a workgroup rightward cyclically"
-    "\\[wg-swap-workgroups]"
-    "Swap the previous and current workgroups"
-    "\\[wg-switch-to-previous-workgroup]"
-    "Switch to the previously selected workgroup"
+    "Update a workgroup's base config with its working config"
+    "\\[wg-update-all-workgroups]"
+    "Update all workgroups' base configs with their working configs"
+    "\\[wg-revert-workgroup]"
+    "Revert a workgroup's working config to its base config"
+    "\\[wg-revert-all-workgroups]"
+    "Revert all workgroups' working configs to their base configs"
     "\\[wg-switch-to-index]"
-    "Jump to a workgroup by number"
+    "Jump to a workgroup by its index in the workgroups list"
     "\\[wg-switch-to-index-0]"
     "Switch to the workgroup at index 0"
     "\\[wg-switch-to-index-1]"
@@ -2011,26 +1915,52 @@ The string is passed through a format arg to escape %'s."
     "Switch to the workgroup at index 8"
     "\\[wg-switch-to-index-9]"
     "Switch to the workgroup at index 9"
-    "\\[wg-get-by-buffer]"
-    "Switch to the workgroup and config which contains the specified buffer"
+    "\\[wg-switch-left]"
+    "Switch to the workgroup leftward cyclically in the workgroups list"
+    "\\[wg-switch-right]"
+    "Switch to the workgroup rightward cyclically in the workgroups list"
+    "\\[wg-switch-left-other-frame]"
+    "Like `wg-switch-left', but operates in the next frame"
+    "\\[wg-switch-right-other-frame]"
+    "Like `wg-switch-right', but operates in the next frame"
+    "\\[wg-switch-to-previous-workgroup]"
+    "Switch to the previously selected workgroup"
+    "\\[wg-swap-workgroups]"
+    "Swap the positions of the current and previous workgroups"
+    "\\[wg-offset-left]"
+    "Offset a workgroup's position leftward cyclically in the workgroups list"
+    "\\[wg-offset-right]"
+    "Offset a workgroup's position rightward cyclically in the workgroups list"
+    "\\[wg-rename-workgroup]"
+    "Rename a workgroup"
+    "\\[wg-reset]"
+    "Reset Workgroups' entire state."
+    "\\[wg-save]"
+    "Save the workgroup list to a file"
+    "\\[wg-load]"
+    "Load a workgroups list from a file"
     "\\[wg-find-file]"
-    "Create a new workgroup and find a file in it"
+    "Create a new blank workgroup and find a file in it"
     "\\[wg-find-file-read-only]"
-    "Create a new workgroup and find-file-read-only in it"
+    "Create a new blank workgroup and find a file read-only in it"
+    "\\[wg-get-by-buffer]"
+    "Switch to the workgroup and config in which the specified buffer is visible"
     "\\[wg-dired]"
-    "Create a new workgroup and open a dired buffer in it"
+    "Create a new blank workgroup and open a dired buffer in it"
     "\\[wg-toggle-mode-line]"
-    "Toggle workgroups mode-line display"
+    "Toggle Workgroups' mode-line display"
     "\\[wg-toggle-morph]"
-    "Toggle `wg-morph' animation on workgroups switch"
-    "\\[wg-echo-all-workgroups]"
-    "Display the names of all workgroups in the echo area"
+    "Toggle the morph animation on any wconfig change"
     "\\[wg-echo-current-workgroup]"
     "Display the name of the current workgroup in the echo area"
+    "\\[wg-echo-all-workgroups]"
+    "Display the names of all workgroups in the echo area"
     "\\[wg-echo-time]"
     "Display the current time in the echo area"
     "\\[wg-echo-version]"
-    "Display the version in the echo area"
+    "Display the current version of Workgroups in the echo area"
+    "\\[wg-echo-last-message]"
+    "Display the last message Workgroups sent to the echo area in the echo area."
     "\\[wg-help]"
     "Show this help message")
   "List of commands and their help messages. Used by `wg-help'.")
@@ -2040,13 +1970,85 @@ The string is passed through a format arg to escape %'s."
   (interactive)
   (let ((hline (concat (make-string 80 ?-) "\n")))
     (with-output-to-temp-buffer "*workroups help*"
-      (princ  "Workgroups For Windows keybindings:\n")
-      (princ hline)
+      (princ  "Workgroups' keybindings:\n\n")
       (dolist (elt (wg-partition wg-help 2))
-        (princ (format "%15s  |  %s\n"
-                       (substitute-command-keys (car elt))
-                       (cadr elt))))
-      (princ hline))))
+        (wg-dbind (cmd help-string) elt
+          (princ (format "%15s   %s\n"
+                         (substitute-command-keys cmd)
+                         help-string)))))))
+
+
+;;; keymap
+
+(defvar wg-map
+  (wg-fill-keymap (make-sparse-keymap)
+    "C-'"        'wg-switch-to-workgroup
+    "'"          'wg-switch-to-workgroup
+    "C-v"        'wg-switch-to-workgroup
+    "v"          'wg-switch-to-workgroup
+    "C-c"        'wg-create-workgroup
+    "c"          'wg-create-workgroup
+    "C"          'wg-clone-workgroup
+    "C-k"        'wg-kill-workgroup
+    "k"          'wg-kill-workgroup
+    "M-W"        'wg-kill-ring-save-base-config
+    "M-w"        'wg-kill-ring-save-working-config
+    "C-y"        'wg-yank-config
+    "y"          'wg-yank-config
+    "M-k"        'wg-kill-workgroup-and-buffers
+    "K"          'wg-delete-other-workgroups
+    "C-u"        'wg-update-workgroup
+    "u"          'wg-update-workgroup
+    "C-S-u"      'wg-update-all-workgroups
+    "U"          'wg-update-all-workgroups
+    "C-r"        'wg-revert-workgroup
+    "r"          'wg-revert-workgroup
+    "C-S-r"      'wg-revert-all-workgroups
+    "R"          'wg-revert-all-workgroups
+    "C-j"        'wg-switch-to-index
+    "0"          'wg-switch-to-index-0
+    "1"          'wg-switch-to-index-1
+    "2"          'wg-switch-to-index-2
+    "3"          'wg-switch-to-index-3
+    "4"          'wg-switch-to-index-4
+    "5"          'wg-switch-to-index-5
+    "6"          'wg-switch-to-index-6
+    "7"          'wg-switch-to-index-7
+    "8"          'wg-switch-to-index-8
+    "9"          'wg-switch-to-index-9
+    "C-p"        'wg-switch-left
+    "p"          'wg-switch-left
+    "C-n"        'wg-switch-right
+    "n"          'wg-switch-right
+    "M-p"        'wg-switch-left-other-frame
+    "M-n"        'wg-switch-right-other-frame
+    "C-a"        'wg-switch-to-previous-workgroup
+    "a"          'wg-switch-to-previous-workgroup
+    "C-x"        'wg-swap-workgroups
+    "C-,"        'wg-offset-left
+    "C-."        'wg-offset-right
+    "A"          'wg-rename-workgroup
+    "!"          'wg-reset
+    "C-s"        'wg-save
+    "C-l"        'wg-load
+    "C-f"        'wg-find-file
+    "S-C-f"      'wg-find-file-read-only
+    "C-b"        'wg-get-by-buffer
+    "b"          'wg-get-by-buffer
+    "d"          'wg-dired
+    "C-i"        'wg-toggle-mode-line
+    "C-w"        'wg-toggle-morph
+    "S-C-e"      'wg-echo-current-workgroup
+    "E"          'wg-echo-current-workgroup
+    "C-e"        'wg-echo-all-workgroups
+    "e"          'wg-echo-all-workgroups
+    "C-t"        'wg-echo-time
+    "t"          'wg-echo-time
+    "V"          'wg-echo-version
+    "C-m"        'wg-echo-last-message
+    "m"          'wg-echo-last-message
+    "?"          'wg-help)
+  "Workgroups' keymap.")
 
 
 ;;; mode definition
