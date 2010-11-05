@@ -36,7 +36,6 @@
 ;;; TODO:
 ;;
 ;; - fix selected-window in morph
-;; - complete documentation
 ;; - update all docstrings
 ;;
 
@@ -50,10 +49,10 @@
 ;;; consts
 
 (defconst wg-version "0.2.0"
-  "Current version number of workgroups.")
+  "Current version of workgroups.")
 
 (defconst wg-persisted-workgroups-tag '-*-workgroups-*-
-  "This should be car of any list of persisted workgroups.")
+  "This should be the car of any list of persisted workgroups.")
 
 
 ;;; customization
@@ -74,12 +73,12 @@
   :group 'workgroups
   :set (lambda (sym val)
          (custom-set-default sym val)
-         (when (fboundp 'wg-set-prefix-key)
+         (when (and (boundp 'workgroups-mode) workgroups-mode)
            (wg-set-prefix-key))
          val))
 
 (defcustom wg-switch-hook nil
-  "Hook run whenever a workgroup is switched to."
+  "Hook run by `wg-switch-to-workgroup'."
   :type 'hook
   :group 'workgroups)
 
@@ -93,7 +92,7 @@ query-for-save behavior.  Use
   :group 'workgroups)
 
 (defcustom wg-mode-line-on t
-  "Toggles workgroups' mode-line display."
+  "Toggles Workgroups' mode-line display."
   :type 'boolean
   :group 'workgroups
   :set (lambda (sym val)
@@ -114,12 +113,12 @@ query-for-save behavior.  Use
 ;; save and load customization
 
 (defcustom wg-switch-on-load t
-  "Non-nil means switch to the first workgroup when a file is loaded."
+  "Non-nil means switch to the first workgroup in a file when it's loaded."
   :type 'boolean
   :group 'workgroups)
 
 (defcustom wg-query-for-save-on-emacs-exit t
-  "Non-nil means query to save unsaved changes before exiting Emacs.
+  "Non-nil means query to save changes before exiting Emacs.
 Exiting workgroups removes its `kill-emacs-query-functions' hook,
 so if you set this to nil, you may want to set
 `wg-query-for-save-on-workgroups-exit' to t."
@@ -127,7 +126,7 @@ so if you set this to nil, you may want to set
   :group 'workgroups)
 
 (defcustom wg-query-for-save-on-workgroups-mode-exit t
-  "Non-nil means query to save unsaved changes before exiting workgroups-mode.
+  "Non-nil means query to save changes before exiting `workgroups-mode'.
 Exiting workgroups removes its `kill-emacs-query-functions' hook,
 which is why this variable exists."
   :type 'boolean
@@ -137,7 +136,8 @@ which is why this variable exists."
 ;; workgroup restoration customization
 
 (defcustom wg-default-buffer "*scratch*"
-  "Buffer used when a workgroup is created, or its buffer can't be found."
+  "Buffer switched to when a blank workgroup is created.
+Also used when a window's buffer can't be restored."
   :type 'string
   :group 'workgroups)
 
@@ -168,8 +168,8 @@ which is why this variable exists."
 
 (defcustom wg-restore-point t
   "Non-nil means restore `point' on workgroup restore.
-This is included only so it can be bound to nil during
-`wg-morph' -- you want this on."
+This is included mainly so point restoration can be suspended
+during `wg-morph' -- you probably want this on."
   :type 'boolean
   :group 'workgroups)
 
@@ -177,9 +177,8 @@ This is included only so it can be bound to nil during
   "Non-nil means put `point' at `point-max', even if `point-max' has increased.
 If `point' is at `point-max' when a wconfig is created, put
 `point' back at `point-max' when the wconfig is restored, even if
-`point-max' has increased in the meantime.  This is useful in,
-for instance, irc buffers where `point-max' is constantly
-increasing."
+`point-max' has increased in the meantime.  This is useful
+in (say) irc buffers where `point-max' is constantly increasing."
   :type 'boolean
   :group 'workgroups)
 
@@ -187,18 +186,18 @@ increasing."
 ;; morph customization
 
 (defcustom wg-morph-on t
-  "Non-nil means `wg-morph' when restoring wconfigs."
+  "Non-nil means use `wg-morph' when restoring wconfigs."
   :type 'boolean
   :group 'workgroups)
 
 (defcustom wg-morph-hsteps 9
-  "Columns/step when enlarging windows during `wg-morph'.
+  "Columns/iteration to step window edges by during `wg-morph'.
 Values lower than 1 are invalid."
   :type 'integer
   :group 'workgroups)
 
 (defcustom wg-morph-vsteps 3
-  "Rows/step when enlarging windows during `wg-morph'.
+  "Rows/iteration to step window edges by during `wg-morph'.
 Values lower than 1 are invalid."
   :type 'integer
   :group 'workgroups)
@@ -216,19 +215,18 @@ If nil, `wg-morph-vsteps' is used."
   :group 'workgroups)
 
 (defcustom wg-morph-sit-for-seconds 0
-  "Seconds to `sit-for' between `wg-morph' animation steps.
-Use zero unless `redisplay' is *really* fast on your machine, and
-`wg-morph-hsteps' and `wg-morph-vsteps' are already
-set as low as possible."
+  "Seconds to `sit-for' between `wg-morph' iterations.
+Should probably be zero unless `redisplay' is *really* fast on
+your machine, and `wg-morph-hsteps' and `wg-morph-vsteps' are
+already set as low as possible."
   :type 'float
   :group 'workgroups)
 
 (defcustom wg-morph-truncate-partial-width-windows t
-  "Non-nil means truncate lines during `wg-morph'.
-Bound to `truncate-partial-width-windows' during `wg-morph'.
-This prevents weird-looking continuation line behavior, and can
-speed up morphing a little.  Lines jump back to their wrapped
-status when `wg-morph' is complete."
+  "Bound to `truncate-partial-width-windows' during `wg-morph'.
+Non-nil, this prevents weird-looking continuation line behavior,
+and can speed up morphing a little.  Lines jump back to their
+wrapped status when `wg-morph' is complete."
   :type 'boolean
   :group 'workgroups)
 
@@ -241,67 +239,62 @@ status when `wg-morph' is complete."
   :group 'workgroups)
 
 (defcustom wg-mode-line-left-brace "("
-  "String on the left of the mode-line display."
+  "String to the left of the mode-line display."
   :type 'string
   :group 'workgroups)
 
 (defcustom wg-mode-line-right-brace ")"
-  "String on the right of the mode-line display."
+  "String to the right of the mode-line display."
   :type 'string
   :group 'workgroups)
 
 (defcustom wg-mode-line-divider ":"
-  "String between workgroups names in the list display."
+  "String between workgroup position and name in the mode-line display."
   :type 'string
   :group 'workgroups)
 
 (defcustom wg-display-left-brace "( "
-  "String on the left of the list display."
+  "String to the left of the list display."
   :type 'string
   :group 'workgroups)
 
 (defcustom wg-display-right-brace " )"
-  "String on the right of the list display."
+  "String to the right of the list display."
   :type 'string
   :group 'workgroups)
 
 (defcustom wg-display-divider " | "
-  "String between workgroups names in the list display."
+  "String between workgroup names in the list display."
   :type 'string
   :group 'workgroups)
 
 (defcustom wg-display-current-workgroup-left-decor "-<{ "
-  "String displayed to the left of the current workgroup in the
-list display."
+  "String to the left of the current workgroup name in the list display."
   :type 'string
   :group 'workgroups)
 
 (defcustom wg-display-current-workgroup-right-decor " }>-"
-  "String displayed to the right of the current workgroup in the
-list display."
+  "String to the right of the current workgroup name in the list display."
   :type 'string
   :group 'workgroups)
 
 (defcustom wg-display-previous-workgroup-left-decor "*"
-  "String displayed to the left of the previous workgroup in the
-list display."
+  "String to the left of the previous workgroup name in the list display."
   :type 'string
   :group 'workgroups)
 
 (defcustom wg-display-previous-workgroup-right-decor "*"
-  "String displayed to the right of the previous workgroup in the
-list display."
+  "String to the right of the previous workgroup name in the list display."
   :type 'string
   :group 'workgroups)
 
 (defcustom wg-time-format "%H:%M:%S %A, %B %d %Y"
-  "Format string for time display.
-Passed to `format-time-string'."
+  "Format string for time display.  Passed to `format-time-string'."
   :type 'string
   :group 'workgroups)
 
 (defcustom wg-display-battery t
-  "Non-nil mean include battery info in the time display."
+  "Non-nil means include `battery', when available, in the time display."
   :type 'boolean
   :group 'workgroups)
 
@@ -315,48 +308,47 @@ Passed to `format-time-string'."
   "List of currently defined workgroups.")
 
 (defvar wg-frame-table (make-hash-table)
-  "Hash table keyed on frame, storing that frame's state.")
+  "Hash table keyed on frame, storing each frame's state.")
 
 (defvar wg-dirty nil
   "Non-nil when there are unsaved changes.")
 
 (defvar wg-kill-ring nil
-  "Kill ring of saved configs.")
+  "Ring of killed or kill-ring-saved wconfigs.")
 
 (defvar wg-window-min-width 2
-  "Bound to `window-min-width' when restoring wconfigs. ")
+  "Bound to `window-min-width' when restoring wtrees. ")
 
 (defvar wg-window-min-height 1
-  "Bound to `window-min-height' when restoring wconfigs.")
+  "Bound to `window-min-height' when restoring wtrees.")
 
-(defvar wg-window-split-pad 2
-  "Added to the window-mins to prevent split size errors.")
+(defvar wg-window-min-pad 2
+  "Added to `wg-window-min-foo' to produce the actual minimum window size.")
 
-(defvar wg-min-hsplit (+ wg-window-min-width wg-window-split-pad)
+(defvar wg-actual-min-width (+ wg-window-min-width wg-window-min-pad)
   "Minimum width when splitting windows horizontally.")
 
-(defvar wg-min-vsplit (+ wg-window-min-height wg-window-split-pad)
+(defvar wg-actual-min-height (+ wg-window-min-height wg-window-min-pad)
   "Minimum height when splitting windows vertically.")
 
-(defvar wg-min-edges `(0 0 ,wg-min-hsplit ,wg-min-vsplit)
-  "Smallest allowable edge list.")
+(defvar wg-min-edges `(0 0 ,wg-actual-min-width ,wg-actual-min-height)
+  "Edge list of the smallest allowable window.")
 
 (defvar wg-null-edges '(0 0 0 0)
   "Null edge list.")
 
 (defvar wg-morph-max-iterations 200
-  "Maximum morph iterations before forcing exit.")
+  "Maximum `wg-morph' iterations before forcing exit.")
 
 (defvar wg-morph-no-error t
   "Non-nil means ignore errors during `wg-morph'.
 The error message is sent to *messages* instead.  This was added
-when `wg-morph' was unstable, so the screen wouldn't be
-left in an inconsistent state.  It's unnecessary now, as
-`wg-morph' is very stable, but is left here for the time
-being.")
+when `wg-morph' was unstable, so that the screen wouldn't be left
+in an inconsistent state.  It's unnecessary now, as `wg-morph' is
+stable, but is left here for the time being.")
 
 (defvar wg-last-message nil
-  "Holds the last message workgroups sent to the echo area.")
+  "Holds the last message Workgroups sent to the echo area.")
 
 (defvar wg-selected-window nil
   "Used during wconfig restoration to hold the selected window.")
@@ -376,22 +368,22 @@ being.")
 
 (wg-defface wg-current-workgroup-face :cur
   '((((class color)) (:foreground "white")))
-  "Face used for the current workgroup in the list display."
+  "Face used for the name of the current workgroup in the list display."
   :group 'workgroups)
 
 (wg-defface wg-previous-workgroup-face :prev
   '((((class color)) (:foreground "light sky blue")))
-  "Face used for the previous workgroup in the list display."
+  "Face used for the name of the previous workgroup in the list display."
   :group 'workgroups)
 
 (wg-defface wg-other-workgroup-face :other
   '((((class color)) (:foreground "light slate grey")))
-  "Face used for other workgroups in the list display."
+  "Face used for the names of other workgroups in the list display."
   :group 'workgroups)
 
 (wg-defface wg-command-face :cmd
   '((((class color)) (:foreground "aquamarine")))
-  "Face used for command/operation names."
+  "Face used for command/operation strings."
   :group 'workgroups)
 
 (wg-defface wg-divider-face :div
@@ -411,12 +403,12 @@ being.")
 
 (wg-defface wg-mode-line-face :mode
   '((((class color)) (:foreground "light sky blue")))
-  "Face used for mode-line display."
+  "Face used for workgroup position and name in the mode-line display."
   :group 'workgroups)
 
 (wg-defface wg-filename-face :file
   '((((class color)) (:foreground "light sky blue")))
-  "Face used for the filenames."
+  "Face used for filenames."
   :group 'workgroups)
 
 (wg-defface wg-frame-face :frame
@@ -666,7 +658,7 @@ FACEKEY must be a key in `wg-face-abbrevs'."
           (string `(progn ,spec))
           (atom `(format "%s" ,spec))))))
 
-(defun wg-check-minibuffer-active ()
+(defun wg-check-if-minibuffer-is-active ()
   "Throw an error when the minibuffer is active."
   (when (active-minibuffer-window)
     (error "Workgroup operations aren't permitted while the \
@@ -765,8 +757,8 @@ W should be a window or a wtree."
          (left (car edges))
          (top (cadr edges)))
     (wg-put-edges win left top
-                  (+ left wg-min-hsplit)
-                  (+ top wg-min-vsplit))))
+                  (+ left wg-actual-min-width)
+                  (+ top  wg-actual-min-height))))
 
 (defun wg-minify-last-win (w)
   "Minify the first actual window in W.
@@ -906,6 +898,7 @@ EWIN should be an Emacs window object."
 (defun wg-ewtree->wtree (&optional ewtree)
   "Return a new workgroups wtree from EWTREE or `window-tree'.
 If specified, EWTREE should be an Emacs `window-tree'."
+  (wg-check-if-minibuffer-is-active)
   (flet ((inner (ewt) (if (windowp ewt) (wg-ewin->window ewt)
                         (wg-dbind (dir edges . wins) ewt
                           (wg-make-wtree
@@ -917,7 +910,6 @@ If specified, EWTREE should be an Emacs `window-tree'."
 
 (defun wg-make-wconfig ()
   "Return a new workgroups window config from `selected-frame'."
-  (wg-check-minibuffer-active)
   (message nil)
   `((type    .   wconfig)
     (left    .  ,(frame-parameter nil 'left))
@@ -940,7 +932,7 @@ The wconfig displays BUFFER or `wg-default-buffer'."
 ;;; wconfig restoring
 
 (defun wg-switch-to-window-buffer (win)
-  "Switchq to WIN's buffer, which is determined from its fname and bname.
+  "Switch to WIN's buffer, which is determined from its fname and bname.
 Return the buffer if it was found, nil otherwise."
   (wg-abind win (fname bname)
     (cond ((and fname (file-exists-p fname))
@@ -951,7 +943,7 @@ Return the buffer if it was found, nil otherwise."
           (t (switch-to-buffer wg-default-buffer) nil))))
 
 (defun wg-restore-window (win)
-  "Restore WIN's state in `selected-window'."
+  "Restore WIN in `selected-window'."
   (wg-abind win (point mark markx wstart hscroll sbars
                        fringes margins selwin mbswin)
     (let ((sw (selected-window)))
@@ -967,12 +959,14 @@ Return the buffer if it was found, nil otherwise."
         (when wg-restore-margins
           (set-window-margins sw (car margins) (cdr margins)))
         (set-window-hscroll sw hscroll)
-        (set-window-start sw wstart t)
-        (goto-char (cond ((not wg-restore-point) wstart)
-                         ((eq point :max) (point-max))
-                         (t point)))
         (set-mark mark)
-        (unless markx (deactivate-mark))))))
+        (unless markx (deactivate-mark))
+        (let ((pm (point-max)))
+          (set-window-start sw wstart t)
+          (goto-char (cond ((not wg-restore-point) wstart)
+                           ((eq point :max) pm)
+                           (t point)))
+          (when (>= wstart pm) (recenter)))))))
 
 (defun wg-restore-wtree (wtree)
   "Restore WTREE in `selected-frame'."
@@ -1000,14 +994,14 @@ Return the buffer if it was found, nil otherwise."
 
 (defun wg-restore-wconfig (wconfig)
   "Restore WCONFIG in `selected-frame'."
-  (wg-check-minibuffer-active)
+  (wg-check-if-minibuffer-is-active)
   (let ((f (selected-frame)) wt)
     (wg-abind wconfig (left top sbars sbwid)
       (setq wt (w-set-frame-size-and-scale-wtree wconfig f))
       (when (and wg-restore-position left top)
         (set-frame-position f left top))
       (when (and wg-morph-on after-init-time)
-        (wg-morph wt))
+        (wg-morph wt wg-morph-no-error))
       (wg-restore-wtree wt)
       (when wg-restore-scroll-bars
         (set-frame-parameter f 'vertical-scroll-bars sbars)
@@ -1109,7 +1103,7 @@ combination of types."
         ((and (wg-wtree-p w1) (wg-window-p w2))
          (wg-morph-wtree->win w1 w2))))
 
-(defun wg-morph (to)
+(defun wg-morph (to &optional noerror)
   "Morph from the current wtree to TO.
 Assumes TO will fit in `selected-frame'.  TO should be a wtree."
   (let ((from (wg-ewtree->wtree))
@@ -1128,11 +1122,10 @@ Assumes TO will fit in `selected-frame'.  TO should be a wtree."
             (error "`wg-morph-max-iterations' exceeded"))
           (setq from (wg-normalize-wtree (wg-morph-dispatch from to)))
           (wg-restore-wtree from)
-          (redisplay t)
+          (redisplay)
           (unless (zerop wg-morph-sit-for-seconds)
             (sit-for wg-morph-sit-for-seconds t)))
-      (error (if wg-morph-no-error (message "%S" err)
-               (error "%S" err))))))
+      (error (if noerror (message "%S" err) (error "%S" err))))))
 
 
 ;;; global error wrappers
@@ -1402,12 +1395,16 @@ Query to overwrite if a workgroup with the same name exists."
 (defun wg-mode-line-string ()
   "Return the string to be displayed in the mode-line."
   (let ((cur (wg-current-workgroup t)))
-    (wg-fontify
-     (:div wg-mode-line-left-brace)
-     (:mode (when cur (position cur (wg-list t))))
-     (:div wg-mode-line-divider)
-     (:mode (when cur (wg-name cur)))
-     (:div wg-mode-line-right-brace))))
+    (cond (cur (wg-fontify
+                (:div wg-mode-line-left-brace)
+                (:mode (position cur (wg-list t)))
+                (:div wg-mode-line-divider)
+                (:mode (wg-name cur))
+                (:div wg-mode-line-right-brace)))
+          (t   (wg-fontify
+                (:div wg-mode-line-left-brace)
+                (:mode "No workgroups")
+                (:div wg-mode-line-right-brace))))))
 
 (defun wg-mode-line-add-display ()
   "Add workgroups' mode-line format to `mode-line-format'."
@@ -2048,8 +2045,7 @@ The string is passed through a format arg to escape %'s."
         (princ (format "%15s  |  %s\n"
                        (substitute-command-keys (car elt))
                        (cadr elt))))
-      (princ hline)
-      (help-print-return-message))))
+      (princ hline))))
 
 
 ;;; mode definition
