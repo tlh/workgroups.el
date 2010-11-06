@@ -312,8 +312,9 @@ To bring up a help buffer listing all the commands and their bindings, hit
 
 **Q:** Why should I use Workgroups instead of Elscreen?
 
-**A:** Workgroups provides persistence, base/working configs, frame-morphing and
-  other chrome, and cleaner code.  And it's maintained.
+**A:** Workgroups provides persistence, base/working configs, morphing,
+  frame-reversing and other chrome, as many workgroups as you want and cleaner
+  code.  And it's maintained.
 
 **Q:** What's the difference between a "window configuration", a "wconfig" and a
   "workgroup"?

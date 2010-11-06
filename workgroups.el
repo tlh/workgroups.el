@@ -355,7 +355,7 @@ wrapped status when `wg-morph' is complete."
 (defvar wg-null-edges '(0 0 0 0)
   "Null edge list.")
 
-(defvar wg-morph-max-iterations 200
+(defvar wg-morph-max-steps 200
   "Maximum `wg-morph' iterations before forcing exit.")
 
 (defvar wg-morph-no-error t
@@ -464,6 +464,13 @@ stable, but is left here for the time being.")
   "do-style wrapper for `mapcar'."
   (declare (indent 1))
   `(mapcar (lambda (,(car spec)) ,@body) ,(cadr spec)))
+
+(defmacro wg-get-some (spec &rest body)
+  "do-style wrapper for `some'.
+Returns the elt itself, rather than the return value of the form."
+  (declare (indent 1))
+  (wg-dbind (sym list) spec
+    `(some (lambda (,sym) (when (progn ,@body) ,sym)) ,list)))
 
 (defmacro wg-when-let (binds &rest body)
   "Like `let*', but only eval BODY when all BINDS are non-nil."
@@ -862,7 +869,7 @@ with `wg-scale-wconfigs-wtree' to fit the frame as it exists."
             (wg-wtree wconfig)
           (wg-scale-wconfigs-wtree wconfig fwidth fheight))))))
 
-(defun wg-reverse-wtree (w &optional dir)
+(defun wg-reverse-wlist (w &optional dir)
   "Reverse W's wlist and those of all its sub-wtrees in direction DIR.
 If DIR is nil, reverse WTREE horizontally.
 If DIR is 'both, reverse WTREE both horizontally and vertically.
@@ -879,9 +886,27 @@ Otherwise, reverse WTREE vertically."
     (wg-normalize-wtree (inner w))))
 
 (defun wg-reverse-wconfig (&optional dir wconfig)
-  "Reverse WCONFIG's wtree in direction DIR.  See `wg-reverse-wtree'."
+  "Reverse WCONFIG's wtree's wlist in direction DIR."
   (let ((wc (or wconfig (wg-make-wconfig))))
-    (wg-aput wc 'wtree (wg-reverse-wtree (wg-aget wc 'wtree) dir))))
+    (wg-aput wc 'wtree (wg-reverse-wlist (wg-aget wc 'wtree) dir))))
+
+(defun wg-wtree-move-window (wtree offset)
+  "Offset `selected-window' OFFSET places in WTREE."
+  (flet ((inner
+          (w)
+          (if (wg-window-p w) w
+            (wg-abind w ((d1 dir) edges wlist)
+              (wg-make-wtree
+               d1 edges
+               (wg-aif (wg-get-some (sw wlist) (wg-aget sw 'selwin))
+                   (wg-cyclic-offset-elt it wlist offset)
+                 (mapcar 'inner wlist)))))))
+    (wg-normalize-wtree (inner wtree))))
+
+(defun wg-wconfig-move-window (offset &optional wconfig)
+  "Offset `selected-window' OFFSET places in WCONFIG."
+  (let ((wc (or wconfig (wg-make-wconfig))))
+    (wg-aput wc 'wtree (wg-wtree-move-window (wg-aget wc 'wtree) offset))))
 
 
 ;;; wconfig making
@@ -1136,8 +1161,8 @@ Assumes TO will fit in `selected-frame'.  TO should be a wtree."
         (watchdog 0))
     (condition-case err
         (wg-until (wg-equal-wtrees from to)
-          (when (> (incf watchdog) wg-morph-max-iterations)
-            (error "`wg-morph-max-iterations' exceeded"))
+          (when (> (incf watchdog) wg-morph-max-steps)
+            (error "`wg-morph-max-steps' exceeded"))
           (setq from (wg-normalize-wtree (wg-morph-dispatch from to)))
           (wg-restore-wtree from)
           (redisplay)
@@ -1387,8 +1412,8 @@ Query to overwrite if a workgroup with the same name exists."
 
 (defun wg-find-buffer (bname)
   "Return the first workgroup in which a buffer named BNAME is visible."
-  (some (lambda (wg) (and (member bname (wg-workgroup-buffer-list wg)) wg))
-        (wg-list)))
+  (wg-get-some (wg (wg-list))
+    (member bname (wg-workgroup-buffer-list wg))))
 
 
 ;;; mode-line
@@ -1831,6 +1856,16 @@ is non-nil, use `wg-file'. Otherwise read a filename."
 
 ;;; Window movement commands
 
+(defun wg-move-window-backward (offset)
+  "Move `selected-window' backward by OFFSET in its wlist."
+  (interactive (list (or current-prefix-arg -1)))
+  (wg-restore-wconfig (wg-wconfig-move-window offset)))
+
+(defun wg-move-window-forward (offset)
+  "Move `selected-window' forward by OFFSET in its wlist."
+  (interactive (list (or current-prefix-arg 1)))
+  (wg-restore-wconfig (wg-wconfig-move-window offset)))
+
 (defun wg-reverse-frame-horizontally ()
   "Reverse the order of all horizontally split wtrees."
   (interactive)
@@ -1966,6 +2001,10 @@ The string is passed through a format arg to escape %'s."
     "Switch to the workgroup and config in which the specified buffer is visible"
     "\\[wg-dired]"
     "Create a new blank workgroup and open a dired buffer in it"
+    "\\[wg-move-window-backward]"
+    "Move `selected-window' backward in its wlist"
+    "\\[wg-move-window-forward]"
+    "Move `selected-window' forward in its wlist"
     "\\[wg-reverse-frame-horizontally]"
     "Reverse the order of all horizontall window lists."
     "\\[wg-reverse-frame-vertically]"
@@ -2067,6 +2106,8 @@ The string is passed through a format arg to escape %'s."
 
     ;; workgroup movement
 
+    "<"          'wg-move-window-backward
+    ">"          'wg-move-window-forward
     "C-x"        'wg-swap-workgroups
     "C-,"        'wg-offset-left
     "C-."        'wg-offset-right
