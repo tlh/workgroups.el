@@ -52,8 +52,9 @@
 
 ;;; TODO:
 ;;
+;; - add invert-wtree
+;; - add move window
 ;; - fix selected-window in morph
-;; - update all docstrings
 ;;
 
 
@@ -344,13 +345,13 @@ wrapped status when `wg-morph' is complete."
   "Added to `wg-window-min-foo' to produce the actual minimum window size.")
 
 (defvar wg-actual-min-width (+ wg-window-min-width wg-window-min-pad)
-  "Minimum width when splitting windows horizontally.")
+  "Actual minimum window width when creating windows.")
 
 (defvar wg-actual-min-height (+ wg-window-min-height wg-window-min-pad)
-  "Minimum height when splitting windows vertically.")
+  "Actual minimum window height when creating windows.")
 
 (defvar wg-min-edges `(0 0 ,wg-actual-min-width ,wg-actual-min-height)
-  "Edge list of the smallest allowable window.")
+  "Smallest allowable edge list of windows created by Workgroups.")
 
 (defvar wg-null-edges '(0 0 0 0)
   "Null edge list.")
@@ -863,6 +864,27 @@ with `wg-scale-wconfigs-wtree' to fit the frame as it exists."
             (wg-wtree wconfig)
           (wg-scale-wconfigs-wtree wconfig fwidth fheight))))))
 
+(defun wg-reverse-wtree (w &optional dir)
+  "Reverse W's wlist and those of all its sub-wtrees in direction DIR.
+If DIR is nil, reverse WTREE horizontally.
+If DIR is 'both, reverse WTREE both horizontally and vertically.
+Otherwise, reverse WTREE vertically."
+  (flet ((inner (w) (if (wg-window-p w) w
+                      (wg-abind w ((d1 dir) edges wlist)
+                        (wg-make-wtree
+                         d1 edges
+                         (let ((wl2 (mapcar 'inner wlist)))
+                           (if (or (eq dir 'both)
+                                   (and (not dir) (not d1))
+                                   (and dir d1))
+                               (nreverse wl2) wl2)))))))
+    (wg-normalize-wtree (inner w))))
+
+(defun wg-reverse-wconfig (&optional dir wconfig)
+  "Reverse WCONFIG's wtree in direction DIR.  See `wg-reverse-wtree'."
+  (let ((wc (or wconfig (wg-make-wconfig))))
+    (wg-aput wc 'wtree (wg-reverse-wtree (wg-aget wc 'wtree) dir))))
+
 
 ;;; wconfig making
 
@@ -1031,7 +1053,11 @@ Return the buffer if it was found, nil otherwise."
            wg-morph-vsteps)))
 
 (defun wg-morph-match-wlist (wt1 wt2)
-  "This is tricky.  **WRITEME**"
+  "Return a wlist by matching WT1's wlist to WT2's.
+When their lengths are =, return WT1's wlist.
+When WT1's is shorter than WT2's, add a minified window at the front of WT1's.
+When WT1's is longer than WT2's, package up WT1's excess into a wtree, so it's
+the same length as WT2's."
   (let* ((d1 (wg-dir wt1)) (wl1 (wg-wlist wt1)) (l1 (length wl1))
          (d2 (wg-dir wt2)) (wl2 (wg-wlist wt2)) (l2 (length wl2)))
     (cond ((= l1 l2) wl1)
@@ -1345,43 +1371,26 @@ Query to overwrite if a workgroup with the same name exists."
 
 ;;; buffer list ops
 
-(defun wg-wconfig-buffer-list (wconfig)
-  "Return the names of all unique buffers in WCONFIG."
-  (let (bufs)
-    (flet ((inner
-            (win)
-            (cond ((wg-window-p win)
-                   (pushnew (wg-aget win 'bname) bufs :test 'equal))
-                  ((wg-wtree-p win)
-                   (mapc 'inner (wg-wlist win))))))
-      (inner (wg-wtree wconfig))
-      bufs)))
+(defun wg-wtree-buffer-list (wtree)
+  "Return a list of unique buffer names visible in WTREE."
+  (flet ((rec (w) (if (wg-window-p w) (list (wg-aget w 'bname))
+                    (mapcan 'rec (wg-wlist w)))))
+    (remove-duplicates (rec wtree) :test 'equal)))
 
 (defun wg-workgroup-buffer-list (workgroup)
-  "Return the names of all unique buffers in WORKGROUP."
-  (let ((bufs (wg-wconfig-buffer-list
-               (wg-working-config workgroup))))
-    (dolist (buf (wg-wconfig-buffer-list
-                  (wg-base-config workgroup)) bufs)
-      (unless (member buf bufs) (push buf bufs)))))
+  "Call `wg-wconfig-buffer-list' on WORKGROUP's working config."
+  (wg-wtree-buffer-list (wg-wtree (wg-working-config workgroup))))
 
 (defun wg-buffer-list ()
-  "Return the names of all unique buffers in `wg-list'."
-  (let (bufs)
-    (dolist (w (wg-list) (nreverse bufs))
-      (dolist (buf (wg-workgroup-buffer-list w))
-        (unless (member buf bufs) (push buf bufs))))))
+  "Call `wg-workgroup-buffer-list' on all workgroups in `wg-list'."
+  (remove-duplicates
+   (mapcan 'wg-workgroup-buffer-list (wg-list t))
+   :test 'equal))
 
-(defun wg-find-buffer (buf)
-  "Return the workgroup and config flag that contains BUF."
-  (catch 'result
-    (dolist (w (wg-list))
-      (cond ((member buf (wg-wconfig-buffer-list
-                          (wg-working-config w)))
-             (throw 'result (list w nil)))
-            ((member buf (wg-wconfig-buffer-list
-                          (wg-base-config w)))
-             (throw 'result (list w t)))))))
+(defun wg-find-buffer (bname)
+  "Return the first workgroup in which a buffer named BNAME is visible."
+  (some (lambda (wg) (and (member bname (wg-workgroup-buffer-list wg)) wg))
+        (wg-list)))
 
 
 ;;; mode-line
@@ -1646,8 +1655,7 @@ Worgroups are updated with their working configs in the
    workgroup (wg-base-config workgroup))
   (when (eq workgroup (wg-current-workgroup))
     (wg-restore-workgroup workgroup t))
-  (wg-fontified-msg
-    (:cmd "Reverted: ") (:cur (wg-name workgroup))))
+  (wg-fontified-msg (:cmd "Reverted: ") (:cur (wg-name workgroup))))
 
 (defun wg-revert-all-workgroups ()
   "Revert all workgroups to their base configs."
@@ -1795,8 +1803,7 @@ is non-nil, use `wg-file'. Otherwise read a filename."
 (defun wg-get-by-buffer (buf)
   "Switch to the first workgroup in which BUF is visible."
   (interactive (list (wg-read-buffer)))
-  (wg-aif (wg-find-buffer buf)
-      (apply 'wg-switch-to-workgroup it)
+  (wg-aif (wg-find-buffer buf) (wg-switch-to-workgroup it)
     (error "No workgroup contains %S" buf)))
 
 (defun wg-dired (dir &optional switches)
@@ -1825,6 +1832,24 @@ is non-nil, use `wg-file'. Otherwise read a filename."
   (setq wg-morph-on (not wg-morph-on))
   (wg-fontified-msg
     (:cmd "Morph: ") (:msg (if wg-morph-on "on" "off"))))
+
+
+;;; Window movement commands
+
+(defun wg-reverse-frame-horizontally ()
+  "Reverse the order of all horizontally split wtrees."
+  (interactive)
+  (wg-restore-wconfig (wg-reverse-wconfig)))
+
+(defun wg-reverse-frame-vertically ()
+  "Reverse the order of all vertically split wtrees."
+  (interactive)
+  (wg-restore-wconfig (wg-reverse-wconfig t)))
+
+(defun wg-reverse-frame-horizontally-and-vertically ()
+  "Reverse the order of all wtrees."
+  (interactive)
+  (wg-restore-wconfig (wg-reverse-wconfig 'both)))
 
 
 ;;; echo commands
@@ -1966,16 +1991,15 @@ The string is passed through a format arg to escape %'s."
   "List of commands and their help messages. Used by `wg-help'.")
 
 (defun wg-help ()
-  "Show Workgroups' command help buffer."
+  "Display Workgroups' help buffer."
   (interactive)
-  (let ((hline (concat (make-string 80 ?-) "\n")))
-    (with-output-to-temp-buffer "*workroups help*"
-      (princ  "Workgroups' keybindings:\n\n")
-      (dolist (elt (wg-partition wg-help 2))
-        (wg-dbind (cmd help-string) elt
-          (princ (format "%15s   %s\n"
-                         (substitute-command-keys cmd)
-                         help-string)))))))
+  (with-output-to-temp-buffer "*workroups help*"
+    (princ  "Workgroups' keybindings:\n\n")
+    (dolist (elt (wg-partition wg-help 2))
+      (wg-dbind (cmd help-string) elt
+        (princ (format "%15s   %s\n"
+                       (substitute-command-keys cmd)
+                       help-string))))))
 
 
 ;;; keymap
@@ -2036,6 +2060,13 @@ The string is passed through a format arg to escape %'s."
     "C-b"        'wg-get-by-buffer
     "b"          'wg-get-by-buffer
     "d"          'wg-dired
+
+    ;; These bindings are mnemonics for the axes
+    ;; about which frame is reversed:
+    "|"          'wg-reverse-frame-horizontally
+    "-"          'wg-reverse-frame-vertically
+    "+"          'wg-reverse-frame-horizontally-and-vertically
+
     "C-i"        'wg-toggle-mode-line
     "C-w"        'wg-toggle-morph
     "S-C-e"      'wg-echo-current-workgroup
