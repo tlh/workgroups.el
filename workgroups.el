@@ -35,24 +35,23 @@
 
 ;;; Symbol naming conventions:
 ;;
-;; The symbol W always refers to a Workgroups window or wtree.
+;; W always refers to a Workgroups window or wtree.
 ;;
-;; The symbol WT always refers to a Workgroups wtree.
+;; WT always refers to a Workgroups wtree.
 ;;
-;; The symbol SW always refers to a sub-window or sub-wtree of a wtree.
+;; SW always refers to a sub-window or sub-wtree of a wtree.
 ;;
-;; The symbol WL always refers to the window list of a wtree.
+;; WL always refers to the window list of a wtree.
 ;;
 ;; LN, TN, RN and BN always refer to the LEFT, TOP, RIGHT and BOTTOM edges of an
 ;; edge list, where N is a differentiating integer.
 ;;
 ;; LS, HS, LB and HB always refer to the LOW-SIDE, HIGH-SIDE, LOW-BOUND and
-;; HIGH-BOUND of a bounds list.  See `wg-bounds'.
+;; HIGH-BOUND of a bounds list.  See `wg-with-bounds'.
 ;;
 
 ;;; TODO:
 ;;
-;; - add invert-wtree
 ;; - add move window
 ;; - fix selected-window in morph
 ;;
@@ -438,6 +437,11 @@ stable, but is left here for the time being.")
 
 ;;; utils
 
+(defmacro wg-with-gensyms (syms &rest body)
+  "Bind all symbols in SYMS to `gensym's, and eval BODY."
+  (declare (indent 1))
+  `(let (,@(mapcar (lambda (sym) `(,sym (gensym))) syms)) ,@body))
+
 (defmacro wg-dbind (args expr &rest body)
   "Wrapper to shorten `destructuring-bind'."
   (declare (indent 2))
@@ -594,7 +598,7 @@ If an elt of BINDS is a symbol, use it as both the bound variable
 and the key in ALIST.  If it is a cons, use the car as the bound
 variable, and the cadr as the key."
   (declare (indent 2))
-  (let ((asym (gensym)))
+  (wg-with-gensyms (asym)
     `(let* ((,asym ,alist)
             ,@(wg-docar (bind binds)
                 (let ((c (consp bind)))
@@ -605,7 +609,7 @@ variable, and the cadr as the key."
 (defmacro wg-fill-keymap (keymap &rest binds)
   "Return KEYMAP after defining in it all keybindings in BINDS."
   (declare (indent 1))
-  (let ((km (gensym)))
+  (wg-with-gensyms (km)
     `(let ((,km ,keymap))
        ,@(wg-docar (b (wg-partition binds 2))
            `(define-key ,km (kbd ,(car b)) ,(cadr b)))
@@ -719,25 +723,19 @@ minibuffer is active.")))
   "Return a copy of W with an edge list of LEFT TOP RIGHT and BOTTOM."
   (wg-aput w 'edges (list left top right bottom)))
 
-(defun wg-bounds (w dir)
-  "Return the edges of W in bounds-form from direction DIR.
-
-\"Bounds\" are a generic way to handle edge-lists.  A bounds-list
-consists of a low-side, a high-side, a low-bound and a
-high-bound.  Given a split direction DIR, the \"sides\" are in
-the direction perpendicular to DIR, and the \"bounds\" are in the
-direction of DIR.  So if DIR is t -- a vertical split -- the left
-and right edge are the low and high side, respectively, and the
-top and bottom edge are the low and high bounds.  Vice-versa for
-a horizontal split.  Bounds avoid a lot of code conditional on
-DIR."
-  (wg-with-edges w (l1 t1 r1 b1)
-    (if dir (list l1 r1 t1 b1) (list t1 b1 l1 r1))))
-
 (defmacro wg-with-bounds (w dir spec &rest body)
-  "Bind SPEC to W's bounds in DIR, and eval BODY. See `wg-bounds'."
+  "Bind SPEC to W's bounds in DIR, and eval BODY.
+\"bounds\" are a direction-independent way of dealing with edge lists."
   (declare (indent 3))
-  `(wg-dbind ,spec (wg-bounds ,w ,dir) ,@body))
+  (wg-with-gensyms (dir-sym l1 t1 r1 b1)
+    (wg-dbind (ls1 hs1 lb1 hb1) spec
+      `(wg-with-edges ,w (,l1 ,t1 ,r1 ,b1)
+         (let* ((,dir-sym ,dir)
+                (,ls1 (if ,dir ,l1 ,t1))
+                (,hs1 (if ,dir ,r1 ,b1))
+                (,lb1 (if ,dir ,t1 ,l1))
+                (,hb1 (if ,dir ,b1 ,r1)))
+           ,@body)))))
 
 (defun wg-put-bounds (w dir ls hs lb hb)
   "Set W's edges in DIR with bounds LS HS LB and HB."
@@ -752,6 +750,10 @@ DIR."
         (list left top
               (+ left (wg-step-to (- r1 l1) (- r2 l2) hstep))
               (+ top  (wg-step-to (- b1 t1) (- b2 t2) vstep)))))))
+
+(defun wg-w-edge-operation (w edges op)
+  "Return a copy of W with its edges mapped through OP with EDGES."
+  (wg-aput w 'edges (mapcar* op (wg-aget w 'edges) edges)))
 
 (defun wg-first-win (w)
   "Return the first actual window in W."
@@ -779,17 +781,13 @@ DIR."
   (wg-with-edges w (l1 t1 r1 b1)
     (if height (- b1 t1) (- r1 l1))))
 
-(defun wg-w-edges-op (w edges op)
-  "Return a copy of W with EDGES subtracted from W's edges."
-  (wg-aput w 'edges (mapcar* op (wg-aget w 'edges) edges)))
-
 (defun wg-adjust-wsize (w width-fn height-fn &optional new-left new-top)
   "Adjust W's width and height with WIDTH-FN and HEIGHT-FN."
   (wg-with-edges w (left top right bottom)
     (let ((left (or new-left left)) (top (or new-top top)))
       (wg-put-edges w left top
-                    (+ left (funcall width-fn (- right left)))
-                    (+ top (funcall height-fn (- bottom top)))))))
+                    (+ left (funcall width-fn  (- right  left)))
+                    (+ top  (funcall height-fn (- bottom top)))))))
 
 (defun wg-scale-wsize (w width-scale height-scale)
   "Scale W's size by WIDTH-SCALE and HEIGHT-SCALE."
@@ -1054,16 +1052,16 @@ Return the buffer if it was found, nil otherwise."
 
 (defun wg-morph-match-wlist (wt1 wt2)
   "Return a wlist by matching WT1's wlist to WT2's.
-When their lengths are =, return WT1's wlist.
-When WT1's is shorter than WT2's, add a minified window at the front of WT1's.
-When WT1's is longer than WT2's, package up WT1's excess into a wtree, so it's
-the same length as WT2's."
+When wlist1's and wlist2's lengths are equal, return wlist1.
+When wlist1 is shorter than wlist2, add a window at the front of wlist1.
+When wlist1 is longer than wlist2, package up wlist1's excess windows
+into a wtree, so it's the same length as wlist2."
   (let* ((d1 (wg-dir wt1)) (wl1 (wg-wlist wt1)) (l1 (length wl1))
          (d2 (wg-dir wt2)) (wl2 (wg-wlist wt2)) (l2 (length wl2)))
     (cond ((= l1 l2) wl1)
           ((< l1 l2)
            (cons (wg-minify-last-win (wg-rnth (1+ l1) wl2))
-                 (cons (wg-w-edges-op (car wl1) wg-min-edges '-)
+                 (cons (wg-w-edge-operation (car wl1) wg-min-edges '-)
                        (cdr wl1))))
           ((> l1 l2)
            (append (wg-take wl1 (1- l2))
@@ -1623,8 +1621,7 @@ ring, starting at the front."
 (defun wg-delete-other-workgroups (workgroup)
   "Delete all workgroups but WORKGROUP."
   (interactive (list (wg-arg)))
-  (unless (or wg-no-confirm
-              (y-or-n-p "Really delete all other workgroups? "))
+  (unless (or wg-no-confirm (y-or-n-p "Really delete all other workgroups? "))
     (error "Cancelled"))
   (let ((cur (wg-current-workgroup)))
     (mapc 'wg-delete (remove workgroup (wg-list)))
@@ -1751,9 +1748,7 @@ Deletes saved state in `wg-frame-table' and nulls out `wg-list',
   (unless (or force wg-no-confirm (y-or-n-p "Are you sure? "))
     (error "Canceled"))
   (clrhash wg-frame-table)
-  (setq wg-list nil
-        wg-file nil
-        wg-dirty nil)
+  (setq wg-list nil wg-file nil wg-dirty nil)
   (wg-fontified-msg (:cmd "Reset: ") (:msg "Workgroups")))
 
 
@@ -1853,7 +1848,6 @@ is non-nil, use `wg-file'. Otherwise read a filename."
 
 
 ;;; echo commands
-
 
 (defun wg-echo-current-workgroup ()
   "Display the name of the current workgroup in the echo area."
@@ -1972,6 +1966,12 @@ The string is passed through a format arg to escape %'s."
     "Switch to the workgroup and config in which the specified buffer is visible"
     "\\[wg-dired]"
     "Create a new blank workgroup and open a dired buffer in it"
+    "\\[wg-reverse-frame-horizontally]"
+    "Reverse the order of all horizontall window lists."
+    "\\[wg-reverse-frame-vertically]"
+    "Reverse the order of all vertical window lists."
+    "\\[wg-reverse-frame-horizontally-and-vertically]"
+    "Reverse the order of all window lists."
     "\\[wg-toggle-mode-line]"
     "Toggle Workgroups' mode-line display"
     "\\[wg-toggle-morph]"
@@ -2006,13 +2006,16 @@ The string is passed through a format arg to escape %'s."
 
 (defvar wg-map
   (wg-fill-keymap (make-sparse-keymap)
-    "C-'"        'wg-switch-to-workgroup
-    "'"          'wg-switch-to-workgroup
-    "C-v"        'wg-switch-to-workgroup
-    "v"          'wg-switch-to-workgroup
+
+    ;; workgroup creation
+
     "C-c"        'wg-create-workgroup
     "c"          'wg-create-workgroup
     "C"          'wg-clone-workgroup
+
+
+    ;; killing and yanking
+
     "C-k"        'wg-kill-workgroup
     "k"          'wg-kill-workgroup
     "M-W"        'wg-kill-ring-save-base-config
@@ -2021,6 +2024,10 @@ The string is passed through a format arg to escape %'s."
     "y"          'wg-yank-config
     "M-k"        'wg-kill-workgroup-and-buffers
     "K"          'wg-delete-other-workgroups
+
+
+    ;; updating and reverting
+
     "C-u"        'wg-update-workgroup
     "u"          'wg-update-workgroup
     "C-S-u"      'wg-update-all-workgroups
@@ -2029,6 +2036,14 @@ The string is passed through a format arg to escape %'s."
     "r"          'wg-revert-workgroup
     "C-S-r"      'wg-revert-all-workgroups
     "R"          'wg-revert-all-workgroups
+
+
+    ;; workgroup switching
+
+    "C-'"        'wg-switch-to-workgroup
+    "'"          'wg-switch-to-workgroup
+    "C-v"        'wg-switch-to-workgroup
+    "v"          'wg-switch-to-workgroup
     "C-j"        'wg-switch-to-index
     "0"          'wg-switch-to-index-0
     "1"          'wg-switch-to-index-1
@@ -2048,11 +2063,17 @@ The string is passed through a format arg to escape %'s."
     "M-n"        'wg-switch-right-other-frame
     "C-a"        'wg-switch-to-previous-workgroup
     "a"          'wg-switch-to-previous-workgroup
+
+
+    ;; workgroup movement
+
     "C-x"        'wg-swap-workgroups
     "C-,"        'wg-offset-left
     "C-."        'wg-offset-right
-    "A"          'wg-rename-workgroup
-    "!"          'wg-reset
+
+
+    ;; file and buffer
+
     "C-s"        'wg-save
     "C-l"        'wg-load
     "C-f"        'wg-find-file
@@ -2061,14 +2082,22 @@ The string is passed through a format arg to escape %'s."
     "b"          'wg-get-by-buffer
     "d"          'wg-dired
 
-    ;; These bindings are mnemonics for the axes
-    ;; about which frame is reversed:
+
+    ;; frame reversal - keys are mnemonics for the axis of reversal
+
     "|"          'wg-reverse-frame-horizontally
     "-"          'wg-reverse-frame-vertically
     "+"          'wg-reverse-frame-horizontally-and-vertically
 
+
+    ;; toggling
+
     "C-i"        'wg-toggle-mode-line
     "C-w"        'wg-toggle-morph
+
+
+    ;; echoing
+
     "S-C-e"      'wg-echo-current-workgroup
     "E"          'wg-echo-current-workgroup
     "C-e"        'wg-echo-all-workgroups
@@ -2078,7 +2107,15 @@ The string is passed through a format arg to escape %'s."
     "V"          'wg-echo-version
     "C-m"        'wg-echo-last-message
     "m"          'wg-echo-last-message
-    "?"          'wg-help)
+
+
+    ;; misc
+
+    "A"          'wg-rename-workgroup
+    "!"          'wg-reset
+    "?"          'wg-help
+
+    )
   "Workgroups' keymap.")
 
 
