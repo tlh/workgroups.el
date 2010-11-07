@@ -301,7 +301,7 @@ To bring up a help buffer listing all the commands and their bindings, hit
 
 ## FAQ
 
-**Q:** Why is it called "Workgroups"?
+**Q:** Why is it called "Workgroups"?  
 **A:** Mostly because it's funny, but it also makes sense.  I needed a name that
   would also work for the collections of wconfigs being manipulated.  Elscreen
   has "screens", which works well.  I couldn't call them "window configurations"
@@ -313,13 +313,13 @@ To bring up a help buffer listing all the commands and their bindings, hit
   associated with the word "windows".  So "Workgroups" it is.  I'll have to do
   something special for the 0.3.11 release.
 
-**Q:** Why should I use Workgroups instead of Elscreen?
+**Q:** Why should I use Workgroups instead of Elscreen?  
 **A:** Workgroups provides persistence, base and working configs, morphing,
   frame-reversing and other chrome, unlimited workgroups per frame and cleaner
   code.  And it's maintained.
 
 **Q:** What's the difference between a "window configuration", a "wconfig" and a
-  "workgroup"?
+  "workgroup"?  
 **A:** A "window configuration" is Emacs' opaque internal representation of most
   of the state of one frame.  A "wconfig" is Workgroups' independent,
   translucent window configuration object.  And a "workgroup" is a named set of
