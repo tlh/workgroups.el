@@ -35,11 +35,11 @@
 
 ;;; Symbol naming conventions:
 ;;
-;; W always refers to a Workgroups window or wtree.
+;; W always refers to a Workgroups window or window tree.
 ;;
-;; WT always refers to a Workgroups wtree.
+;; WT always refers to a Workgroups window tree.
 ;;
-;; SW always refers to a sub-window or sub-wtree of a wtree.
+;; SW always refers to a sub-window or sub-window-tree of a wtree.
 ;;
 ;; WL always refers to the window list of a wtree.
 ;;
@@ -52,7 +52,6 @@
 
 ;;; TODO:
 ;;
-;; - add move window
 ;; - fix selected-window in morph
 ;;
 
@@ -634,6 +633,16 @@ variable, and the cadr as the key."
     (insert-file-contents file)
     (goto-char (point-min))
     (read (current-buffer))))
+
+(defun wg-read-object (prompt test warning &rest args)
+  "PROMPT for an object that satisfies TEST, WARNING if necessary.
+ARGS are `read-from-minibuffer's args, after PROMPT."
+  (let ((obj (apply 'read-from-minibuffer prompt args)))
+    (wg-until (funcall test obj)
+      (message warning)
+      (sit-for wg-warning-timeout)
+      (setq obj (apply 'read-from-minibuffer prompt args)))
+    obj))
 
 
 ;;; workgroups utils
@@ -1336,13 +1345,12 @@ If WORKGROUP is the current workgroup, update it first."
 
 (defun wg-make-blank-workgroup (name &optional buffer)
   "Return a new blank workgroup named NAME, optionally viewing BUFFER."
-  (wg-make-workgroup
-   nil name (wg-make-blank-wconfig buffer)))
+  (wg-make-workgroup nil name (wg-make-blank-wconfig buffer)))
 
 (defun wg-restore-workgroup (workgroup &optional base)
   "Restore WORKGROUP's working config, or base config is BASE is non-nil."
-  (wg-restore-wconfig
-   (if base (wg-base-config workgroup) (wg-working-config workgroup))))
+  (wg-restore-wconfig (if base (wg-base-config workgroup)
+                        (wg-working-config workgroup))))
 
 
 ;;; workgroups list ops
@@ -1455,37 +1463,31 @@ Query to overwrite if a workgroup with the same name exists."
              'ido-completing-read
            'completing-read) prompt choices args))
 
-(defun wg-read-workgroup (&optional noerror)
+(defun wg-read-workgroup-name (&optional noerror)
   "Read a workgroup with `wg-completing-read'."
   (wg-get-workgroup
    'name (wg-completing-read "Workgroup: " (wg-names))
    noerror))
 
-(defun wg-read-name (&optional prompt)
-  "Read a non-empty name string from the minibuffer."
-  (let ((prompt (or prompt "Name: ")) (name nil)
-        (warning (wg-fontify :msg "Name must be non-empty")))
-    (while (and (setq name (read-from-minibuffer prompt))
-                (equal name ""))
-      (message warning)
-      (sit-for wg-warning-timeout))
-    name))
-
-(defun wg-read-idx (lo hi &optional prompt)
-  "Read and return an integer within LO and HI."
-  (let ((prompt (or prompt (format "[%d-%d]: " lo hi))) i
-        (warning (wg-fontify
-                  (:msg (format "Enter an integer [%d-%d]" lo hi)))))
-    (wg-until (and (setq i (read-number prompt))
-                   (integerp i)
-                   (wg-within i lo hi t))
-      (message warning)
-      (sit-for wg-warning-timeout))
-    i))
-
 (defun wg-read-buffer ()
   "Read and return a buffer-name from `wg-buffer-list'."
   (wg-completing-read "Workgroup buffers: " (wg-buffer-list)))
+
+(defun wg-read-new-workgroup-name (&optional prompt)
+  "Read a non-empty name string from the minibuffer."
+  (wg-read-object
+   (or prompt "Name: ")
+   (lambda (obj) (and (stringp obj) (not (equal obj ""))))
+   "Please enter a unique, non-empty name"))
+
+(defun wg-read-workgroup-index ()
+  "Prompt for the index of a workgroup."
+  (let ((max (1- (length (wg-list)))))
+    (wg-read-object
+     (format "%s\n\nEnter [0-%d]: " (wg-disp) max)
+     (lambda (obj) (and (integerp obj) (wg-within obj 0 max t)))
+     (format "Please enter an integer [%d-%d]" 0 max)
+     nil nil t)))
 
 
 ;;; messaging
@@ -1511,7 +1513,7 @@ the minibuffer.  If REVERSE is non-nil, `current-prefix-arg's
 begavior is reversed."
   (wg-list noerror)
   (if (if reverse (not current-prefix-arg) current-prefix-arg)
-      (wg-read-workgroup noerror)
+      (wg-read-workgroup-name noerror)
     (wg-current-workgroup noerror)))
 
 (defun wg-add-to-kill-ring (config)
@@ -1557,7 +1559,7 @@ current and previous workgroups."
   "Switch to WORKGROUP.
 BASE nil means restore WORKGROUP's working config.
 BASE non-nil means restore WORKGROUP's base config."
-  (interactive (list (wg-read-workgroup) current-prefix-arg))
+  (interactive (list (wg-read-workgroup-name) current-prefix-arg))
   (wg-awhen (wg-current-workgroup t)
     (when (eq it workgroup) (error "Already on: %s" (wg-name it)))
     (wg-update-working-config it))
@@ -1572,7 +1574,7 @@ BASE non-nil means restore WORKGROUP's base config."
 If workgroups already exist, create a blank workgroup.  If no
 workgroups exist yet, create a workgroup from the current window
 configuration."
-  (interactive (list (wg-read-name)))
+  (interactive (list (wg-read-new-workgroup-name)))
   (let ((w (if (wg-current-workgroup t) (wg-make-blank-workgroup name)
              (wg-make-default-workgroup name))))
     (wg-check-and-add w)
@@ -1581,7 +1583,7 @@ configuration."
 
 (defun wg-clone-workgroup (workgroup name)
   "Create and add a clone of WORKGROUP named NAME."
-  (interactive (list (wg-arg) (wg-read-name)))
+  (interactive (list (wg-arg) (wg-read-new-workgroup-name)))
   (let ((new (wg-make-workgroup nil name (wg-base-config workgroup))))
     (wg-check-and-add new)
     (wg-set-working-config new (wg-working-config workgroup))
@@ -1685,15 +1687,9 @@ Worgroups are updated with their working configs in the
   (mapc 'wg-revert-workgroup (wg-list))
   (wg-fontified-msg (:cmd "Reverted: ") (:msg "All")))
 
-(defun wg-index-prompt ()
-  "Prompt for a workgroup index with `wg-read-idx'."
-  (let* ((max (1- (length (wg-list))))
-         (pr (format "%s\n\nEnter [0-%d]: " (wg-disp) max)))
-    (wg-read-idx 0 max pr)))
-
 (defun wg-switch-to-index (n)
   "Switch to Nth workgroup in `wg-list'."
-  (interactive (list (or current-prefix-arg (wg-index-prompt))))
+  (interactive (list (or current-prefix-arg (wg-read-workgroup-index))))
   (let ((wl (wg-list)))
     (wg-switch-to-workgroup
      (or (nth n wl) (error "There are only %d workgroups" (length wl))))))
@@ -1758,7 +1754,7 @@ Worgroups are updated with their working configs in the
 
 (defun wg-rename-workgroup (workgroup newname)
   "Rename WORKGROUP to NEWNAME."
-  (interactive (list (wg-arg) (wg-read-name "New name: ")))
+  (interactive (list (wg-arg) (wg-read-new-workgroup-name "New name: ")))
   (let ((oldname (wg-name workgroup)))
     (wg-set-name workgroup newname)
     (wg-fontified-msg

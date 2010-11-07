@@ -1,10 +1,11 @@
 # Workgroups for Windows (for Emacs)
 
-Workgroups is a session management package for GNU Emacs (it has nothing to do
-with Microsoft Windows).  It allows you to store and restore window
-configurations (called "workgroups" because it's shorter and funnier), save them
-to and load them from disk, morph between them and perform various other
-operations on them.
+Workgroups is a window configuration management package for GNU Emacs.  It
+provides a suite of operations on window configurations (called "workgroups"
+because it's shorter and funnier), including storage and restoration, saving to
+and loading from disk, "base" and "working" configs, killing and yanking,
+animated window config morphing, and other stuff.  It's similar to elscreen in
+some ways, but very different in others.
 
 Here's what the Elisp info docs have to say about window configurations `(info
 "(Elisp)Window Configurations")`:
@@ -35,8 +36,8 @@ listed above, and more.  For instance, if a region is highlighted in
 `transient-mark-mode`, that region will still be highlighted after restarting
 Emacs and restoring that wconfig.  They also save frame position and size.  And
 wconfigs can be constructed programatically, without the need to manipulate a
-live frame, vastly simplifying things like frame morphing, window moving, frame
-reversing and other operations.
+live frame, enabling things like frame morphing, window moving, frame reversing
+and other operations.
 
 
 ## Getting Workgroups
@@ -248,10 +249,14 @@ to the kill ring.  You can yank killed wconfigs into the current frame with
 calling it again will yank the *next* wconfig in the kill ring, and so on, much
 like Emacs' own kill ring.
 
-You can also save a wconfig to the kill ring without killing its workgroup.
-`<prefix> M-w` (`wg-kill-ring-save-working-config`) saves the working config to
-the kill ring, and `<prefix> M-W` (`wg-kill-ring-save-base-config`) saves the
-base config to the kill ring.
+You can save a wconfig to the kill ring without killing its workgroup with the
+kill-ring-save commands.  `<prefix> M-w` (`wg-kill-ring-save-working-config`)
+saves the working config to the kill ring, and `<prefix> M-W`
+(`wg-kill-ring-save-base-config`) saves the base config to the kill ring.
+
+`<prefix> M-k` (`wg-kill-workgroup-and-buffers`) kills a workgroup, and all the
+buffers visible in it, and `<prefix> K` (`wg-delete-other-workgroups`) deletes
+all but the current workgroup.
 
 
 ### Cloning
@@ -298,7 +303,6 @@ To bring up a help buffer listing all the commands and their bindings, hit
 ## FAQ
 
 **Q:** Why is it called "Workgroups"?
-
 **A:** Mostly because it's funny, but it also makes sense.  I needed a name that
   would also work for the window configuration objects being manipulated.
   Elscreen has "screens", which works well.  I couldn't call them "window
@@ -311,14 +315,12 @@ To bring up a help buffer listing all the commands and their bindings, hit
   something special for the 3.11 release.
 
 **Q:** Why should I use Workgroups instead of Elscreen?
-
 **A:** Workgroups provides persistence, base/working configs, morphing,
   frame-reversing and other chrome, as many workgroups as you want and cleaner
   code.  And it's maintained.
 
 **Q:** What's the difference between a "window configuration", a "wconfig" and a
   "workgroup"?
-
 **A:** A "window configuration" is Emacs' opaque internal representation of
   frame state.  A "wconfig" is Workgroups' own independent window configuration
   type.  And a "workgroup" is a named set of multiple wconfigs (one base config,
