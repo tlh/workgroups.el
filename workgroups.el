@@ -25,8 +25,7 @@
 
 ;;; Commentary:
 ;;
-;; You should have received a copy of README.md along with this
-;; program; if not, return it for a full refund.
+;; See the file README.md in `workgroups.el's directory
 ;;
 ;;; Installation:
 ;;
@@ -51,8 +50,6 @@
 ;;
 
 ;;; TODO:
-;;
-;; - fix selected-window in morph
 ;;
 
 
@@ -741,7 +738,7 @@ minibuffer is active.")))
 
 (defmacro wg-with-bounds (w dir spec &rest body)
   "Bind SPEC to W's bounds in DIR, and eval BODY.
-\"bounds\" are a direction-independent way of dealing with edge lists."
+\"Bounds\" are a direction-independent way of dealing with edge lists."
   (declare (indent 3))
   (wg-with-gensyms (dir-sym l1 t1 r1 b1)
     (wg-dbind (ls1 hs1 lb1 hb1) spec
@@ -2102,8 +2099,6 @@ The string is passed through a format arg to escape %'s."
 
     ;; workgroup movement
 
-    "<"          'wg-move-window-backward
-    ">"          'wg-move-window-forward
     "C-x"        'wg-swap-workgroups
     "C-,"        'wg-offset-left
     "C-."        'wg-offset-right
@@ -2120,8 +2115,10 @@ The string is passed through a format arg to escape %'s."
     "d"          'wg-dired
 
 
-    ;; frame reversal - keys are mnemonics for the axis of reversal
+    ;; window moving and frame reversal
 
+    "<"          'wg-move-window-backward
+    ">"          'wg-move-window-forward
     "|"          'wg-reverse-frame-horizontally
     "-"          'wg-reverse-frame-vertically
     "+"          'wg-reverse-frame-horizontally-and-vertically

@@ -1,11 +1,10 @@
 # Workgroups for Windows (for Emacs)
 
 Workgroups is a window configuration management package for GNU Emacs.  It
-provides a suite of operations on window configurations (called "workgroups"
-because it's shorter and funnier), including storage and restoration, saving to
-and loading from disk, "base" and "working" configs, killing and yanking,
-animated window config morphing, and other stuff.  It's similar to elscreen in
-some ways, but very different in others.
+provides a suite of operations on window configurations, including storage and
+restoration, saving to and loading from disk, "base" and "working" configs,
+killing and yanking, animated window config morphing, and other stuff.  It's
+similar to elscreen in some ways, but very different in others.
 
 Here's what the Elisp info docs have to say about window configurations `(info
 "(Elisp)Window Configurations")`:
@@ -29,15 +28,15 @@ Here's what the same info node has to say about window configuration opacity:
 > Other primitives to look inside of window configurations would make sense, but
 > are not implemented because we did not need them."
 
-Greeeeat.  Workgroups solves this problem by implementing an independent window
+Greeeaaat.  Workgroups solves this problem by implementing an independent window
 configuration object -- one that is translucent, frobbable and serializable.
 Workgroups' window configurations (called "wconfigs") save all the settings
 listed above, and more.  For instance, if a region is highlighted in
 `transient-mark-mode`, that region will still be highlighted after restarting
 Emacs and restoring that wconfig.  They also save frame position and size.  And
-wconfigs can be constructed programatically, without the need to manipulate a
-live frame, enabling things like frame morphing, window moving, frame reversing
-and other operations.
+wconfigs can be constructed and manipulated programatically, without the need to
+restore them in a live frame, enabling things like frame morphing, window
+moving, frame reversing and other operations.
 
 
 ## Getting Workgroups
@@ -127,25 +126,25 @@ position in the workgroups list.  Try switching between your workgroups now.
 
 ### Morph
 
-After you've switched between workgroups, you'll notice that Workgroups displays
-an animation when switching between wconfigs, called "morph".  Morph reuses
-whatever window-tree structure the two configs have in common, sliding in or
-wiping subwindows as necessary to complete the transformation.  You can toggle
-it off and on with `<prefix> w` (`wg-toggle-morph`), or you can set the value of
-`wg-morph-on` to t or nil to turn it on or off permenently.
+After you've switched between workgroups, you'll notice that Workgroups animates
+the transition between wconfigs.  "Morph" reuses whatever tree structure the two
+window trees have in common, sliding in or wiping subtrees as necessary to
+complete the transformation.  You can toggle it off and on with `<prefix> w`
+(`wg-toggle-morph`), or you can set the value of `wg-morph-on` to t or nil to
+turn it on or off permenently.
 
-There are a couple variables that determine the morphing speed.
-`wg-morph-hsteps` and `wg-morph-vsteps` control the number of columns and lines
-respectively that window boundaries move for each step of the morph animation.
-The defaults for these are a little low so you see what the morph is doing, so
-set them higher if you wish.  Values less than 1 are invalid.
+There are a couple variables that determine morph speed.  `wg-morph-hsteps` and
+`wg-morph-vsteps` control the number of columns and lines respectively that
+window boundaries move for each step of the morph transition.  The defaults for
+these are a little low, so that you can see what morph is doing.  You can set
+them as high as you like, but values less than 1 are invalid.
 
-`wg-morph-terminal-hsteps` and `wg-morph-terminal-vsteps` control the horizontal
-and vertical stepping in terminal frames.  They are separate from the first two
-because Emacs' `redisplay` is usually significanly faster on local terminal
-frames, so the morph can happen too fast to see at values appropriate for GUI
-frames.  If they are set, their values are used in terminal frames.  If they are
-nil, the step values default to `wg-morph-hsteps` and `wg-morph-vsteps`.
+There are separate horizontal and vertical step values used in terminal frames
+(`wg-morph-terminal-hsteps` and `wg-morph-terminal-vsteps`).  This is because
+Emacs' `redisplay` is usually significanly faster on local terminal frames, so
+morphing can happen too fast to see at values appropriate for GUI frames.  If
+they are set, their values are used in terminal frames.  If they are nil, the
+step values default to `wg-morph-hsteps` and `wg-morph-vsteps`.
 
 *NOTE on morphing in xterm*
 
@@ -162,12 +161,12 @@ xterm has some wierd redisplay issues:
 
   you may run into this.
 
-- Very large terminal geometries (270x70 or higher) can also cause slow
-  `redisplay` in xterm.
+- Very large terminal geometries (270x70 or higher) can also cause very slow
+  `redisplay` in xterm. Until I figure out the best way to handle this, you
+  should just see what works, and either set your background color or turn off
+  morphing with:
 
-I'm trying to determine the best way to handle these issues.  But for now, you
-should just see what works, and either set your background color or turn off
-morphing with `(setq wg-morph-on nil)`.
+        `(setq wg-morph-on nil)`
 
 
 ### Base and Working Configs
@@ -304,27 +303,40 @@ To bring up a help buffer listing all the commands and their bindings, hit
 
 **Q:** Why is it called "Workgroups"?
 **A:** Mostly because it's funny, but it also makes sense.  I needed a name that
-  would also work for the window configuration objects being manipulated.
-  Elscreen has "screens", which works well.  I couldn't call them "window
-  configurations" because it's too long, and Emacs already uses that for
-  something else.  It'd be misleading, too, since a workgroup is actually a
-  named set of multiple wconfigs (one base config, and then a working config for
-  each frame).  A "workgroup" seems like a good name for such a collection of
-  window configurations, and thanks to MS, the word "workgroups" is also
+  would also work for the collections of wconfigs being manipulated.  Elscreen
+  has "screens", which works well.  I couldn't call them "window configurations"
+  because it's too long, and Emacs already uses that for something else.  It'd
+  be misleading, too, since a workgroup is actually a named set of multiple
+  wconfigs (one base config, and then a working config for each frame).
+  "Workgroup" seemed like a good name for such a collection of window
+  configurations, and, thanks to Microsoft, the word "workgroups" is already
   associated with the word "windows".  So "Workgroups" it is.  I'll have to do
-  something special for the 3.11 release.
+  something special for the 0.3.11 release.
 
 **Q:** Why should I use Workgroups instead of Elscreen?
-**A:** Workgroups provides persistence, base/working configs, morphing,
-  frame-reversing and other chrome, as many workgroups as you want and cleaner
+**A:** Workgroups provides persistence, base and working configs, morphing,
+  frame-reversing and other chrome, unlimited workgroups per frame and cleaner
   code.  And it's maintained.
 
 **Q:** What's the difference between a "window configuration", a "wconfig" and a
   "workgroup"?
-**A:** A "window configuration" is Emacs' opaque internal representation of
-  frame state.  A "wconfig" is Workgroups' own independent window configuration
-  type.  And a "workgroup" is a named set of multiple wconfigs (one base config,
-  and then a working config for each frame).
+**A:** A "window configuration" is Emacs' opaque internal representation of most
+  of the state of one frame.  A "wconfig" is Workgroups' independent,
+  translucent window configuration object.  And a "workgroup" is a named set of
+  multiple wconfigs (one base config, and then a working config for each frame).
+
+
+## Feature Requests
+
+Feature requests, like other parameters you'd like Workgroups to persist, should
+be added to the [wiki](http://github.com/tlh/workgroups.el/wiki)
+
+
+## Reporting Bugs
+
+If you encounter a bug in Workgroups, please file an issue
+[here](http://github.com/tlh/workgroups.el/issues).  If possible, please include
+a stack-trace and a the value of `wg-list`.
 
 
 ## A Note On Application Buffers
