@@ -774,7 +774,7 @@ minibuffer is active.")))
 
 (defun wg-last-win (w)
   "Return the last actual window in W."
-  (if (wg-window-p w) w (wg-last-win (last1 (wg-wlist w)))))
+  (if (wg-window-p w) w (wg-last-win (wg-last1 (wg-wlist w)))))
 
 (defun wg-minify-win (w)
   "Return a copy of W with the smallest allowable dimensions."
@@ -1043,17 +1043,17 @@ Return the buffer if it was found, nil otherwise."
 (defun wg-restore-wconfig (wconfig)
   "Restore WCONFIG in `selected-frame'."
   (wg-check-if-minibuffer-is-active)
-  (let ((f (selected-frame)) wt)
+  (let ((frame (selected-frame)) wt)
     (wg-abind wconfig (left top sbars sbwid)
-      (setq wt (w-set-frame-size-and-scale-wtree wconfig f))
+      (setq wt (w-set-frame-size-and-scale-wtree wconfig frame))
       (when (and wg-restore-position left top)
-        (set-frame-position f left top))
+        (set-frame-position frame left top))
       (when (and wg-morph-on after-init-time)
         (wg-morph wt wg-morph-no-error))
       (wg-restore-wtree wt)
       (when wg-restore-scroll-bars
-        (set-frame-parameter f 'vertical-scroll-bars sbars)
-        (set-frame-parameter f 'scroll-bar-width sbwid)))))
+        (set-frame-parameter frame 'vertical-scroll-bars sbars)
+        (set-frame-parameter frame 'scroll-bar-width sbwid)))))
 
 (defun wg-restore-blank-wconfig ()
   "Restore a new blank wconfig in `selected-frame'."
@@ -1460,13 +1460,13 @@ Query to overwrite if a workgroup with the same name exists."
              'ido-completing-read
            'completing-read) prompt choices args))
 
-(defun wg-read-workgroup-name (&optional noerror)
+(defun wg-read-workgroup (&optional noerror)
   "Read a workgroup with `wg-completing-read'."
   (wg-get-workgroup
    'name (wg-completing-read "Workgroup: " (wg-names))
    noerror))
 
-(defun wg-read-buffer ()
+(defun wg-read-buffer-name ()
   "Read and return a buffer-name from `wg-buffer-list'."
   (wg-completing-read "Workgroup buffers: " (wg-buffer-list)))
 
@@ -1510,7 +1510,7 @@ the minibuffer.  If REVERSE is non-nil, `current-prefix-arg's
 begavior is reversed."
   (wg-list noerror)
   (if (if reverse (not current-prefix-arg) current-prefix-arg)
-      (wg-read-workgroup-name noerror)
+      (wg-read-workgroup noerror)
     (wg-current-workgroup noerror)))
 
 (defun wg-add-to-kill-ring (config)
@@ -1556,7 +1556,7 @@ current and previous workgroups."
   "Switch to WORKGROUP.
 BASE nil means restore WORKGROUP's working config.
 BASE non-nil means restore WORKGROUP's base config."
-  (interactive (list (wg-read-workgroup-name) current-prefix-arg))
+  (interactive (list (wg-read-workgroup) current-prefix-arg))
   (wg-awhen (wg-current-workgroup t)
     (when (eq it workgroup) (error "Already on: %s" (wg-name it)))
     (wg-update-working-config it))
@@ -1815,7 +1815,7 @@ is non-nil, use `wg-file'. Otherwise read a filename."
 
 (defun wg-get-by-buffer (buf)
   "Switch to the first workgroup in which BUF is visible."
-  (interactive (list (wg-read-buffer)))
+  (interactive (list (wg-read-buffer-name)))
   (wg-aif (wg-find-buffer buf) (wg-switch-to-workgroup it)
     (error "No workgroup contains %S" buf)))
 
