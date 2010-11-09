@@ -46,6 +46,12 @@ The latest version of Workgroups can always be found
 
     git clone git://github.com/tlh/workgroups.el
 
+Workgroups is being actively developed.  Later on, when you want to update to
+the latest:
+
+    git fetch
+    git merge origin
+
 
 ## Installation
 

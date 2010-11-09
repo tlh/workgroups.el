@@ -434,7 +434,7 @@ stable, but is left here for the time being.")
 
 (eval-and-compile
 
-;;; fns used in macros
+;;; fns used in macros:
 
   (defun wg-take (list n)
     "Return a list of the first N elts in LIST."
