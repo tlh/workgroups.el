@@ -55,7 +55,6 @@
 
 ;;; Code:
 
-
 (require 'cl)
 
 
@@ -433,6 +432,24 @@ stable, but is left here for the time being.")
 
 ;;; utils
 
+(eval-and-compile
+
+;;; fns used in macros
+
+  (defun wg-take (list n)
+    "Return a list of the first N elts in LIST."
+    (butlast list (- (length list) n)))
+
+  (defun wg-partition (list n &optional step)
+    "Return list of N-length sublists of LIST, offset by STEP.
+Iterative to prevent stack overflow."
+    (let (acc)
+      (while list
+        (push (wg-take list n) acc)
+        (setq list (nthcdr (or step n) list)))
+      (nreverse acc)))
+  )
+
 (defmacro wg-with-gensyms (syms &rest body)
   "Bind all symbols in SYMS to `gensym's, and eval BODY."
   (declare (indent 1))
@@ -516,10 +533,6 @@ INCLUSIVE non-nil means the HI bound is inclusive."
   "Return the last element of LIST."
   (car (last list)))
 
-(defun wg-take (list n)
-  "Return a list of the first N elts in LIST."
-  (butlast list (- (length list) n)))
-
 (defun wg-leave (list n)
   "Return a list of the last N elts in LIST."
   (nthcdr (- (length list) n) list))
@@ -527,15 +540,6 @@ INCLUSIVE non-nil means the HI bound is inclusive."
 (defun wg-rnth (n list)
   "Return the nth element of LIST, counting from the end."
   (nth (- (length list) n 1) list))
-
-(defun wg-partition (list n &optional step)
-  "Return list of N-length sublists of LIST, offset by STEP.
-Iterative to prevent stack overflow."
-  (let (acc)
-    (while list
-      (push (wg-take list n) acc)
-      (setq list (nthcdr (or step n) list)))
-    (nreverse acc)))
 
 (defun wg-insert-elt (elt list &optional pos)
   "Insert ELT into LIST at POS or the end."
@@ -727,6 +731,10 @@ minibuffer is active.")))
   "Return the minimum window size in split direction DIR."
   (if dir wg-window-min-height wg-window-min-width))
 
+(defun wg-actual-min-size (dir)
+  "Return the actual minimum window size in split direction DIR."
+  (if dir wg-actual-min-height wg-actual-min-width))
+
 (defmacro wg-with-edges (w spec &rest body)
   "Bind W's edge list to SPEC and eval BODY."
   (declare (indent 2))
@@ -817,6 +825,7 @@ minibuffer is active.")))
               (equal (wg-edges w1) (wg-edges w2))
               (every 'wg-equal-wtrees (wg-wlist w1) (wg-wlist w2))))))
 
+;; FIXME: Require a minimum size to fix wscaling
 (defun wg-normalize-wtree (wtree)
   "Clean up and return a new wtree from WTREE.
 Recalculate the edge lists of all subwins, and remove subwins
@@ -825,8 +834,9 @@ new wlist, return it instead of a new wtree."
   (if (wg-window-p wtree) wtree
     (wg-abind wtree (dir wlist)
       (wg-with-bounds wtree dir (ls1 hs1 lb1 hb1)
-        (let ((max (- hb1 1 (wg-min-size dir)))
-              (lastw (wg-last1 wlist)))
+        (let* ((min-size (wg-min-size dir))
+               (max (- hb1 1 min-size))
+               (lastw (wg-last1 wlist)))
           (flet ((mapwl
                   (wl)
                   (wg-dbind (sw . rest) wl
@@ -1043,14 +1053,14 @@ Return the buffer if it was found, nil otherwise."
 (defun wg-restore-wconfig (wconfig)
   "Restore WCONFIG in `selected-frame'."
   (wg-check-if-minibuffer-is-active)
-  (let ((frame (selected-frame)) wt)
+  (let ((frame (selected-frame)) wtree)
     (wg-abind wconfig (left top sbars sbwid)
-      (setq wt (w-set-frame-size-and-scale-wtree wconfig frame))
+      (setq wtree (w-set-frame-size-and-scale-wtree wconfig frame))
       (when (and wg-restore-position left top)
         (set-frame-position frame left top))
       (when (and wg-morph-on after-init-time)
-        (wg-morph wt wg-morph-no-error))
-      (wg-restore-wtree wt)
+        (wg-morph (wg-ewtree->wtree) wtree wg-morph-no-error))
+      (wg-restore-wtree wtree)
       (when wg-restore-scroll-bars
         (set-frame-parameter frame 'vertical-scroll-bars sbars)
         (set-frame-parameter frame 'scroll-bar-width sbwid)))))
@@ -1069,15 +1079,13 @@ Return the buffer if it was found, nil otherwise."
 
 (defun wg-morph-determine-hsteps ()
   "Return the horizontal step value to use during `wg-morph'."
-  (max 1 (if (and (not window-system)
-                  wg-morph-terminal-hsteps)
+  (max 1 (if (and (not window-system) wg-morph-terminal-hsteps)
              wg-morph-terminal-hsteps
            wg-morph-hsteps)))
 
 (defun wg-morph-determine-vsteps ()
   "Return the vertical step value to use during `wg-morph'."
-  (max 1 (if (and (not window-system)
-                  wg-morph-terminal-vsteps)
+  (max 1 (if (and (not window-system) wg-morph-terminal-vsteps)
              wg-morph-terminal-vsteps
            wg-morph-vsteps)))
 
@@ -1087,17 +1095,20 @@ When wlist1's and wlist2's lengths are equal, return wlist1.
 When wlist1 is shorter than wlist2, add a window at the front of wlist1.
 When wlist1 is longer than wlist2, package up wlist1's excess windows
 into a wtree, so it's the same length as wlist2."
-  (let* ((d1 (wg-dir wt1)) (wl1 (wg-wlist wt1)) (l1 (length wl1))
-         (d2 (wg-dir wt2)) (wl2 (wg-wlist wt2)) (l2 (length wl2)))
+  (let* ((wl1 (wg-wlist wt1)) (l1 (length wl1)) (d1 (wg-dir wt1))
+         (wl2 (wg-wlist wt2)) (l2 (length wl2)))
     (cond ((= l1 l2) wl1)
           ((< l1 l2)
            (cons (wg-minify-last-win (wg-rnth (1+ l1) wl2))
-                 (cons (wg-w-edge-operation (car wl1) wg-min-edges '-)
-                       (cdr wl1))))
+                 (if (< (wg-wsize (car wl1) d1)
+                        (* 2 (wg-actual-min-size d1)))
+                     wl1
+                   (cons (wg-w-edge-operation (car wl1) wg-min-edges '-)
+                         (cdr wl1)))))
           ((> l1 l2)
            (append (wg-take wl1 (1- l2))
-                   (list (wg-make-wtree
-                          d2 wg-null-edges (nthcdr (1- l2) wl1))))))))
+                   (list (wg-make-wtree d1 wg-null-edges
+                                        (nthcdr (1- l2) wl1))))))))
 
 (defun wg-morph-win->win (w1 w2 &optional swap)
   "Return a copy of W1 with its edges stepped toward W2.
@@ -1152,16 +1163,15 @@ Dispatches on each possible combination of types."
         ((and (wg-wtree-p w1) (wg-window-p w2))
          (wg-morph-wtree->win w1 w2))))
 
-(defun wg-morph (to &optional noerror)
-  "Morph from the current wtree to TO.
-Assumes TO will fit in `selected-frame'.  TO should be a wtree."
-  (let ((from (wg-ewtree->wtree))
-        (wg-morph-hsteps (wg-morph-determine-hsteps))
+(defun wg-morph (from to &optional noerror)
+  "Morph from wtree FROM to wtree TO.
+Assumes both FROM and TO fit in `selected-frame'."
+  (let ((wg-morph-hsteps (wg-morph-determine-hsteps))
         (wg-morph-vsteps (wg-morph-determine-vsteps))
-        (wg-restore-scroll-bars  nil)
-        (wg-restore-fringes      nil)
-        (wg-restore-margins      nil)
-        (wg-restore-point        nil)
+        (wg-restore-scroll-bars nil)
+        (wg-restore-fringes nil)
+        (wg-restore-margins nil)
+        (wg-restore-point nil)
         (truncate-partial-width-windows
          wg-morph-truncate-partial-width-windows)
         (watchdog 0))
@@ -2077,6 +2087,7 @@ The string is passed through a format arg to escape %'s."
     "C-v"        'wg-switch-to-workgroup
     "v"          'wg-switch-to-workgroup
     "C-j"        'wg-switch-to-index
+    "j"          'wg-switch-to-index
     "0"          'wg-switch-to-index-0
     "1"          'wg-switch-to-index-1
     "2"          'wg-switch-to-index-2
