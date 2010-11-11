@@ -204,13 +204,13 @@ in (say) irc buffers where `point-max' is constantly increasing."
   :group 'workgroups)
 
 (defcustom wg-morph-hsteps 9
-  "Columns/iteration to step window edges by during `wg-morph'.
+  "Columns/iteration to step window edges during `wg-morph'.
 Values lower than 1 are invalid."
   :type 'integer
   :group 'workgroups)
 
 (defcustom wg-morph-vsteps 3
-  "Rows/iteration to step window edges by during `wg-morph'.
+  "Rows/iteration to step window edges during `wg-morph'.
 Values lower than 1 are invalid."
   :type 'integer
   :group 'workgroups)
@@ -751,12 +751,10 @@ minibuffer is active.")))
   (wg-with-gensyms (dir-sym l1 t1 r1 b1)
     (wg-dbind (ls1 hs1 lb1 hb1) spec
       `(wg-with-edges ,w (,l1 ,t1 ,r1 ,b1)
-         (let* ((,dir-sym ,dir)
-                (,ls1 (if ,dir ,l1 ,t1))
-                (,hs1 (if ,dir ,r1 ,b1))
-                (,lb1 (if ,dir ,t1 ,l1))
-                (,hb1 (if ,dir ,b1 ,r1)))
-           ,@body)))))
+         (cond (,dir (let ((,ls1 ,l1) (,hs1 ,r1) (,lb1 ,t1) (,hb1 ,b1))
+                       ,@body))
+               (t    (let ((,ls1 ,t1) (,hs1 ,b1) (,lb1 ,l1) (,hb1 ,r1))
+                       ,@body)))))))
 
 (defun wg-put-bounds (w dir ls hs lb hb)
   "Set W's edges in DIR with bounds LS HS LB and HB."

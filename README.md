@@ -1,12 +1,28 @@
 # Workgroups for Windows (for Emacs)
 
-Workgroups is a window configuration management package for GNU Emacs.  It
-provides a suite of operations on window configurations, including storage and
-restoration, saving to and loading from disk, "base" and "working" configs,
-killing and yanking, animated window config morphing, and other stuff.  It's
-similar to elscreen in some ways, but very different in others.
+With Workgroups, you can:
 
-Here's what the Elisp info docs have to say about window configurations `(info
+- Store an unlimited list of window configs
+
+- Save window configs to disk, and load them from disk
+
+- Kill and yank window configs
+
+It also provides:
+
+- Animated window config morphing
+
+- Frame reversing and window movement
+
+- A concept of "base" and "working" configs, for maximum flexibility
+
+- Lots of other stuff
+
+
+## Background
+
+Workgroups is a window configuration management package for GNU Emacs.  Here's
+what the Elisp info docs have to say about window configurations `(info
 "(Elisp)Window Configurations")`:
 
 > A 'window configuration' records the entire layout of one frame--all windows,
@@ -58,7 +74,7 @@ the latest:
 - Put `workgroups.el` somewhere on your Emacs load path
 
 - Byte-compile `workgroups.el`.  This isn't required, but it'll speed some
-  things up.  To do so, enter:
+  things up:
 
         M-x byte-compile-file RET /path/to/workgroups.el RET
 
@@ -342,7 +358,7 @@ be added to the [wiki](http://github.com/tlh/workgroups.el/wiki)
 
 If you encounter a bug in Workgroups, please file an issue
 [here](http://github.com/tlh/workgroups.el/issues).  If possible, please include
-a stack-trace and a the value of `wg-list`.
+a stack-trace and the value of `wg-list`.
 
 
 ## A Note On Application Buffers
