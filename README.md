@@ -1,5 +1,15 @@
 # Workgroups for Windows (for Emacs)
 
+It's tedious setting Emacs' window layout just the way you like it -- splitting
+windows, adjusting their size, switching to the right buffers, etc. -- and even
+when it *is* set, it won't stay that way for long.  On top of that, you can't
+save these window-configurations to disk, so you have to start over from scratch
+every time you restart Emacs.
+
+There are solutions out there to parts of the problem -- elscreen, revive.el
+window-configuration-to-register, etc. -- but none provide a complete solution.
+Workgroups does.
+
 With Workgroups, you can:
 
 - Store an unlimited list of window configs
