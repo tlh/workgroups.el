@@ -51,6 +51,9 @@
 
 ;;; TODO:
 ;;
+;; undo/redo to replace winner
+;; erc and gnus persistence
+;;
 
 
 ;;; Code:
@@ -432,9 +435,9 @@ stable, but is left here for the time being.")
 
 ;;; utils
 
-(eval-and-compile
 
-;;; fns used in macros:
+;; functions used in macros:
+(eval-and-compile
 
   (defun wg-take (list n)
     "Return a list of the first N elts in LIST."
@@ -761,7 +764,7 @@ minibuffer is active.")))
   (if dir (wg-put-edges w ls lb hs hb) (wg-put-edges w lb ls hb hs)))
 
 (defun wg-step-edges (edges1 edges2 hstep vstep)
-  "Return W1's edges step once toward W2's by HSTEP and VSTEP."
+  "Return W1's edges stepped once toward W2's by HSTEP and VSTEP."
   (wg-dbind (l1 t1 r1 b1) edges1
     (wg-dbind (l2 t2 r2 b2) edges2
       (let ((left (wg-step-to l1 l2 hstep))
@@ -771,7 +774,7 @@ minibuffer is active.")))
               (+ top  (wg-step-to (- b1 t1) (- b2 t2) vstep)))))))
 
 (defun wg-w-edge-operation (w edges op)
-  "Return a copy of W with its edges mapped through OP with EDGES."
+  "Return a copy of W with its edges mapped against EDGES through OP."
   (wg-aput w 'edges (mapcar* op (wg-aget w 'edges) edges)))
 
 (defun wg-first-win (w)
@@ -792,7 +795,7 @@ minibuffer is active.")))
                   (+ top  wg-actual-min-height))))
 
 (defun wg-minify-last-win (w)
-  "Minify the first actual window in W."
+  "Minify the last actual window in W."
   (wg-minify-win (wg-last-win w)))
 
 (defun wg-wsize (w &optional height)
@@ -850,7 +853,7 @@ new wlist, return it instead of a new wtree."
                 (car new)))))))))
 
 (defun wg-scale-wtree (wtree wscale hscale)
-  "Return a copy of WTREE with its dimensions by scaled by WSCALE and HSCALE.
+  "Return a copy of WTREE with its dimensions scaled by WSCALE and HSCALE.
 All WTREE's subwins are scaled as well."
   (let ((scaled (wg-scale-wsize wtree wscale hscale)))
     (if (wg-window-p wtree) scaled
@@ -1109,12 +1112,12 @@ into a wtree, so it's the same length as wlist2."
                                         (nthcdr (1- l2) wl1))))))))
 
 (defun wg-morph-win->win (w1 w2 &optional swap)
-  "Return a copy of W1 with its edges stepped toward W2.
+  "Return a copy of W1 with its edges stepped once toward W2.
 When SWAP is non-nil, return a copy of W2 instead."
   (wg-aput (if swap w2 w1) 'edges (wg-morph-step-edges w1 w2)))
 
 (defun wg-morph-win->wtree (win wt)
-  "Return a new wtree from WIN with WT's toplevel structure."
+  "Return a new wtree with WIN's edges and WT's last two windows."
   (wg-make-wtree
    (wg-dir wt)
    (wg-morph-step-edges win wt)
@@ -1188,19 +1191,19 @@ Assumes both FROM and TO fit in `selected-frame'."
 ;;; global error wrappers
 
 (defun wg-file (&optional noerror)
-  "Return `wg-file'."
+  "Return `wg-file' or error."
   (or wg-file
       (unless noerror
         (error "Workgroups isn't visiting a file"))))
 
 (defun wg-list (&optional noerror)
-  "Return `wg-list'."
+  "Return `wg-list' or error."
   (or wg-list
       (unless noerror
         (error "No workgroups are defined."))))
 
 (defun wg-get-workgroup (key val &optional noerror)
-  "Return the workgroup whose KEY equals VAL."
+  "Return the workgroup whose KEY equals VAL or error."
   (or (wg-get-alist key val (wg-list noerror))
       (unless noerror
         (error "There is no workgroup with an %S of %S" key val))))
@@ -1247,7 +1250,7 @@ value in `wg-frame-table'."
   (wg-aget workgroup prop))
 
 (defun wg-set-workgroup-prop (prop val workgroup &optional nodirty)
-  "Set PROP to VAL in WORKGROUP."
+  "Set PROP to VAL in WORKGROUP, setting `wg-dirty' unless NODIRTY."
   (wg-type-check 'workgroup workgroup)
   (setcdr (assq prop workgroup) val)
   (unless nodirty (setq wg-dirty t)))

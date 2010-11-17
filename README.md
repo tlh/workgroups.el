@@ -12,7 +12,7 @@ Workgroups does.
 
 With Workgroups, you can:
 
-- Store an unlimited list of window configs
+- Store an unlimited number of window configs
 
 - Save window configs to disk, and load them from disk
 
@@ -35,14 +35,14 @@ Workgroups is a window configuration management package for GNU Emacs.  Here's
 what the Elisp info docs have to say about window configurations `(info
 "(Elisp)Window Configurations")`:
 
-> A 'window configuration' records the entire layout of one frame--all windows,
+> A "window configuration" records the entire layout of one frame--all windows,
 > their sizes, which buffers they contain, how those buffers are scrolled, and
 > their values of point and the mark; also their fringes, margins, and scroll
 > bar settings.  It also includes the value of `minibuffer-scroll-window'.  As a
 > special exception, the window configuration does not record the value of point
 > in the selected window for the current buffer.  Also, the window configuration
 > does not record the values of window parameters; see *Note Window
-> Parameters::."
+> Parameters::.
 
 The problem with Emacs' window configurations is that they're opaque C types:
 you can't peer inside them.  To get at the information in a window
@@ -52,7 +52,7 @@ parameters.
 Here's what the same info node has to say about window configuration opacity:
 
 > Other primitives to look inside of window configurations would make sense, but
-> are not implemented because we did not need them."
+> are not implemented because we did not need them.
 
 Greeeaaat.  Workgroups solves this problem by implementing an independent window
 configuration object -- one that is translucent, frobbable and serializable.
@@ -332,6 +332,10 @@ To bring up a help buffer listing all the commands and their bindings, hit
 
 
 ## FAQ
+
+**Q:** Does Workgroups for Windows have anything to do with Microsoft Windows
+  for Workgroups?  
+**A:** Nope.  
 
 **Q:** Why is it called "Workgroups"?  
 **A:** Mostly because it's funny, but it also makes sense.  I needed a name that
