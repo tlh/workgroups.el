@@ -53,6 +53,9 @@
 ;;
 ;; undo/redo to replace winner
 ;; erc and gnus persistence
+;;  - possibly subsume desktop.el?
+;; add winsav.el's complex window adding
+;;
 ;;
 
 
@@ -190,7 +193,7 @@ during `wg-morph' -- you probably want this on."
   :group 'workgroups)
 
 (defcustom wg-restore-point-max t
-  "Non-nil means put `point' at `point-max', even if `point-max' has increased.
+  "Controls point restoration when point is at `point-max'.
 If `point' is at `point-max' when a wconfig is created, put
 `point' back at `point-max' when the wconfig is restored, even if
 `point-max' has increased in the meantime.  This is useful
@@ -379,7 +382,7 @@ stable, but is left here for the time being.")
   "`defface' wrapper adding a lookup key used by `wg-fontify'."
   (declare (indent 2))
   `(progn
-     (pushnew (cons ,key ',face) wg-face-abbrevs :test 'equal)
+     (pushnew (cons ,key ',face) wg-face-abbrevs :test #'equal)
      (defface ,face ,spec ,doc ,@args)))
 
 (wg-defface wg-current-workgroup-face :cur
@@ -459,16 +462,15 @@ Iterative to prevent stack overflow."
   `(let (,@(mapcar (lambda (sym) `(,sym (gensym))) syms)) ,@body))
 
 (defmacro wg-dbind (args expr &rest body)
-  "Wrapper to shorten `destructuring-bind'."
+  "Abbreviation of `destructuring-bind'."
   (declare (indent 2))
   `(destructuring-bind ,args ,expr ,@body))
 
 (defmacro wg-dohash (spec &rest body)
   "do-style wrapper for `maphash'."
   (declare (indent 1))
-  (wg-dbind (key val table &optional ret) spec
-    `(progn (maphash (lambda (,key ,val) ,@body) ,table)
-            ,ret)))
+  (wg-dbind (key val table &optional return) spec
+    `(progn (maphash (lambda (,key ,val) ,@body) ,table) ,return)))
 
 (defmacro wg-doconcat (spec &rest body)
   "do-style wrapper for `mapconcat'."
@@ -541,7 +543,7 @@ INCLUSIVE non-nil means the HI bound is inclusive."
   (nthcdr (- (length list) n) list))
 
 (defun wg-rnth (n list)
-  "Return the nth element of LIST, counting from the end."
+  "Return the Nth element of LIST, counting from the end."
   (nth (- (length list) n 1) list))
 
 (defun wg-insert-elt (elt list &optional pos)
@@ -641,11 +643,11 @@ variable, and the cadr as the key."
 (defun wg-read-object (prompt test warning &rest args)
   "PROMPT for an object that satisfies TEST, WARNING if necessary.
 ARGS are `read-from-minibuffer's args, after PROMPT."
-  (let ((obj (apply 'read-from-minibuffer prompt args)))
+  (let ((obj (apply #'read-from-minibuffer prompt args)))
     (wg-until (funcall test obj)
       (message warning)
       (sit-for wg-warning-timeout)
-      (setq obj (apply 'read-from-minibuffer prompt args)))
+      (setq obj (apply #'read-from-minibuffer prompt args)))
     obj))
 
 
@@ -683,6 +685,7 @@ FACEKEY must be a key in `wg-face-abbrevs'."
 
 (defmacro wg-fontify (&rest specs)
   "A small fontification DSL. *WRITEME*"
+  (declare (indent defun))
   `(concat
     ,@(wg-docar (spec specs)
         (typecase spec
@@ -815,7 +818,7 @@ minibuffer is active.")))
   "Scale W's size by WIDTH-SCALE and HEIGHT-SCALE."
   (flet ((wscale (width)  (truncate (* width  width-scale)))
          (hscale (height) (truncate (* height height-scale))))
-    (wg-adjust-wsize w 'wscale 'hscale)))
+    (wg-adjust-wsize w #'wscale #'hscale)))
 
 (defun wg-equal-wtrees (w1 w2)
   "Return t when W1 and W2 have equal structure."
@@ -824,7 +827,7 @@ minibuffer is active.")))
         ((and (wg-wtree-p w1) (wg-wtree-p w2))
          (and (eq (wg-dir w1) (wg-dir w2))
               (equal (wg-edges w1) (wg-edges w2))
-              (every 'wg-equal-wtrees (wg-wlist w1) (wg-wlist w2))))))
+              (every #'wg-equal-wtrees (wg-wlist w1) (wg-wlist w2))))))
 
 ;; FIXME: Require a minimum size to fix wscaling
 (defun wg-normalize-wtree (wtree)
@@ -895,7 +898,7 @@ Otherwise, reverse WTREE vertically."
                       (wg-abind w ((d1 dir) edges wlist)
                         (wg-make-wtree
                          d1 edges
-                         (let ((wl2 (mapcar 'inner wlist)))
+                         (let ((wl2 (mapcar #'inner wlist)))
                            (if (or (eq dir 'both)
                                    (and (not dir) (not d1))
                                    (and dir d1))
@@ -917,7 +920,7 @@ Otherwise, reverse WTREE vertically."
                d1 edges
                (wg-aif (wg-get-some (sw wlist) (wg-aget sw 'selwin))
                    (wg-cyclic-offset-elt it wlist offset)
-                 (mapcar 'inner wlist)))))))
+                 (mapcar #'inner wlist)))))))
     (wg-normalize-wtree (inner wtree))))
 
 (defun wg-wconfig-move-window (offset &optional wconfig)
@@ -967,7 +970,7 @@ If specified, EWTREE should be an Emacs `window-tree'."
   (flet ((inner (ewt) (if (windowp ewt) (wg-ewin->window ewt)
                         (wg-dbind (dir edges . wins) ewt
                           (wg-make-wtree
-                           dir edges (mapcar 'inner wins))))))
+                           dir edges (mapcar #'inner wins))))))
     (let ((ewt (car (or ewtree (window-tree)))))
       (when (and (windowp ewt) (window-minibuffer-p ewt))
         (error "Workgroups can't operate on minibuffer-only frames."))
@@ -1020,7 +1023,7 @@ Return the buffer if it was found, nil otherwise."
           (set-window-scroll-bars
            sw (nth 0 sbars) (nth 2 sbars) (nth 3 sbars)))
         (when wg-restore-fringes
-          (apply 'set-window-fringes sw fringes))
+          (apply #'set-window-fringes sw fringes))
         (when wg-restore-margins
           (set-window-margins sw (car margins) (cdr margins)))
         (set-window-hscroll sw hscroll)
@@ -1104,7 +1107,7 @@ into a wtree, so it's the same length as wlist2."
                  (if (< (wg-wsize (car wl1) d1)
                         (* 2 (wg-actual-min-size d1)))
                      wl1
-                   (cons (wg-w-edge-operation (car wl1) wg-min-edges '-)
+                   (cons (wg-w-edge-operation (car wl1) wg-min-edges #'-)
                          (cdr wl1)))))
           ((> l1 l2)
            (append (wg-take wl1 (1- l2))
@@ -1148,7 +1151,7 @@ structures of WT1 and WT2 looking for discrepancies."
      d2 (wg-morph-step-edges wt1 wt2)
      (if (not (eq (wg-dir wt1) (wg-dir wt2)))
          (list (wg-minify-last-win wt2) wt1)
-       (mapcar* 'wg-morph-dispatch
+       (mapcar* #'wg-morph-dispatch
                 (wg-morph-match-wlist wt1 wt2)
                 (wg-wlist wt2))))))
 
@@ -1413,8 +1416,8 @@ Query to overwrite if a workgroup with the same name exists."
 (defun wg-wtree-buffer-list (wtree)
   "Return a list of unique buffer names visible in WTREE."
   (flet ((rec (w) (if (wg-window-p w) (list (wg-aget w 'bname))
-                    (mapcan 'rec (wg-wlist w)))))
-    (remove-duplicates (rec wtree) :test 'equal)))
+                    (mapcan #'rec (wg-wlist w)))))
+    (remove-duplicates (rec wtree) :test #'equal)))
 
 (defun wg-workgroup-buffer-list (workgroup)
   "Call `wg-wconfig-buffer-list' on WORKGROUP's working config."
@@ -1423,8 +1426,8 @@ Query to overwrite if a workgroup with the same name exists."
 (defun wg-buffer-list ()
   "Call `wg-workgroup-buffer-list' on all workgroups in `wg-list'."
   (remove-duplicates
-   (mapcan 'wg-workgroup-buffer-list (wg-list t))
-   :test 'equal))
+   (mapcan #'wg-workgroup-buffer-list (wg-list t))
+   :test #'equal))
 
 (defun wg-find-buffer (bname)
   "Return the first workgroup in which a buffer named BNAME is visible."
@@ -1437,16 +1440,16 @@ Query to overwrite if a workgroup with the same name exists."
 (defun wg-mode-line-string ()
   "Return the string to be displayed in the mode-line."
   (let ((cur (wg-current-workgroup t)))
-    (cond (cur (wg-fontify
-                (:div wg-mode-line-left-brace)
-                (:mode (position cur (wg-list t)))
-                (:div wg-mode-line-divider)
-                (:mode (wg-name cur))
-                (:div wg-mode-line-right-brace)))
-          (t   (wg-fontify
-                (:div wg-mode-line-left-brace)
-                (:mode "No workgroups")
-                (:div wg-mode-line-right-brace))))))
+    (cond (cur (wg-fontify " "
+                 (:div wg-mode-line-left-brace)
+                 (:mode (position cur (wg-list t)))
+                 (:div wg-mode-line-divider)
+                 (:mode (wg-name cur))
+                 (:div wg-mode-line-right-brace)))
+          (t   (wg-fontify " "
+                 (:div wg-mode-line-left-brace)
+                 (:mode "No workgroups")
+                 (:div wg-mode-line-right-brace))))))
 
 (defun wg-mode-line-add-display ()
   "Add Workgroups' mode-line format to `mode-line-format'."
@@ -1468,8 +1471,8 @@ Query to overwrite if a workgroup with the same name exists."
 (defun wg-completing-read (prompt choices &rest args)
   "Call `completing-read' or `ido-completing-read'."
   (apply (if (and (boundp 'ido-mode) ido-mode)
-             'ido-completing-read
-           'completing-read) prompt choices args))
+             #'ido-completing-read
+           #'completing-read) prompt choices args))
 
 (defun wg-read-workgroup (&optional noerror)
   "Read a workgroup with `wg-completing-read'."
@@ -1503,7 +1506,7 @@ Query to overwrite if a workgroup with the same name exists."
 (defun wg-msg (format-string &rest args)
   "Call `message' with FORMAT-STRING and ARGS.
 Also save the msg to `wg-last-message'."
-  (setq wg-last-message (apply 'message format-string args)))
+  (setq wg-last-message (apply #'message format-string args)))
 
 (defmacro wg-fontified-msg (&rest format)
   "`wg-fontify' FORMAT and call `wg-msg' on it."
@@ -1544,16 +1547,16 @@ current and previous workgroups."
         (prd   wg-display-previous-workgroup-right-decor)
         (i     -1))
     (wg-fontify
-     (:brace wg-display-left-brace)
-     (if (not wl) (wg-fontify (:msg "No workgroups are defined"))
-       (wg-doconcat (w wl div)
-         (let ((str (format "%d: %s" (incf i) (wg-name w))))
-           (cond ((eq w cur)
-                  (wg-fontify (:cur (concat cld str crd))))
-                 ((eq w prev)
-                  (wg-fontify (:prev (concat pld str prd))))
-                 (t (wg-fontify (:other str)))))))
-     (:brace wg-display-right-brace))))
+      (:brace wg-display-left-brace)
+      (if (not wl) (wg-fontify (:msg "No workgroups are defined"))
+        (wg-doconcat (w wl div)
+          (let ((str (format "%d: %s" (incf i) (wg-name w))))
+            (cond ((eq w cur)
+                   (wg-fontify (:cur (concat cld str crd))))
+                  ((eq w prev)
+                   (wg-fontify (:prev (concat pld str prd))))
+                  (t (wg-fontify (:other str)))))))
+      (:brace wg-display-right-brace))))
 
 (defun wg-cyclic-nth-from-workgroup (&optional workgroup n)
   "Return the workgroup N places from WORKGROUP in `wg-list'."
@@ -1646,9 +1649,9 @@ ring, starting at the front."
   (interactive (list (wg-arg)))
   (let ((bufs (save-window-excursion
                 (wg-restore-workgroup workgroup)
-                (mapcar 'window-buffer (window-list)))))
+                (mapcar #'window-buffer (window-list)))))
     (wg-kill-workgroup workgroup)
-    (mapc 'kill-buffer bufs)
+    (mapc #'kill-buffer bufs)
     (wg-fontified-msg
       (:cmd "Killed: ") (:cur (wg-name workgroup))
       (:msg " and its buffers ") "\n" (wg-disp))))
@@ -1659,7 +1662,7 @@ ring, starting at the front."
   (unless (or wg-no-confirm (y-or-n-p "Really delete all other workgroups? "))
     (error "Cancelled"))
   (let ((cur (wg-current-workgroup)))
-    (mapc 'wg-delete (remove workgroup (wg-list)))
+    (mapc #'wg-delete (remove workgroup (wg-list)))
     (unless (eq workgroup cur) (wg-switch-to-workgroup workgroup))
     (wg-fontified-msg
       (:cmd "Deleted: ") (:msg "All workgroups but ")
@@ -1677,7 +1680,7 @@ ring, starting at the front."
 Worgroups are updated with their working configs in the
 `selected-frame'."
   (interactive)
-  (mapc 'wg-update-workgroup (wg-list))
+  (mapc #'wg-update-workgroup (wg-list))
   (wg-fontified-msg (:cmd "Updated: ") (:msg "All")))
 
 (defun wg-revert-workgroup (workgroup)
@@ -1692,7 +1695,7 @@ Worgroups are updated with their working configs in the
 (defun wg-revert-all-workgroups ()
   "Revert all workgroups to their base configs."
   (interactive)
-  (mapc 'wg-revert-workgroup (wg-list))
+  (mapc #'wg-revert-workgroup (wg-list))
   (wg-fontified-msg (:cmd "Reverted: ") (:msg "All")))
 
 (defun wg-switch-to-index (n)
@@ -1904,10 +1907,10 @@ is non-nil, use `wg-file'. Otherwise read a filename."
   (interactive)
   (wg-msg ;; Pass through format to escape the % in `battery'
    "%s" (wg-fontify
-         (:cmd "Current time: ")
-         (:msg (format-time-string wg-time-format))
-         (when (and wg-display-battery (fboundp 'battery))
-           (wg-fontify "\n" (:cmd "Battery: ") (:msg (battery)))))))
+          (:cmd "Current time: ")
+          (:msg (format-time-string wg-time-format))
+          (when (and wg-display-battery (fboundp 'battery))
+            (wg-fontify "\n" (:cmd "Battery: ") (:msg (battery)))))))
 
 (defun wg-echo-version ()
   "Echo Workgroups' current version number."

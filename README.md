@@ -54,15 +54,14 @@ Here's what the same info node has to say about window configuration opacity:
 > Other primitives to look inside of window configurations would make sense, but
 > are not implemented because we did not need them.
 
-Greeeaaat.  Workgroups solves this problem by implementing an independent window
-configuration object -- one that is translucent, frobbable and serializable.
-Workgroups' window configurations (called "wconfigs") save all the settings
-listed above, and more.  For instance, if a region is highlighted in
-`transient-mark-mode`, that region will still be highlighted after restarting
-Emacs and restoring that wconfig.  They also save frame position and size.  And
-wconfigs can be constructed and manipulated programatically, without the need to
-restore them in a live frame, enabling things like frame morphing, window
-moving, frame reversing and other operations.
+Workgroups solves this problem by implementing an independent window
+configuration object.  Workgroups' window configurations (called "wconfigs")
+save all the settings listed above, and more.  For instance, if a region is
+highlighted in `transient-mark-mode`, that region will still be highlighted
+after restarting Emacs and restoring that wconfig.  They also save frame
+position and size.  And wconfigs can be constructed and manipulated
+programatically, without the need to restore them in a live frame, enabling
+things like frame morphing, window moving, frame reversing and other operations.
 
 
 ## Getting Workgroups
