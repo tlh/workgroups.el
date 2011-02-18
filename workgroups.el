@@ -49,29 +49,6 @@
 ;; HIGH-BOUND of a bounds list.  See `wg-with-bounds'.
 ;;
 
-;;; TODO:
-;;
-;; undo/redo to replace winner
-;; erc and gnus persistence
-;;  - possibly subsume desktop.el?
-;; add winsav.el's complex window adding
-;; workgroup-local buffer history
-;; workgroup-local buffer lists
-;;  - advise (buffer-list)
-;;  - kill-buffer dissociates it from workgroup
-;;  - buffer association: "1) all buffers including ephemeral such as *Help*
-;;    etc, 2) only explicitly opened buffers (e.g. find-file, join irc channel),
-;;    or 3) never
-;;
-;; <jlf> funny wg situation today -- i had buffers lint.rpt and lint.rpt<2> and
-;;       switching active wg's failed with a message something like "buffer
-;;       lint.rpt already exists"
-;;
-;; A->B but not B->A morph error
-;;
-;; - qDot's mru buffer suggestion
-;;
-
 
 ;;; Code:
 
