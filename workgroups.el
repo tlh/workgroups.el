@@ -55,7 +55,21 @@
 ;; erc and gnus persistence
 ;;  - possibly subsume desktop.el?
 ;; add winsav.el's complex window adding
+;; workgroup-local buffer history
+;; workgroup-local buffer lists
+;;  - advise (buffer-list)
+;;  - kill-buffer dissociates it from workgroup
+;;  - buffer association: "1) all buffers including ephemeral such as *Help*
+;;    etc, 2) only explicitly opened buffers (e.g. find-file, join irc channel),
+;;    or 3) never
 ;;
+;; <jlf> funny wg situation today -- i had buffers lint.rpt and lint.rpt<2> and
+;;       switching active wg's failed with a message something like "buffer
+;;       lint.rpt already exists"
+;;
+;; A->B but not B->A morph error
+;;
+;; - qDot's mru buffer suggestion
 ;;
 
 
@@ -531,7 +545,7 @@ Return M when the difference between N and M is less than STEP."
 
 (defun wg-within (num lo hi &optional hi-inclusive)
   "Return t when NUM is within bounds LO and HI.
-INCLUSIVE non-nil means the HI bound is inclusive."
+HI-INCLUSIVE non-nil means the HI bound is inclusive."
   (and (>= num lo) (if hi-inclusive (<= num hi) (< num hi))))
 
 (defun wg-last1 (list)
@@ -630,8 +644,9 @@ variable, and the cadr as the key."
 (defun wg-write-sexp-to-file (sexp file)
   "Write the printable representation of SEXP to FILE."
   (with-temp-buffer
-    (insert (format "%S" sexp))
-    (write-file file)))
+    (let (print-level print-length)
+      (insert (format "%S" sexp))
+      (write-file file))))
 
 (defun wg-read-sexp-from-file (file)
   "Read and return an sexp from FILE."
@@ -1092,6 +1107,11 @@ Return the buffer if it was found, nil otherwise."
   (max 1 (if (and (not window-system) wg-morph-terminal-vsteps)
              wg-morph-terminal-vsteps
            wg-morph-vsteps)))
+
+;; (defun wg-morph-determine-steps (gui-steps &optional terminal-steps)
+;;   (max 1 (if (and (not window-system) terminal-steps)
+;;              terminal-steps
+;;            gui-steps
 
 (defun wg-morph-match-wlist (wt1 wt2)
   "Return a wlist by matching WT1's wlist to WT2's.
