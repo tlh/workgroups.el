@@ -691,7 +691,7 @@ FACEKEY must be a key in `wg-face-abbrevs'."
           (string `(progn ,spec))
           (atom `(format "%s" ,spec))))))
 
-(defun wg-check-if-minibuffer-is-active ()
+(defun wg-error-on-active-minibuffer ()
   "Throw an error when the minibuffer is active."
   (when (active-minibuffer-window)
     (error "Workgroup operations aren't permitted while the \
@@ -958,7 +958,7 @@ EWIN should be an Emacs window object."
 (defun wg-ewtree->wtree (&optional ewtree)
   "Return a new Workgroups wtree from EWTREE or `window-tree'.
 If specified, EWTREE should be an Emacs `window-tree'."
-  (wg-check-if-minibuffer-is-active)
+  (wg-error-on-active-minibuffer)
   (flet ((inner (ewt) (if (windowp ewt) (wg-ewin->window ewt)
                         (wg-dbind (dir edges . wins) ewt
                           (wg-make-wtree
@@ -1048,7 +1048,7 @@ Return the buffer if it was found, nil otherwise."
 
 (defun wg-restore-wconfig (wconfig)
   "Restore WCONFIG in `selected-frame'."
-  (wg-check-if-minibuffer-is-active)
+  (wg-error-on-active-minibuffer)
   (let ((frame (selected-frame)) wtree)
     (wg-abind wconfig (left top sbars sbwid)
       (setq wtree (w-set-frame-size-and-scale-wtree wconfig frame))
@@ -1073,22 +1073,8 @@ Return the buffer if it was found, nil otherwise."
   (wg-step-edges (wg-edges w1) (wg-edges w2)
                  wg-morph-hsteps wg-morph-vsteps))
 
-(defun wg-morph-determine-hsteps ()
-  "Return the horizontal step value to use during `wg-morph'."
-  (max 1 (if (and (not window-system) wg-morph-terminal-hsteps)
-             wg-morph-terminal-hsteps
-           wg-morph-hsteps)))
-
-(defun wg-morph-determine-vsteps ()
-  "Return the vertical step value to use during `wg-morph'."
-  (max 1 (if (and (not window-system) wg-morph-terminal-vsteps)
-             wg-morph-terminal-vsteps
-           wg-morph-vsteps)))
-
-;; (defun wg-morph-determine-steps (gui-steps &optional terminal-steps)
-;;   (max 1 (if (and (not window-system) terminal-steps)
-;;              terminal-steps
-;;            gui-steps
+(defun wg-morph-determine-steps (gui-steps &optional term-steps)
+  (max 1 (if (and (not window-system) term-steps) term-steps gui-steps)))
 
 (defun wg-morph-match-wlist (wt1 wt2)
   "Return a wlist by matching WT1's wlist to WT2's.
@@ -1167,8 +1153,10 @@ Dispatches on each possible combination of types."
 (defun wg-morph (from to &optional noerror)
   "Morph from wtree FROM to wtree TO.
 Assumes both FROM and TO fit in `selected-frame'."
-  (let ((wg-morph-hsteps (wg-morph-determine-hsteps))
-        (wg-morph-vsteps (wg-morph-determine-vsteps))
+  (let ((wg-morph-hsteps
+         (wg-morph-determine-steps wg-morph-hsteps wg-morph-terminal-hsteps))
+        (wg-morph-vsteps
+         (wg-morph-determine-steps wg-morph-vsteps wg-morph-terminal-vsteps))
         (wg-restore-scroll-bars nil)
         (wg-restore-fringes nil)
         (wg-restore-margins nil)
