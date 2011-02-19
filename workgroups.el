@@ -923,11 +923,11 @@ Otherwise, reverse WTREE vertically."
 
 ;;; wconfig making
 
-(defun wg-window-point ()
-  "Return `point' or :max.  See `wg-restore-point-max'."
-  (let ((p (point)))
-    (if (and wg-restore-point-max (= p (point-max)))
-        :max p)))
+(defun wg-window-point (ewin)
+  "Return `point' or :max.  See `wg-restore-point-max'.
+EWIN should be an Emacs window object."
+  (let ((p (window-point ewin)))
+    (if (and wg-restore-point-max (= p (point-max))) :max p)))
 
 (defun wg-ewin->window (ewin)
   "Return a new workgroups window from EWIN.
@@ -937,7 +937,7 @@ EWIN should be an Emacs window object."
       (edges    .  ,(window-edges ewin))
       (bname    .  ,(buffer-name))
       (fname    .  ,(buffer-file-name))
-      (point    .  ,(wg-window-point))
+      (point    .  ,(wg-window-point ewin))
       (mark     .  ,(mark))
       (markx    .  ,mark-active)
       (wstart   .  ,(window-start ewin))
