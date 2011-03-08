@@ -1355,7 +1355,7 @@ Assumes both FROM and TO fit in `selected-frame'."
   (wg-set-working-config workgroup (wg-make-wconfig) frame))
 
 (defun wg-push-new-working-config (workgroup config &optional frame)
-  ""
+  "Push CONFIG onto WORKGROUP's history, truncating its future if necessary."
   (let ((undo-table (wg-working-config-undo-table workgroup frame)))
     (setf (gethash 'undo-list undo-table)
           (nthcdr (wg-working-config-undo-pointer workgroup frame)
@@ -1374,42 +1374,26 @@ If WORKGROUP is the current workgroup, update it first."
 
 (defvar wg-do-memorize t)
 
-;; asdf
+(defvar wg-wconfig-has-changed nil
+  "Flag set by `window-configuration-change-hook'")
 
-(defun wg-working-config-update-hook ()
-  ""
+(defun wg-flag-wconfig-change ()
+  "Set `wg-wconfig-has-changed' non-nil when the window config has changed.
+Added to `window-configuration-change-hook'."
   (when (and wg-do-memorize (zerop (minibuffer-depth)))
-    (let ((wg (wg-current-workgroup t)))
-      (when wg
-        (wg-push-new-working-config wg (wg-make-wconfig))))))
+    (setq wg-wconfig-has-changed t)))
 
-(defun wg-wconfig-undo ()
-  (interactive)
-  (let ((wg (wg-current-workgroup)))
-    (wg-aif (nth (1+ (wg-working-config-undo-pointer wg))
-                 (wg-working-config-undo-list wg))
-        (progn
-          (incf (gethash 'undo-pointer (wg-working-config-undo-table wg)))
-          (let (wg-do-memorize) (wg-restore-wconfig it)))
-      (error "There's no more undo information."))))
+(defun wg-update-undo-history-if-necessary ()
+  "Update undo history when `wg-wconfig-has-changed' is non-nil.
+Added to `post-command-hook'."
+  (when wg-wconfig-has-changed
+    (setq wg-wconfig-has-changed nil)
+    (wg-awhen (wg-current-workgroup t)
+      (wg-push-new-working-config it (wg-make-wconfig)))))
 
-(defun wg-wconfig-redo ()
-  ""
-  (interactive)
-  (let ((wg (wg-current-workgroup)))
-    (if (> (wg-working-config-undo-pointer wg) 0)
-        (progn
-          (decf (gethash 'undo-pointer (wg-working-config-undo-table wg)))
-          (let (wg-do-memorize)
-            (wg-restore-wconfig
-             (nth (wg-working-config-undo-pointer wg)
-                  (wg-working-config-undo-list wg)))))
-      (error "There's no more redo information."))))
 
 ;; (wg-working-config-undo-pointer (wg-current-workgroup))
-
 ;; (global-set-key (kbd "C-z C-x /") 'wg-wconfig-undo)
-
 ;; (add-hook 'window-configuration-change-hook 'wg-working-config-update-hook)
 ;; (length (wg-working-config-undo-list (wg-current-workgroup)))
 
@@ -1857,6 +1841,35 @@ Deletes saved state in `wg-frame-locals' and nulls out `wg-list',
   (wg-fontified-msg (:cmd "Reset: ") (:msg "Workgroups")))
 
 
+;;; undo/redo
+
+(defun wg-undo-wconfig-change ()
+  "Undo a change to the current workgroup's window config."
+  (interactive)
+  (let ((wg (wg-current-workgroup)))
+    (wg-aif (nth (1+ (wg-working-config-undo-pointer wg))
+                 (wg-working-config-undo-list wg))
+        (progn
+          (incf (gethash 'undo-pointer (wg-working-config-undo-table wg)))
+          (let (wg-do-memorize) (wg-restore-wconfig it))
+          (wg-fontified-msg (:msg "Undo!")))
+      (error "There's no more undo information."))))
+
+(defun wg-redo-wconfig-change ()
+  "Redo a change to the current workgroup's window config."
+  (interactive)
+  (let ((wg (wg-current-workgroup)))
+    (if (> (wg-working-config-undo-pointer wg) 0)
+        (progn
+          (decf (gethash 'undo-pointer (wg-working-config-undo-table wg)))
+          (let (wg-do-memorize)
+            (wg-restore-wconfig
+             (nth (wg-working-config-undo-pointer wg)
+                  (wg-working-config-undo-list wg))))
+          (wg-fontified-msg (:msg "Redo!")))
+      (error "There's no more redo information."))))
+
+
 ;;; file commands
 
 (defun wg-save (file)
@@ -2196,8 +2209,8 @@ The string is passed through a format arg to escape %'s."
 
     ;; undo/redo
 
-    "["          'wg-wconfig-undo
-    "]"          'wg-wconfig-redo
+    "["          'wg-undo-wconfig-change
+    "]"          'wg-redo-wconfig-change
 
 
     ;; workgroup movement
@@ -2306,15 +2319,15 @@ If ARG is anything else, turn on `workgroups-mode'."
   :group       'workgroups
   (cond (workgroups-mode
          (add-hook 'kill-emacs-query-functions 'wg-emacs-exit-query)
-         (add-hook 'window-configuration-change-hook
-                   'wg-working-config-update-hook)
+         (add-hook 'window-configuration-change-hook 'wg-flag-wconfig-change)
+         (add-hook 'post-command-hook 'wg-update-undo-history-if-necessary)
          (wg-set-prefix-key)
          (wg-mode-line-add-display))
         (t
          (wg-workgroups-mode-exit-query)
          (remove-hook 'kill-emacs-query-functions 'wg-emacs-exit-query)
-         (remove-hook 'window-configuration-change-hook
-                      'wg-working-config-update-hook)
+         (remove-hook 'window-configuration-change-hook 'wg-flag-wconfig-change)
+         (remove-hook 'post-command-hook 'wg-update-undo-history-if-necessary)
          (wg-unset-prefix-key)
          (wg-mode-line-remove-display))))
 
