@@ -49,6 +49,13 @@
 ;; HIGH-BOUND of a bounds list.  See `wg-with-bounds'.
 ;;
 
+;; TODO:
+;;
+;;  - make buffers separate objects
+;;  - each window has one buffer
+;;  - each workgroup has a list of buffers
+;;
+
 
 ;;; Code:
 
@@ -61,7 +68,10 @@
   "Current version of workgroups.")
 
 (defconst wg-persisted-workgroups-tag '-*-workgroups-*-
-  "This should be the car of any list of persisted workgroups.")
+  "Tag appearing at the beginning of any list of persisted workgroups.")
+
+(defconst wg-persisted-workgroups-format-version "2.0"
+  "Current version number of the format of persisted workgroup lists.")
 
 
 ;;; customization
@@ -317,7 +327,7 @@ wrapped status when `wg-morph' is complete."
 (defvar wg-list nil
   "List of currently defined workgroups.")
 
-(defvar wg-frame-table (make-hash-table)
+(defvar wg-frame-locals (make-hash-table)
   "Hash table keyed on frame, storing each frame's state.")
 
 (defvar wg-dirty nil
@@ -700,6 +710,10 @@ minibuffer is active.")))
 
 ;;; type predicates
 
+(defun wg-buffer-p (obj)
+  "Return t if OBJ is a Workgroups buffer, nil otherwise."
+  (wg-type-p 'buffer obj))
+
 (defun wg-window-p (obj)
   "Return t if OBJ is a Workgroups window, nil otherwise."
   (wg-type-p 'window obj))
@@ -904,15 +918,14 @@ Otherwise, reverse WTREE vertically."
 
 (defun wg-wtree-move-window (wtree offset)
   "Offset `selected-window' OFFSET places in WTREE."
-  (flet ((inner
-          (w)
-          (if (wg-window-p w) w
-            (wg-abind w ((d1 dir) edges wlist)
-              (wg-make-wtree
-               d1 edges
-               (wg-aif (wg-get-some (sw wlist) (wg-aget sw 'selwin))
-                   (wg-cyclic-offset-elt it wlist offset)
-                 (mapcar #'inner wlist)))))))
+  (flet ((inner (w)
+                (if (wg-window-p w) w
+                  (wg-abind w ((d1 dir) edges wlist)
+                    (wg-make-wtree
+                     d1 edges
+                     (wg-aif (wg-get-some (sw wlist) (wg-aget sw 'selwin))
+                         (wg-cyclic-offset-elt it wlist offset)
+                       (mapcar #'inner wlist)))))))
     (wg-normalize-wtree (inner wtree))))
 
 (defun wg-wconfig-move-window (offset &optional wconfig)
@@ -921,7 +934,7 @@ Otherwise, reverse WTREE vertically."
     (wg-aput wc 'wtree (wg-wtree-move-window (wg-aget wc 'wtree) offset))))
 
 
-;;; wconfig making
+;;; wconfig construction
 
 (defun wg-window-point (ewin)
   "Return `point' or :max.  See `wg-restore-point-max'.
@@ -929,24 +942,33 @@ EWIN should be an Emacs window object."
   (let ((p (window-point ewin)))
     (if (and wg-restore-point-max (= p (point-max))) :max p)))
 
+(defun wg-ebuf->buffer (ebuf)
+  "Return a new Workgroups buffer from EBUF.
+EBUF should be an Emacs buffer object"
+  (with-current-buffer ebuf
+    `((type        .    buffer)
+      (bname       .   ,(buffer-name))
+      (fname       .   ,(buffer-file-name))
+      (major-mode  .   ,major-mode)
+      (mark        .   ,(mark))
+      (markx       .   ,mark-active))))
+
 (defun wg-ewin->window (ewin)
-  "Return a new workgroups window from EWIN.
+  "Return a new Workgroups window from EWIN.
 EWIN should be an Emacs window object."
-  (with-current-buffer (window-buffer ewin)
-    `((type     .   window)
-      (edges    .  ,(window-edges ewin))
-      (bname    .  ,(buffer-name))
-      (fname    .  ,(buffer-file-name))
-      (point    .  ,(wg-window-point ewin))
-      (mark     .  ,(mark))
-      (markx    .  ,mark-active)
-      (wstart   .  ,(window-start ewin))
-      (hscroll  .  ,(window-hscroll ewin))
-      (sbars    .  ,(window-scroll-bars ewin))
-      (margins  .  ,(window-margins ewin))
-      (fringes  .  ,(window-fringes ewin))
-      (selwin   .  ,(eq ewin (selected-window)))
-      (mbswin   .  ,(eq ewin minibuffer-scroll-window)))))
+  (let ((selwin (eq ewin (selected-window))))
+    (with-selected-window ewin
+      `((type     .   window)
+        (buffer   .  ,(wg-ebuf->buffer (window-buffer ewin)))
+        (edges    .  ,(window-edges ewin))
+        (point    .  ,(wg-window-point ewin))
+        (wstart   .  ,(window-start ewin))
+        (hscroll  .  ,(window-hscroll ewin))
+        (sbars    .  ,(window-scroll-bars ewin))
+        (margins  .  ,(window-margins ewin))
+        (fringes  .  ,(window-fringes ewin))
+        (selwin   .  ,selwin)
+        (mbswin   .  ,(eq ewin minibuffer-scroll-window))))))
 
 (defun wg-make-wtree (dir edges wlist)
   "Return a new Workgroups wtree from DIR EDGES and WLIST."
@@ -989,44 +1011,44 @@ BUFFER or `wg-default-buffer' is visible in the only window."
     (wg-make-wconfig)))
 
 
-;;; wconfig restoring
+;;; wconfig restoration
 
-(defun wg-switch-to-window-buffer (win)
+(defun wg-restore-buffer (buf)
   "Switch to a buffer determined from WIN's fname and bname.
 Return the buffer if it was found, nil otherwise."
-  (wg-abind win (fname bname)
-    (cond ((and fname (file-exists-p fname))
-           (find-file fname)
-           (rename-buffer bname)
-           (current-buffer))
-          ((wg-awhen (get-buffer bname) (switch-to-buffer it)))
-          (t (switch-to-buffer wg-default-buffer) nil))))
+  (wg-abind buf (fname bname mark markx)
+    (when (cond ((and fname (file-exists-p fname))
+                 (find-file fname)
+                 (rename-buffer bname))
+                ((wg-awhen (get-buffer bname) (switch-to-buffer it)))
+                (t (switch-to-buffer wg-default-buffer) nil))
+      (set-mark mark)
+      (unless markx (deactivate-mark))
+      (current-buffer))))
 
 (defun wg-restore-window (win)
   "Restore WIN in `selected-window'."
-  (wg-abind win (point mark markx wstart hscroll sbars
-                       fringes margins selwin mbswin)
+  (wg-abind win (buffer point wstart hscroll sbars fringes
+                        margins selwin mbswin)
     (let ((sw (selected-window)))
       (when selwin (setq wg-selected-window sw))
-      (when (wg-switch-to-window-buffer win)
+      (when (wg-restore-buffer buffer)
+        (set-window-start sw wstart t)
+        (set-window-point
+         sw (cond ((not wg-restore-point) wstart)
+                  ((eq point :max) (point-max))
+                  (t point)))
+        (when (>= wstart (point-max)) (recenter))
         (when (and wg-restore-mbs-window mbswin)
           (setq minibuffer-scroll-window sw))
         (when wg-restore-scroll-bars
-          (set-window-scroll-bars
-           sw (nth 0 sbars) (nth 2 sbars) (nth 3 sbars)))
+          (wg-dbind (width cols vtype htype) sbars
+            (set-window-scroll-bars sw width vtype htype)))
         (when wg-restore-fringes
           (apply #'set-window-fringes sw fringes))
         (when wg-restore-margins
           (set-window-margins sw (car margins) (cdr margins)))
-        (set-window-hscroll sw hscroll)
-        (set-mark mark)
-        (unless markx (deactivate-mark))
-        (let ((pm (point-max)))
-          (set-window-start sw wstart t)
-          (goto-char (cond ((not wg-restore-point) wstart)
-                           ((eq point :max) pm)
-                           (t point)))
-          (when (>= wstart pm) (recenter)))))))
+        (set-window-hscroll sw hscroll)))))
 
 (defun wg-restore-wtree (wtree)
   "Restore WTREE in `selected-frame'."
@@ -1049,7 +1071,9 @@ Return the buffer if it was found, nil otherwise."
 (defun wg-restore-wconfig (wconfig)
   "Restore WCONFIG in `selected-frame'."
   (wg-error-on-active-minibuffer)
-  (let ((frame (selected-frame)) wtree)
+  (let ((frame (selected-frame))
+        (wg-do-memorize nil)
+        (wtree nil))
     (wg-abind wconfig (left top sbars sbwid)
       (setq wtree (w-set-frame-size-and-scale-wtree wconfig frame))
       (when (and wg-restore-position left top)
@@ -1157,6 +1181,7 @@ Assumes both FROM and TO fit in `selected-frame'."
          (wg-morph-determine-steps wg-morph-hsteps wg-morph-terminal-hsteps))
         (wg-morph-vsteps
          (wg-morph-determine-steps wg-morph-vsteps wg-morph-terminal-vsteps))
+        (wg-do-memorize nil)
         (wg-restore-scroll-bars nil)
         (wg-restore-fringes nil)
         (wg-restore-margins nil)
@@ -1195,39 +1220,6 @@ Assumes both FROM and TO fit in `selected-frame'."
   (or (wg-get-alist key val (wg-list noerror))
       (unless noerror
         (error "There is no workgroup with an %S of %S" key val))))
-
-
-;;; frame-table ops
-
-(defmacro wg-with-frame-state (frame state &rest body)
-  "Bind FRAME and STATE and eval BODY.
-FRAME is bound to `selected-frame', and STATE is bound to FRAME's
-value in `wg-frame-table'."
-  (declare (indent 2))
-  `(let* ((,frame (selected-frame))
-          (,state (or (gethash ,frame wg-frame-table)
-                      (puthash ,frame (make-hash-table)
-                               wg-frame-table))))
-     ,@body))
-
-(defun wg-frame-val (key)
-  "Return KEY's value in `selected-frame's state in `wg-frame-table'."
-  (wg-with-frame-state frame state
-    (gethash key state)))
-
-(defun wg-set-frame-val (key val)
-  "Set KEY to VAL in `selected-frame's state in `wg-frame-table'."
-  (wg-with-frame-state frame state
-    (puthash key val state)))
-
-(defun wg-delete-frame-key (key)
-  "Remove KEY from `selected-frame's state in `wg-frame-table'."
-  (wg-with-frame-state frame state
-    (remhash key state)))
-
-(defun wg-delete-frame (frame)
-  "Remove FRAME from `wg-frame-table'."
-  (remhash frame wg-frame-table))
 
 
 ;;; workgroup property ops
@@ -1273,33 +1265,47 @@ value in `wg-frame-table'."
   "Return a list of workgroup names."
   (mapcar 'wg-name (wg-list noerror)))
 
+(defun wg-buffer-list (workgroup)
+  "Return the buffer-list of WORKGROUP."
+  (wg-get-workgroup-prop 'buffer-list workgroup))
+
+(defun wg-set-buffer-list (workgroup buffer-list)
+  "Set the buffer-list of WORKGROUP to BUFFER-LIST."
+  (wg-set-workgroup-prop 'buffer-list buffer-list workgroup))
+
+;; asdf
+
+;; (wg-buffer-list (wg-current-workgroup))
+;; (wg-set-buffer-list (wg-current-workgroup) '(foo bar baz))
+;; (assq 'buffer-list (wg-current-workgroup))
+
 
 ;;; current and previous workgroup ops
 
-(defun wg-get-frame-workgroup (key &optional noerror)
-  "Return the workgroup under KEY in `wg-frame-table'."
-  (or (wg-frame-val key)
-      (unless noerror
-        (error "There's no %s in the frame" key))))
-
-(defun wg-current-workgroup (&optional noerror)
+(defun wg-current-workgroup (&optional noerror frame)
   "Return the current workgroup."
-  (wg-get-frame-workgroup 'current-workgroup noerror))
+  (or (wg-awhen (frame-parameter frame 'wg-current-workgroup-uid)
+        (wg-get-workgroup 'uid it noerror))
+      (unless noerror
+        (error "There's no current workgroup in this frame."))))
 
-(defun wg-set-current-workgroup (workgroup)
+(defun wg-set-current-workgroup (workgroup &optional frame)
   "Set the current workgroup to WORKGROUP."
-  (wg-set-frame-val 'current-workgroup workgroup))
+  (set-frame-parameter frame 'wg-current-workgroup-uid (wg-uid workgroup)))
 
-(defun wg-previous-workgroup (&optional noerror)
+(defun wg-previous-workgroup (&optional noerror frame)
   "Return the previous workgroup."
-  (wg-get-frame-workgroup 'previous-workgroup noerror))
+  (or (wg-awhen (frame-parameter frame 'wg-previous-workgroup-uid)
+        (wg-get-workgroup 'uid it noerror))
+      (unless noerror
+        (error "There's no previous workgroup in this frame."))))
 
-(defun wg-set-previous-workgroup (workgroup)
+(defun wg-set-previous-workgroup (workgroup &optional frame)
   "Set the previous workgroup to WORKGROUP."
-  (wg-set-frame-val 'previous-workgroup workgroup))
+  (set-frame-parameter frame 'wg-previous-workgroup-uid (wg-uid workgroup)))
 
 
-;;; base and working configs
+;;; base config
 
 (defun wg-set-base-config (workgroup config)
   "Set the base config of WORKGROUP to CONFIG."
@@ -1309,31 +1315,114 @@ value in `wg-frame-table'."
   "Return the base config of WORKGROUP."
   (wg-get-workgroup-prop 'wconfig workgroup))
 
-(defun wg-set-working-config (workgroup config)
-  "Set the working config of WORKGROUP to CONFIG."
-  (wg-set-frame-val (wg-uid workgroup) config))
 
-(defun wg-update-working-config (workgroup)
-  "Set WORKGROUP's working config to the current window config."
-  (wg-set-working-config workgroup (wg-make-wconfig)))
+;;; working config
 
-(defun wg-working-config (workgroup)
+(defun wg-working-config-table (&optional frame)
+  "Return FRAME's working config table, creating it first if necessary."
+  (or (frame-parameter frame 'wg-working-config-table)
+      (let ((table (make-hash-table)))
+        (set-frame-parameter frame 'wg-working-config-table table)
+        table)))
+
+(defun wg-working-config-undo-table (workgroup &optional frame)
+  "Return FRAME's WORKGROUP's undo table."
+  (let ((uid (wg-uid workgroup))
+        (wc-table (wg-working-config-table frame)))
+    (or (gethash uid wc-table)
+        (puthash uid (make-hash-table) wc-table))))
+
+(defun wg-working-config-undo-pointer (workgroup &optional frame)
+  "Return FRAME's WORKGROUP's undo table's undo pointer."
+  (let ((wc-undo-table (wg-working-config-undo-table workgroup frame)))
+    (or (gethash 'undo-pointer wc-undo-table)
+        (puthash 'undo-pointer 0 wc-undo-table))))
+
+(defun wg-working-config-undo-list (workgroup &optional frame)
+  "Return FRAME's WORKGROUP's undo table's undo list."
+  (let ((wc-undo-table (wg-working-config-undo-table workgroup frame)))
+    (gethash 'undo-list wc-undo-table)))
+
+(defun wg-set-working-config (workgroup config &optional frame)
+  "Set the working config of WORKGROUP to CONFIG in FRAME."
+  (wg-aif (wg-working-config-undo-list workgroup frame)
+      (setf (nth (wg-working-config-undo-pointer workgroup frame) it) config)
+    (puthash 'undo-list (list config)
+             (wg-working-config-undo-table workgroup frame))))
+
+(defun wg-update-working-config (workgroup &optional frame)
+  "Set WORKGROUP's working config in FRAME to the current window config."
+  (wg-set-working-config workgroup (wg-make-wconfig) frame))
+
+(defun wg-push-new-working-config (workgroup config &optional frame)
+  ""
+  (let ((undo-table (wg-working-config-undo-table workgroup frame)))
+    (setf (gethash 'undo-list undo-table)
+          (nthcdr (wg-working-config-undo-pointer workgroup frame)
+                  (wg-working-config-undo-list workgroup frame)))
+    (push config (gethash 'undo-list undo-table))
+    (setf (gethash 'undo-pointer undo-table) 0)))
+
+(defun wg-working-config (workgroup &optional frame)
   "Return the working config of WORKGROUP.
 If WORKGROUP is the current workgroup, update it first."
-  (when (eq workgroup (wg-current-workgroup t))
-    (wg-update-working-config workgroup))
-  (or (wg-frame-val (wg-uid workgroup))
+  (when (eq workgroup (wg-current-workgroup t frame))
+    (wg-update-working-config workgroup frame))
+  (or (nth (wg-working-config-undo-pointer workgroup frame)
+           (wg-working-config-undo-list workgroup frame))
       (wg-base-config workgroup)))
 
+(defvar wg-do-memorize t)
 
-;;; workgroup making and restoring
+;; asdf
+
+(defun wg-working-config-update-hook ()
+  ""
+  (when (and wg-do-memorize (zerop (minibuffer-depth)))
+    (let ((wg (wg-current-workgroup t)))
+      (when wg
+        (wg-push-new-working-config wg (wg-make-wconfig))))))
+
+(defun wg-wconfig-undo ()
+  (interactive)
+  (let ((wg (wg-current-workgroup)))
+    (wg-aif (nth (1+ (wg-working-config-undo-pointer wg))
+                 (wg-working-config-undo-list wg))
+        (progn
+          (incf (gethash 'undo-pointer (wg-working-config-undo-table wg)))
+          (let (wg-do-memorize) (wg-restore-wconfig it)))
+      (error "There's no more undo information."))))
+
+(defun wg-wconfig-redo ()
+  ""
+  (interactive)
+  (let ((wg (wg-current-workgroup)))
+    (if (> (wg-working-config-undo-pointer wg) 0)
+        (progn
+          (decf (gethash 'undo-pointer (wg-working-config-undo-table wg)))
+          (let (wg-do-memorize)
+            (wg-restore-wconfig
+             (nth (wg-working-config-undo-pointer wg)
+                  (wg-working-config-undo-list wg)))))
+      (error "There's no more redo information."))))
+
+;; (wg-working-config-undo-pointer (wg-current-workgroup))
+
+;; (global-set-key (kbd "C-z C-x /") 'wg-wconfig-undo)
+
+;; (add-hook 'window-configuration-change-hook 'wg-working-config-update-hook)
+;; (length (wg-working-config-undo-list (wg-current-workgroup)))
+
+
+;;; workgroup construction and restoration
 
 (defun wg-make-workgroup (uid name wconfig)
   "Return a new workgroup from UID, NAME and WCONFIG."
-  `((type     .   workgroup)
-    (uid      .  ,uid)
-    (name     .  ,name)
-    (wconfig  .  ,wconfig)))
+  `((type         .   workgroup)
+    (uid          .  ,uid)
+    (name         .  ,name)
+    (wconfig      .  ,wconfig)
+    (buffer-list  .   nil)))
 
 (defun wg-make-default-workgroup (name)
   "Return a new workgroup named NAME with wconfig `wg-make-wconfig'."
@@ -1353,14 +1442,13 @@ If WORKGROUP is the current workgroup, update it first."
 
 (defun wg-delete (workgroup)
   "Remove WORKGROUP from `wg-list'.
-Also delete all references to it in `wg-frame-table'."
-  (wg-dohash (frame state wg-frame-table)
-    (with-selected-frame frame
-      (wg-delete-frame-key (wg-uid workgroup))
-      (when (eq workgroup (wg-current-workgroup t))
-        (wg-set-current-workgroup nil))
-      (when (eq workgroup (wg-previous-workgroup t))
-        (wg-set-previous-workgroup nil))))
+Also delete all references to it in `wg-frame-locals'."
+  (dolist (frame (frame-list))
+    (remhash (wg-uid workgroup) (wg-working-config-table frame))
+    (when (eq workgroup (wg-current-workgroup t frame))
+      (wg-set-current-workgroup nil frame))
+    (when (eq workgroup (wg-previous-workgroup t frame))
+      (wg-set-previous-workgroup nil frame)))
   (setq wg-dirty t wg-list (remove workgroup (wg-list))))
 
 (defun wg-add (new &optional pos)
@@ -1396,28 +1484,24 @@ Query to overwrite if a workgroup with the same name exists."
     (error "Both workgroups aren't present in `wg-list'.")))
 
 
-;;; buffer list ops
-
-(defun wg-wtree-buffer-list (wtree)
-  "Return a list of unique buffer names visible in WTREE."
-  (flet ((rec (w) (if (wg-window-p w) (list (wg-aget w 'bname))
-                    (mapcan #'rec (wg-wlist w)))))
-    (remove-duplicates (rec wtree) :test #'equal)))
-
-(defun wg-workgroup-buffer-list (workgroup)
-  "Call `wg-wconfig-buffer-list' on WORKGROUP's working config."
-  (wg-wtree-buffer-list (wg-wtree (wg-working-config workgroup))))
-
-(defun wg-buffer-list ()
-  "Call `wg-workgroup-buffer-list' on all workgroups in `wg-list'."
-  (remove-duplicates
-   (mapcan #'wg-workgroup-buffer-list (wg-list t))
-   :test #'equal))
-
-(defun wg-find-buffer (bname)
-  "Return the first workgroup in which a buffer named BNAME is visible."
-  (wg-get-some (wg (wg-list))
-    (member bname (wg-workgroup-buffer-list wg))))
+;; ;;; buffer list ops
+;; (defun wg-wtree-buffer-list (wtree)
+;;   "Return a list of unique buffer names visible in WTREE."
+;;   (flet ((rec (w) (if (wg-window-p w) (list (wg-aget w 'bname))
+;;                     (mapcan #'rec (wg-wlist w)))))
+;;     (remove-duplicates (rec wtree) :test #'equal)))
+;; (defun wg-workgroup-buffer-list (workgroup)
+;;   "Call `wg-wconfig-buffer-list' on WORKGROUP's working config."
+;;   (wg-wtree-buffer-list (wg-wtree (wg-working-config workgroup))))
+;; (defun wg-buffer-list ()
+;;   "Call `wg-workgroup-buffer-list' on all workgroups in `wg-list'."
+;;   (remove-duplicates
+;;    (mapcan #'wg-workgroup-buffer-list (wg-list t))
+;;    :test #'equal))
+;; (defun wg-find-buffer (bname)
+;;   "Return the first workgroup in which a buffer named BNAME is visible."
+;;   (wg-get-some (wg (wg-list))
+;;     (member bname (wg-workgroup-buffer-list wg))))
 
 
 ;;; mode-line
@@ -1465,9 +1549,9 @@ Query to overwrite if a workgroup with the same name exists."
    'name (wg-completing-read "Workgroup: " (wg-names))
    noerror))
 
-(defun wg-read-buffer-name ()
-  "Read and return a buffer-name from `wg-buffer-list'."
-  (wg-completing-read "Workgroup buffers: " (wg-buffer-list)))
+;; (defun wg-read-buffer-name ()
+;;   "Read and return a buffer-name from `wg-buffer-list'."
+;;   (wg-completing-read "Workgroup buffers: " (wg-buffer-list)))
 
 (defun wg-read-new-workgroup-name (&optional prompt)
   "Read a non-empty name string from the minibuffer."
@@ -1560,7 +1644,7 @@ BASE non-nil means restore WORKGROUP's base config."
     (when (eq it workgroup) (error "Already on: %s" (wg-name it)))
     (wg-update-working-config it))
   (wg-restore-workgroup workgroup base)
-  (wg-set-previous-workgroup (wg-current-workgroup t))
+  (wg-awhen (wg-current-workgroup t) (wg-set-previous-workgroup it))
   (wg-set-current-workgroup workgroup)
   (run-hooks 'wg-switch-hook)
   (wg-fontified-msg (:cmd "Switched:  ") (wg-disp)))
@@ -1668,6 +1752,7 @@ Worgroups are updated with their working configs in the
   (mapc #'wg-update-workgroup (wg-list))
   (wg-fontified-msg (:cmd "Updated: ") (:msg "All")))
 
+;; FIXME: This shouldn't throw an error when there's no current workgroup
 (defun wg-revert-workgroup (workgroup)
   "Set the working config of WORKGROUP to its base config in `selected-frame'."
   (interactive (list (wg-arg)))
@@ -1759,12 +1844,15 @@ Worgroups are updated with their working configs in the
 
 (defun wg-reset (&optional force)
   "Reset workgroups.
-Deletes saved state in `wg-frame-table' and nulls out `wg-list',
+Deletes saved state in `wg-frame-locals' and nulls out `wg-list',
 `wg-file' and `wg-kill-ring'."
   (interactive "P")
   (unless (or force wg-no-confirm (y-or-n-p "Are you sure? "))
     (error "Canceled"))
-  (clrhash wg-frame-table)
+  (dolist (frame (frame-list))
+    (set-frame-parameter frame 'wg-working-config-table nil)
+    (set-frame-parameter frame 'wg-current-workgroup-uid nil)
+    (set-frame-parameter frame 'wg-previous-workgroup-uid nil))
   (setq wg-list nil wg-file nil wg-dirty nil)
   (wg-fontified-msg (:cmd "Reset: ") (:msg "Workgroups")))
 
@@ -1778,10 +1866,14 @@ is nil, read a filename.  Otherwise use `wg-file'."
   (interactive
    (list (if (or current-prefix-arg (not (wg-file t)))
              (read-file-name "File: ") (wg-file))))
-  (wg-write-sexp-to-file
-   (cons wg-persisted-workgroups-tag (wg-list)) file)
-  (setq wg-dirty nil wg-file file)
-  (wg-fontified-msg (:cmd "Wrote: ") (:file file)))
+  (if (not wg-dirty) (message "(No workgroups need to be saved)")
+    (wg-write-sexp-to-file
+     `(,wg-persisted-workgroups-tag
+       ,wg-persisted-workgroups-format-version
+       ,@(wg-list))
+     file)
+    (setq wg-dirty nil wg-file file)
+    (wg-fontified-msg (:cmd "Wrote: ") (:file file))))
 
 (defun wg-load (file)
   "Load workgroups from FILE.
@@ -1790,11 +1882,16 @@ is non-nil, use `wg-file'. Otherwise read a filename."
   (interactive
    (list (if (and current-prefix-arg (wg-file t))
              (wg-file) (read-file-name "File: "))))
-  (wg-dbind (tag . workgroups) (wg-read-sexp-from-file file)
-    (unless (eq tag wg-persisted-workgroups-tag)
+  (let ((contents (wg-read-sexp-from-file file)))
+    (unless (consp contents)
       (error "%S is not a workgroups file." file))
-    (wg-reset t)
-    (setq wg-list workgroups wg-file file))
+    (wg-dbind (tag version . workgroups-list) contents
+      (unless (eq tag wg-persisted-workgroups-tag)
+        (error "%S is not a workgroups file." file))
+      (unless (string= version wg-persisted-workgroups-format-version)
+        (error "%S is incompatible with this version of Workgroups." file))
+      (wg-reset t)
+      (setq wg-list workgroups-list wg-file file)))
   (when wg-switch-on-load
     (wg-awhen (wg-list t)
       (wg-switch-to-workgroup (car it))))
@@ -1812,11 +1909,11 @@ is non-nil, use `wg-file'. Otherwise read a filename."
   (wg-create-workgroup (file-name-nondirectory file))
   (find-file-read-only file))
 
-(defun wg-get-by-buffer (buf)
-  "Switch to the first workgroup in which BUF is visible."
-  (interactive (list (wg-read-buffer-name)))
-  (wg-aif (wg-find-buffer buf) (wg-switch-to-workgroup it)
-    (error "No workgroup contains %S" buf)))
+;; (defun wg-get-by-buffer (buf)
+;;   "Switch to the first workgroup in which BUF is visible."
+;;   (interactive (list (wg-read-buffer-name)))
+;;   (wg-aif (wg-find-buffer buf) (wg-switch-to-workgroup it)
+;;     (error "No workgroup contains %S" buf)))
 
 (defun wg-dired (dir &optional switches)
   "Create a workgroup and open DIR in dired with SWITCHES."
@@ -2097,6 +2194,12 @@ The string is passed through a format arg to escape %'s."
     "a"          'wg-switch-to-previous-workgroup
 
 
+    ;; undo/redo
+
+    "["          'wg-wconfig-undo
+    "]"          'wg-wconfig-redo
+
+
     ;; workgroup movement
 
     "C-x"        'wg-swap-workgroups
@@ -2203,13 +2306,15 @@ If ARG is anything else, turn on `workgroups-mode'."
   :group       'workgroups
   (cond (workgroups-mode
          (add-hook 'kill-emacs-query-functions 'wg-emacs-exit-query)
-         (add-hook 'delete-frame-functions 'wg-delete-frame)
+         (add-hook 'window-configuration-change-hook
+                   'wg-working-config-update-hook)
          (wg-set-prefix-key)
          (wg-mode-line-add-display))
         (t
          (wg-workgroups-mode-exit-query)
          (remove-hook 'kill-emacs-query-functions 'wg-emacs-exit-query)
-         (remove-hook 'delete-frame-functions 'wg-delete-frame)
+         (remove-hook 'window-configuration-change-hook
+                      'wg-working-config-update-hook)
          (wg-unset-prefix-key)
          (wg-mode-line-remove-display))))
 
