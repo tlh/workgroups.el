@@ -203,6 +203,49 @@ in (say) irc buffers where `point-max' is constantly increasing."
   :group 'workgroups)
 
 
+;; undo/redo customization
+
+(defcustom wg-commands-that-alter-window-configs
+  '(split-window
+    split-window-horizontally
+    split-window-vertically
+    delete-window
+    delete-other-windows
+    delete-other-windows-vertically
+    enlarge-window
+    enlarge-window-horizontally
+    shrink-window
+    shrink-window-horizontally
+    shrink-window-if-larger-than-buffer
+    switch-to-buffer
+    switch-to-buffer-other-window
+    switch-to-buffer-other-frame
+    ido-switch-buffer
+    ido-switch-buffer-other-window
+    ido-switch-buffer-other-frame
+    iswitchb-buffer
+    iswitchb-buffer-other-window
+    iswitchb-buffer-other-frame
+    balance-windows
+    balance-windows-area
+    help-with-tutorial)
+  "List of commands before which to save up-to-date undo info
+about the current window-config.  Since Emacs has no
+`pre-window-configuration-change-hook', there's no way to save
+undo information directly prior to *every* command that modifies
+the window-config.  Instead, workgroups saves undo information
+prior to every command in this list.  Undo info will still be
+mostly correct without including commands in this list, as undo
+info is saved *after* every command that alters the window
+config (via `window-configuration-change-hook'), but details like
+point, mark and `selected-window' will be lost.
+
+Add commands to this list before which you'd like up-to-date undo
+info saved."
+  :type 'list
+  :group 'workgroups)
+
+
 ;; morph customization
 
 (defcustom wg-morph-on t
@@ -339,7 +382,7 @@ wrapped status when `wg-morph' is complete."
 (defvar wg-record-window-config-changes t
   "Non-nil when window config changes should be added to the undo history.")
 
-(defvar wg-window-config-undo-length 20
+(defvar wg-undo-limit 20
   "Number of past window configs for undo to retain.")
 
 (defvar wg-window-min-width 2
@@ -1019,7 +1062,8 @@ BUFFER or `wg-default-buffer' is visible in the only window."
 
 ;;; wconfig restoration
 
-(defun wg-restore-buffer (buf)
+;; FIXME: error when the file doesn't exist
+(defun wg-restore-buffer (buf &optional NOERROR)
   "Switch to a buffer determined from WIN's fname and bname.
 Return the buffer if it was found, nil otherwise."
   (wg-abind buf (fname bname mark markx)
@@ -1080,6 +1124,8 @@ Return the buffer if it was found, nil otherwise."
   (let ((frame (selected-frame))
         (wg-record-window-config-changes nil)
         (wtree nil))
+    (wg-awhen (wg-current-workgroup t frame)
+      (wg-set-working-config it (wg-make-wconfig)))
     (wg-abind wconfig (left top sbars sbwid)
       (setq wtree (w-set-frame-size-and-scale-wtree wconfig frame))
       (when (and wg-restore-position left top)
@@ -1279,11 +1325,78 @@ Assumes both FROM and TO fit in `selected-frame'."
   "Set the buffer-list of WORKGROUP to BUFFER-LIST."
   (wg-set-workgroup-prop 'buffer-list buffer-list workgroup))
 
+(defun wg-buffer-names (workgroup)
+  "Return a list of the names of WORKGROUP's buffers."
+  (mapcar (lambda (buf) (wg-aget buf 'bname)) (wg-buffer-list workgroup)))
+
+
+;; buffer-list commands
+
+(defun wg-add-ebuf-to-workgroup (ebuf workgroup)
+  ""
+  (let ((bl (wg-buffer-list workgroup))
+        (bname (buffer-name ebuf))
+        (fname (buffer-file-name ebuf)))
+    (dolist (buf bl)
+      (when (and (equal bname (wg-aget buf 'bname))
+                 (equal fname (wg-aget buf 'fname)))
+        (error "%s has already been added to %s" bname (wg-name workgroup))))
+    (wg-set-buffer-list workgroup (cons (wg-ebuf->buffer ebuf) bl))))
+
+(defun wg-remove-ebuf-from-workgroup (ebuf workgroup)
+  ""
+  (let ((bl (wg-buffer-list workgroup))
+        (bname (buffer-name ebuf))
+        (fname (buffer-file-name ebuf)))
+    (wg-aif (catch 'res
+              (dolist (buf bl)
+                (when (and (equal bname (wg-aget buf 'bname))
+                           (equal fname (wg-aget buf 'fname)))
+                  (throw 'res buf))))
+        (wg-set-buffer-list workgroup (remove it bl))
+      (error "%s is not a member of %s" bname (wg-name workgroup)))))
+
+;; (defun wg-add-ebuf-to-workgroup (ebuf workgroup)
+;;   ""
+;;   (let ((bl (wg-buffer-list workgroup))
+;;         (fname (buffer-file-name ebuf))
+;;         (bname (buffer-name ebuf))
+;;         (wgname (wg-name workgroup)))
+;;     (if fname
+;;         (dolist (buf bl)
+;;           (when (equal fname (wg-aget buf 'fname))
+;;             (error "%s has already been added to %s" fname wgname)))
+;;       (dolist (buf bl)
+;;         (when (equal bname (wg-aget buf 'bname))
+;;           (error "A buffer named %s has already been added to %s"
+;;                  fname wgname))))
+;;     (wg-set-buffer-list workgroup (cons (wg-ebuf->buffer ebuf) bl))))
+
 ;; asdf
 
-;; (wg-buffer-list (wg-current-workgroup))
-;; (wg-set-buffer-list (wg-current-workgroup) '(foo bar baz))
-;; (assq 'buffer-list (wg-current-workgroup))
+(defun wg-add-current-buffer-to-current-workgroup ()
+  ""
+  (interactive)
+  (let ((buf (current-buffer)) (wg (wg-current-workgroup)))
+    (wg-add-ebuf-to-workgroup buf wg)
+    (message "Added %s to %s" (buffer-name buf) (wg-name wg))))
+
+(defun wg-remove-current-buffer-from-current-workgroup ()
+  ""
+  (interactive)
+  (let ((buf (current-buffer)) (wg (wg-current-workgroup)))
+    (wg-remove-ebuf-from-workgroup buf wg)
+    (message "Removed %s from %s" (buffer-name buf) (wg-name wg))))
+
+(defun wg-switch-to-buffer ()
+  ""
+  (interactive)
+  (wg-when-let ((wg (wg-current-workgroup))
+                (bnames (wg-buffer-names wg))
+                (bname (ido-completing-read "Buffer: " bnames)))
+    (wg-restore-buffer
+     (wg-get-some (buf (wg-buffer-list wg))
+       (equal bname (wg-aget buf 'bname))))))
 
 
 ;;; current and previous workgroup ops
@@ -1358,15 +1471,12 @@ Assumes both FROM and TO fit in `selected-frame'."
 
 (defun wg-push-new-working-config (workgroup config &optional frame)
   "Push CONFIG onto WORKGROUP's history, truncating its future if necessary."
-  (let* ((undo-table (wg-working-config-undo-table workgroup frame))
-         (undo-pointer (wg-working-config-undo-pointer workgroup frame)))
-    (while (>= (decf undo-pointer) 0)
-      (pop (gethash 'undo-list undo-table)))
-    (push config (gethash 'undo-list undo-table))
-    (let ((undo-list (gethash 'undo-list undo-table)))
-      (when (> (length undo-list) wg-window-config-undo-length)
-        (setf (gethash 'undo-list undo-table) (butlast undo-list))))
-    (setf (gethash 'undo-pointer undo-table) 0)))
+  (let* ((u-t (wg-working-config-undo-table workgroup frame))
+         (u-p (gethash 'undo-pointer u-t))
+         (u-l (cons config (nthcdr u-p (gethash 'undo-list u-t)))))
+    (setf (gethash 'undo-list u-t)
+          (butlast u-l (max 0 (- (length u-l) wg-undo-limit))))
+    (setf (gethash 'undo-pointer u-t) 0)))
 
 (defun wg-update-working-config (workgroup &optional frame)
   "Create or update WORKGROUP's working config."
@@ -1396,6 +1506,7 @@ If WORKGROUP is the current workgroup, update it first."
 ;; post-command-hook called
 ;; pre-command-hook called self-insert-command
 ;; post-command-hook called
+;; ...
 ;; pre-command-hook called self-insert-command
 ;; post-command-hook called
 ;; pre-command-hook called ido-exit-minibuffer
@@ -1430,6 +1541,13 @@ Added to `window-configuration-change-hook'."
              (not wg-minibuffer-just-exited))
     (setq wg-window-config-has-changed t))
   (setq wg-minibuffer-just-exited nil))
+
+(defun wg-update-working-config-before-command ()
+  "Update the working config before window-config altering commands.
+Added to `pre-command-hook'."
+  (wg-awhen (wg-current-workgroup t)
+    (when (memq this-command wg-commands-that-alter-window-configs)
+      (wg-set-working-config it (wg-make-wconfig)))))
 
 (defun wg-update-undo-history-if-necessary ()
   "Update undo history when `wg-window-config-has-changed' is non-nil.
@@ -1661,28 +1779,13 @@ current and previous workgroups."
 
 ;;; commands
 
-;; (defun wg-switch-to-workgroup (workgroup &optional base)
-;;   "Switch to WORKGROUP.
-;; BASE nil means restore WORKGROUP's working config.
-;; BASE non-nil means restore WORKGROUP's base config."
-;;   (interactive (list (wg-read-workgroup) current-prefix-arg))
-;;   (wg-awhen (wg-current-workgroup t)
-;;     (when (eq it workgroup) (error "Already on: %s" (wg-name it)))
-;;     (wg-update-working-config it))
-;;   (wg-restore-workgroup workgroup base)
-;;   (wg-awhen (wg-current-workgroup t) (wg-set-previous-workgroup it))
-;;   (wg-set-current-workgroup workgroup)
-;;   (run-hooks 'wg-switch-hook)
-;;   (wg-fontified-msg (:cmd "Switched:  ") (wg-disp)))
-
 (defun wg-switch-to-workgroup (workgroup &optional base)
   "Switch to WORKGROUP.
 BASE nil means restore WORKGROUP's working config.
 BASE non-nil means restore WORKGROUP's base config."
   (interactive (list (wg-read-workgroup) current-prefix-arg))
   (wg-awhen (wg-current-workgroup t)
-    (when (eq it workgroup) (error "Already on: %s" (wg-name it)))
-    (wg-set-working-config it (wg-make-wconfig)))
+    (when (eq it workgroup) (error "Already on: %s" (wg-name it))))
   (wg-restore-workgroup workgroup base)
   (wg-awhen (wg-current-workgroup t) (wg-set-previous-workgroup it))
   (wg-set-current-workgroup workgroup)
@@ -1910,9 +2013,9 @@ Deletes saved state in `wg-frame-locals' and nulls out `wg-list',
          (undo-list-length (length undo-list)))
     (if (>= undo-pointer undo-list-length)
         (error "There's no more undo information.")
-      (incf (gethash 'undo-pointer (wg-working-config-undo-table wg)))
       (let (wg-record-window-config-changes)
         (wg-restore-wconfig (nth undo-pointer undo-list)))
+      (incf (gethash 'undo-pointer (wg-working-config-undo-table wg)))
       (wg-fontified-msg (:cmd "Undo: ")
         (:cur (int-to-string undo-pointer)) (:msg " of ")
         (:cur (int-to-string (1- undo-list-length)))))))
@@ -1926,9 +2029,9 @@ Deletes saved state in `wg-frame-locals' and nulls out `wg-list',
          (undo-list-length (length undo-list)))
     (if (< undo-pointer 0)
         (error "There's no more redo information.")
-      (decf (gethash 'undo-pointer (wg-working-config-undo-table wg)))
       (let (wg-record-window-config-changes)
         (wg-restore-wconfig (nth undo-pointer undo-list)))
+      (decf (gethash 'undo-pointer (wg-working-config-undo-table wg)))
       (wg-fontified-msg (:cmd "Redo: ") (:msg "(")
         (:cur (int-to-string undo-pointer)) (:msg "/")
         (:cur (int-to-string (1- undo-list-length))) (:msg ")")))))
@@ -2165,8 +2268,8 @@ The string is passed through a format arg to escape %'s."
     "Create a new blank workgroup and find a file in it"
     "\\[wg-find-file-read-only]"
     "Create a new blank workgroup and find a file read-only in it"
-    "\\[wg-get-by-buffer]"
-    "Switch to the workgroup and config in which the specified buffer is visible"
+    ;; "\\[wg-get-by-buffer]"
+    ;; "Switch to the workgroup and config in which the specified buffer is visible"
     "\\[wg-dired]"
     "Create a new blank workgroup and open a dired buffer in it"
     "\\[wg-move-window-backward]"
@@ -2210,6 +2313,11 @@ The string is passed through a format arg to escape %'s."
 
 
 ;;; keymap
+
+
+;; (define-key wg-map (kbd "o") 'wg-add-current-buffer-to-current-workgroup)
+;; (define-key wg-map (kbd "O") 'wg-remove-current-buffer-from-current-workgroup)
+
 
 (defvar wg-map
   (wg-fill-keymap (make-sparse-keymap)
@@ -2294,8 +2402,10 @@ The string is passed through a format arg to escape %'s."
     "C-l"        'wg-load
     "C-f"        'wg-find-file
     "S-C-f"      'wg-find-file-read-only
-    "C-b"        'wg-get-by-buffer
-    "b"          'wg-get-by-buffer
+    ;; "C-b"        'wg-get-by-buffer
+    ;; "b"          'wg-get-by-buffer
+    "C-b"        'wg-switch-to-buffer
+    "b"          'wg-switch-to-buffer
     "d"          'wg-dired
 
 
@@ -2389,6 +2499,7 @@ If ARG is anything else, turn on `workgroups-mode'."
    (workgroups-mode
     (add-hook 'kill-emacs-query-functions 'wg-emacs-exit-query)
     (add-hook 'window-configuration-change-hook 'wg-flag-wconfig-change)
+    (add-hook 'pre-command-hook 'wg-update-working-config-before-command)
     (add-hook 'post-command-hook 'wg-update-undo-history-if-necessary)
     (add-hook 'minibuffer-setup-hook 'wg-minibuffer-setup-hook)
     (add-hook 'minibuffer-exit-hook 'wg-minibuffer-exit-hook)
@@ -2398,6 +2509,7 @@ If ARG is anything else, turn on `workgroups-mode'."
     (wg-workgroups-mode-exit-query)
     (remove-hook 'kill-emacs-query-functions 'wg-emacs-exit-query)
     (remove-hook 'window-configuration-change-hook 'wg-flag-wconfig-change)
+    (remove-hook 'pre-command-hook 'wg-update-working-config-before-command)
     (remove-hook 'post-command-hook 'wg-update-undo-history-if-necessary)
     (remove-hook 'minibuffer-setup-hook 'wg-minibuffer-setup-hook)
     (remove-hook 'minibuffer-exit-hook 'wg-minibuffer-exit-hook)
