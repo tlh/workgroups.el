@@ -198,7 +198,7 @@ in (say) irc buffers where `point-max' is constantly increasing."
 
 ;; undo/redo customization
 
-(defcustom wg-undo-limit 100
+(defcustom wg-wconfig-undo-limit 30
   "Number of past window configs for undo to retain.
 A value of nil means no limit."
   :type 'integer
@@ -1360,7 +1360,7 @@ Assumes both FROM and TO fit in `selected-frame'."
   (wg-get-workgroup-prop 'wconfig workgroup))
 
 
-;;; working config / undo state
+;;; working config undoification
 
 (defun wg-workgroup-table (&optional frame)
   "Return FRAME's workgroup table, creating it first if necessary."
@@ -1395,16 +1395,16 @@ Assumes both FROM and TO fit in `selected-frame'."
   (let* ((wst (wg-workgroup-state-table workgroup frame))
          (u-l (nthcdr (gethash 'undo-pointer wst) (gethash 'undo-list wst)))
          (u-l (cons config u-l)))
-    (when (and wg-undo-limit (> (length u-l) wg-undo-limit))
-      (setq u-l (wg-take u-l wg-undo-limit)))
+    (when (and wg-wconfig-undo-limit (> (length u-l) wg-wconfig-undo-limit))
+      (setq u-l (wg-take u-l wg-wconfig-undo-limit)))
     (puthash 'undo-list u-l wst)
     (puthash 'undo-pointer 0 wst)))
 
 
 ;;; undo/redo hook functions
 ;;
-;; It's tricky exempting minibuffer-related window-config changes from
-;; undoification.  Hence all the flag-toggling hooks.
+;; Exempting minibuffer-related window-config changes from undoification is
+;; tricky, which is why all the flag-setting hooks.
 ;;
 ;; Example hook call order:
 ;;
@@ -1727,8 +1727,6 @@ current and previous workgroups."
 ;;                  fname wgname))))
 ;;     (wg-set-buffer-list workgroup (cons (wg-ebuf->buffer ebuf) bl))))
 
-;; asdf
-
 (defun wg-add-current-buffer-to-current-workgroup ()
   ""
   (interactive)
@@ -2002,41 +2000,47 @@ Deletes all state saved in frame parameters, and nulls out
 
 ;;; undo/redo
 
-;; TODO: maybe the message should be a timeline visualization
+(defun wg-undo-timeline-string (workgroup)
+  "Return a timeline visualization string of WORKGROUP's undo state."
+  (let* ((state-table (wg-workgroup-state-table workgroup))
+         (u-p (gethash 'undo-pointer state-table))
+         (u-l (gethash 'undo-list state-table)))
+    (wg-fontify
+      (:div "-<(")
+      (:other (mapconcat 'identity (make-list (- (length u-l) u-p) "-") "="))
+      (:cur "O")
+      (:other (mapconcat 'identity (make-list (1+ u-p) "-") "="))
+      (:div ")>-"))))
 
 (defun wg-undo-wconfig-change ()
   "Undo a change to the current workgroup's window config."
   (interactive)
-  (let* ((state-table (wg-workgroup-state-table (wg-current-workgroup)))
+  (let* ((wg (wg-current-workgroup))
+         (state-table (wg-workgroup-state-table wg))
          (undo-pointer (1+ (gethash 'undo-pointer state-table)))
          (undo-list (gethash 'undo-list state-table))
-         (undo-limit (1- (length undo-list))))
-    (if (> undo-pointer undo-limit)
-        (error "There's no more undo information.")
+         (error-msg ""))
+    (if (> undo-pointer (1- (length undo-list)))
+        (setq error-msg "  There's no more undo information.")
       (wg-restore-wconfig (nth undo-pointer undo-list) t)
-      (incf (gethash 'undo-pointer state-table))
-      (wg-fontified-msg
-        (:cmd "Undo: ")
-        (:cur (int-to-string (- undo-limit undo-pointer)))
-        (:msg " of ")
-        (:cur (int-to-string undo-limit))))))
+      (incf (gethash 'undo-pointer state-table)))
+    (wg-fontified-msg (:cmd "Undo: ")
+      (wg-undo-timeline-string wg) (:cur error-msg))))
 
 (defun wg-redo-wconfig-change ()
   "Redo a change to the current workgroup's window config."
   (interactive)
-  (let* ((state-table (wg-workgroup-state-table (wg-current-workgroup)))
+  (let* ((wg (wg-current-workgroup))
+         (state-table (wg-workgroup-state-table wg))
          (undo-pointer (1- (gethash 'undo-pointer state-table)))
          (undo-list (gethash 'undo-list state-table))
-         (undo-limit (1- (length undo-list))))
+         (error-msg ""))
     (if (< undo-pointer 0)
-        (error "There's no more redo information.")
+        (setq error-msg "  There's no more redo information.")
       (wg-restore-wconfig (nth undo-pointer undo-list) t)
-      (decf (gethash 'undo-pointer state-table))
-      (wg-fontified-msg
-        (:cmd "Redo: ")
-        (:cur (int-to-string (- undo-limit undo-pointer)))
-        (:msg " of ")
-        (:cur (int-to-string undo-limit))))))
+      (decf (gethash 'undo-pointer state-table)))
+    (wg-fontified-msg (:cmd "Redo: ")
+      (wg-undo-timeline-string wg) (:cur error-msg))))
 
 
 ;;; file commands
