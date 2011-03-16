@@ -54,6 +54,8 @@
 
 (require 'cl)
 
+;; (require 'ido) ;; maybe?
+
 
 ;;; consts
 
@@ -482,7 +484,6 @@ stable, but is left here for the time being.")
 
 ;;; utils
 
-
 ;; functions used in macros:
 (eval-and-compile
 
@@ -578,6 +579,12 @@ Return M when the difference between N and M is less than STEP."
 HI-INCLUSIVE non-nil means the HI bound is inclusive."
   (and (>= num lo) (if hi-inclusive (<= num hi) (< num hi))))
 
+(defun wg-filter (pred seq)
+  "Return a list elements in SEQ on which PRED returns non-nil."
+  (let (acc)
+    (mapc (lambda (elt) (and (funcall pred elt) (push elt acc))) seq)
+    (nreverse acc)))
+
 (defun wg-last1 (list)
   "Return the last element of LIST."
   (car (last list)))
@@ -641,12 +648,12 @@ Otherwise, cons a new key-value-pair onto ALIST."
                                (wg-aset (rec alist rest) k v)))))
     (rec (wg-acopy alist) key-value-pairs)))
 
-(defun wg-get-alist (key val alist-list)
-  "Return the first alist in ALIST-LIST containing KEY and VAL."
-  (catch 'res
-    (dolist (alist alist-list)
+(defun wg-get-alist (key val list-of-alists)
+  "Return the first alist in LIST-OF-ALISTS containing KEY and VAL."
+  (catch 'found
+    (dolist (alist list-of-alists)
       (when (equal val (cdr (assoc key alist)))
-        (throw 'res alist)))))
+        (throw 'found alist)))))
 
 (defmacro wg-abind (alist binds &rest body)
   "Bind values in ALIST to symbols in BINDS, then eval BODY.
@@ -754,11 +761,17 @@ FACEKEY must be a key in `wg-face-abbrevs'."
     (error "Workgroup operations aren't permitted while the \
 minibuffer is active.")))
 
-(defun wg-determine-switch-buffer-type ()
-  "Return the switch-to-buffer package in use, if any."
-  (cond ((and (boundp 'ido-mode) ido-mode) 'ido)
-        ((and (boundp 'iswitchb-mode) iswitchb-mode) 'iswitchb)
-        (t nil)))
+(defun wg-current-switch-buffer-mode ()
+  "Return the buffer switching package (ido or iswitchb) to use, or nil."
+  (let ((ido-p (and (boundp 'ido-mode) (memq ido-mode '(both buffer))))
+        (iswitchb-p (and (boundp 'iswitchb-mode) iswitchb-mode)))
+    (cond ((and ido-p iswitchb-p)
+           (if (< (position 'iswitchb-mode minor-mode-map-alist :key 'car)
+                  (position 'ido-mode minor-mode-map-alist :key 'car))
+               'iswitchb 'ido))
+          (ido-p 'ido)
+          (iswitchb-p 'iswitchb)
+          (t nil))))
 
 
 ;;; type predicates
@@ -1622,7 +1635,7 @@ Query to overwrite if a workgroup with the same name exists."
 (defun wg-completing-read
   (prompt choices &optional pred rm ii history default)
   "Do a completing read.  The function called depends on what's on."
-  (case (wg-determine-switch-buffer-type)
+  (case (wg-current-switch-buffer-mode)
     (ido (ido-completing-read prompt choices pred rm ii history default))
     (iswitchb
      (let* ((iswitchb-use-virtual-buffers nil)
@@ -1733,51 +1746,41 @@ current and previous workgroups."
 ;; ido-temp-list
 ;;
 
-(defvar wg-complete-on-workgroup-buffers nil
+(defvar wg-filter-buffer-list nil
   "Locally bound to t in commands that filter the buffer-list.")
 
-(defun wg-wgbuf-refers-to-ebuf-p (wgbuf ebuf)
-  "Return t if WGBUF refers to EBUF, nil otherwise."
-  (let ((wg-fname (wg-aget wgbuf 'fname)))
+(defun wg-wgbuf-refers-to-p (wgbuf buffer-or-name)
+  "Return t if WGBUF refers to BUFFER-OR-NAME, nil otherwise."
+  (let ((wg-fname (wg-aget wgbuf 'fname))
+        (ebuf (get-buffer buffer-or-name)))
     (cond (wg-fname (equal wg-fname (buffer-file-name ebuf)))
           ((buffer-file-name ebuf) nil)
           ((equal (wg-aget wgbuf 'bname) (buffer-name (buffer-name ebuf)))))))
 
-(defun wg-get-corresponding-wgbuf (ebuf workgroup)
+(defun wg-get-corresponding-wgbuf (buffer-or-name workgroup)
   "Return the wgbuf in WORKGROUP's buffer list corresponding to EBUF."
-  (catch 'result
+  (catch 'found
     (dolist (wgbuf (wg-buffer-list workgroup))
-      (when (wg-wgbuf-refers-to-ebuf-p wgbuf ebuf)
-        (throw 'result wgbuf)))))
+      (when (wg-wgbuf-refers-to-p wgbuf buffer-or-name)
+        (throw 'found wgbuf)))))
 
-(defun wg-filtered-buffer-list (buffer-names)
-  ""
-  (wg-when-let ((wg (wg-current-workgroup t)))
-    (let (filtered-buffer-list)
-      (dolist (bname buffer-names (nreverse filtered-buffer-list))
-        (wg-awhen (wg-get-corresponding-wgbuf (get-buffer bname) wg)
-          (push bname filtered-buffer-list))))))
-
-;; (defun wg-filter-ido-buffer-list ()
-;;   "Set `ido-temp-list' to only the current workgroup's live buffers."
-;;   (when (and wg-complete-on-workgroup-buffers (boundp 'ido-temp-list))
-;;     (setq ido-temp-list
-;;           (wg-when-let ((wg (wg-current-workgroup t)))
-;;             (let (filtered-buffer-list)
-;;               (dolist (bname ido-temp-list (nreverse filtered-buffer-list))
-;;                 (wg-awhen (wg-get-corresponding-wgbuf (get-buffer bname) wg)
-;;                   (push bname filtered-buffer-list))))))))
+(defun wg-filter-buffer-names (buffer-names workgroup)
+  "Filter BUFFER-NAMES by WORKGROUP's live buffers' names."
+  (wg-filter (lambda (b) (wg-get-corresponding-wgbuf b workgroup)) buffer-names))
 
 (defun wg-filter-ido-buffer-list ()
   "Set `ido-temp-list' to only the current workgroup's live buffers."
-  (when (and wg-complete-on-workgroup-buffers (boundp 'ido-temp-list))
-    (setq ido-temp-list (wg-filtered-buffer-list ido-temp-list))))
+  (when (and wg-filter-buffer-list (boundp 'ido-temp-list))
+    (wg-awhen (wg-current-workgroup t)
+      (setq ido-temp-list
+            (wg-filter-buffer-names ido-temp-list it)))))
 
 (defun wg-filter-iswitchb-buffer-list ()
   "Set `iswitchb-temp-buflist' to only the current workgroup's live buffers."
-  (when (and wg-complete-on-workgroup-buffers (boundp 'iswitchb-temp-buflist))
-    (setq iswitchb-temp-buflist
-          (wg-filtered-buffer-list iswitchb-temp-buflist))))
+  (when (and wg-filter-buffer-list (boundp 'iswitchb-temp-buflist))
+    (wg-awhen (wg-current-workgroup t)
+      (setq iswitchb-temp-buflist
+            (wg-filter-buffer-names iswitchb-temp-buflist it)))))
 
 (defun wg-add-buffer-to-workgroup (ebuf workgroup &optional force)
   "Add EBUF to WORKGROUP's buffer list."
@@ -1811,43 +1814,91 @@ current and previous workgroups."
   (interactive)
   (wg-remove-buffer-from-workgroup (current-buffer) (wg-current-workgroup)))
 
-(defcustom wg-complete-on-workgroup-buffers-first t
-  ""
-  :type 'boolean
+(defcustom wg-switch-buffer-fallback-type 'all-then-workgroup
+  "Values can be all-then-workgroup, workgroup-then-all, or nil."
+  :type 'symbol
   :group 'workgroups)
 
-(defun wg-switch-to-buffer-fallback ()
-  (interactive)
-  (let ((wg-complete-on-workgroup-buffers (not wg-complete-on-workgroup-buffers)))
-    (ido-switch-buffer)))
+;; asdf
+;;
+;; (setq wg-switch-buffer-fallback-type 'workgroup-then-all)
+;; (setq wg-switch-buffer-fallback-type 'all-then-workgroup)
+;; (setq wg-switch-buffer-fallback-type nil)
 
-;; FIXME: flash a msg about how to fall all the way back
+;; ido fallback
+
+(defun wg-ido-switch-buffer (&optional nofallback)
+  ""
+  (ido-buffer-internal
+   ido-default-buffer-method
+   (unless nofallback 'wg-ido-switch-buffer-fallback)
+   (when wg-filter-buffer-list
+     (format "Workgroup buffer [%s]: " (wg-name (wg-current-workgroup))))))
+
+(defun wg-ido-switch-buffer-fallback ()
+  ""
+  (interactive)
+  (let ((wg-filter-buffer-list (not wg-filter-buffer-list)))
+    (wg-ido-switch-buffer t)))
+
+
+;; iswitchb fallback
+
+(defvar wg-locally-bind-iswitchb-commands-on t "")
+
+(defun wg-locally-bind-iswitchb-commands ()
+  (when wg-locally-bind-iswitchb-commands-on
+    (local-set-key (kbd "C-b") 'wg-iswitchb-fallback)))
+
+(defun wg-iswitchb-buffer (&optional nofallback)
+  ""
+  (let ((wg-locally-bind-iswitchb-commands-on (not nofallback)))
+    (iswitchb-buffer)))
+
+(defun wg-iswitchb-fallback ()
+  ""
+  (interactive)
+  ;; Make C-b behave normally when point isn't directly after the "iswitch" prompt:
+  (if (and (boundp 'prompt) (> (point) (1+ (length prompt))))
+      (backward-char)
+    (setq wg-filter-buffer-list (not wg-filter-buffer-list))
+    (setq iswitchb-buflist (iswitchb-make-buflist iswitchb-default))
+    (setq iswitchb-rescan t)))
+
+;; switch-to-buffer fallback
+
+(defun wg-naked-switch-to-buffer (&optional nofallback)
+  ""
+  (call-interactively 'switch-to-buffer))
+
+(defun wg-current-switch-buffer-function ()
+  ""
+  (case (wg-current-switch-buffer-mode)
+    (ido 'wg-ido-switch-buffer)
+    (iswitchb 'wg-iswitchb-buffer)
+    (otherwise 'wg-naked-switch-to-buffer)))
+
 (defun wg-switch-to-buffer ()
   ""
   (interactive)
-  (let ((wg-complete-on-workgroup-buffers
-         wg-complete-on-workgroup-buffers-first))
-    (case (wg-determine-switch-buffer-type)
-      (ido
-       (ido-buffer-internal
-        ido-default-buffer-method 'wg-switch-to-buffer-fallback))
-      (iswitchb (iswitchb-buffer)))))
-
-;; asdf
-
-;; ;; FIXME: flash a msg about how to fall all the way back
-;; (defun wg-switch-to-buffer ()
-;;   ""
-;;   (interactive)
-;;   (let ((wg-complete-on-workgroup-buffers wg-complete-on-workgroup-buffers-first))
-;;     (ido-buffer-internal
-;;      ido-default-buffer-method
-;;      (lambda () (interactive)
-;;        (let ((wg-complete-on-workgroup-buffers
-;;               (not wg-complete-on-workgroup-buffers)))
-;;          (ido-switch-buffer))))))
-
-;; asdf
+  (let ((switch-buffer-fn (wg-current-switch-buffer-function))
+        (order wg-switch-buffer-fallback-type))
+    (cond ((not (eq this-original-command 'switch-to-buffer))
+           ;; filtered with no fallback when not called via remap
+           (let ((wg-filter-buffer-list t))
+             (funcall switch-buffer-fn t)))
+          ((or (null order) (not (wg-current-workgroup t)))
+           ;; unfiltered with no fallback
+           (let ((wg-filter-buffer-list nil))
+             (funcall switch-buffer-fn t)))
+          ((eq order 'workgroup-then-all)
+           ;; filtered then unfiltered
+           (let ((wg-filter-buffer-list t))
+             (funcall switch-buffer-fn nil)))
+          ((eq order 'all-then-workgroup)
+           ;; unfiltered then filtered
+           (let ((wg-filter-buffer-list nil))
+             (funcall switch-buffer-fn nil))))))
 
 (defun wg-next-buffer ()
   (interactive)
@@ -2564,6 +2615,16 @@ Call `wg-query-for-save' when
   (or (not wg-query-for-save-on-workgroups-mode-exit)
       (wg-query-for-save)))
 
+;; (defun wg-add/remove-buffer-list-filtration-hooks (&optional remove)
+;;   "Add or remove buffer-list filtration hooks for ido or iswitchb."
+;;   (let ((oper (if remove #'remove-hook #'add-hook)))
+;;     (when (boundp 'ido-make-buffer-list-hook)
+;;       (funcall oper 'ido-make-buffer-list-hook
+;;                'wg-filter-ido-buffer-list))
+;;     (when (boundp 'iswitchb-make-buflist-hook)
+;;       (funcall oper 'iswitchb-make-buflist-hook
+;;                'wg-filter-iswitchb-buffer-list))))
+
 (defun wg-add/remove-buffer-list-filtration-hooks (&optional remove)
   "Add or remove buffer-list filtration hooks for ido or iswitchb."
   (let ((oper (if remove #'remove-hook #'add-hook)))
@@ -2572,7 +2633,10 @@ Call `wg-query-for-save' when
                'wg-filter-ido-buffer-list))
     (when (boundp 'iswitchb-make-buflist-hook)
       (funcall oper 'iswitchb-make-buflist-hook
-               'wg-filter-iswitchb-buffer-list))))
+               'wg-filter-iswitchb-buffer-list))
+    (when (boundp 'iswitchb-minibuffer-setup-hook)
+      (funcall oper 'iswitchb-minibuffer-setup-hook
+               'wg-locally-bind-iswitchb-commands))))
 
 (defvar wg-minor-mode-map-entry nil)
 
