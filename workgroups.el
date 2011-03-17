@@ -1810,23 +1810,28 @@ current and previous workgroups."
   (wg-remove-buffer-from-workgroup
    (current-buffer) (wg-current-workgroup)))
 
-(defcustom wg-switch-buffer-fallback-type 'unfiltered-filtered-fallback
+(defcustom wg-switch-buffer-filter-order 'unfiltered-filtered-fallback
   "FIXME:  Write a bunch of documentation for this.
-Values can be unfiltered-filtered-fallback, filtered-unfiltered-fallback, or nil."
+Values:
+  filtered-unfiltered-fallback
+  unfiltered-filtered-fallback
+  filtered-unfiltered-cyclic
+  unfiltered-filtered-cyclic
+  nil"
   :type 'symbol
   :group 'workgroups)
 
 ;; buffer list filtration
 
-;; (setq wg-switch-buffer-fallback-type 'filtered-unfiltered-fallback)
-;; (setq wg-switch-buffer-fallback-type 'unfiltered-filtered-fallback)
-;; (setq wg-switch-buffer-fallback-type 'filtered-unfiltered-cyclic)
-;; (setq wg-switch-buffer-fallback-type 'unfiltered-filtered-cyclic)
-;; (setq wg-switch-buffer-fallback-type nil)
+;; (setq wg-switch-buffer-filter-order 'filtered-unfiltered-fallback)
+;; (setq wg-switch-buffer-filter-order 'unfiltered-filtered-fallback)
+;; (setq wg-switch-buffer-filter-order 'filtered-unfiltered-cyclic)
+;; (setq wg-switch-buffer-filter-order 'unfiltered-filtered-cyclic)
+;; (setq wg-switch-buffer-filter-order nil)
 
 (defun wg-next-filter-state (state)
   ""
-  (case wg-switch-buffer-fallback-type
+  (case wg-switch-buffer-filter-order
     (unfiltered-filtered-fallback
      (ecase state
        (unfiltered 'filtered)
@@ -1931,10 +1936,10 @@ Otherwise, call `backward-char'.  Bound to C-b in `iswitchb-mode-map'."
   "Switch to a buffer.  Call the current switch buffer function,
 completing on either all buffer names then current workgroup
 buffer names, or current workgroup buffer names then all buffer
-names.  See `wg-switch-buffer-fallback-type'."
+names.  See `wg-switch-buffer-filter-order'."
   (interactive)
   (let ((switch-buffer-fn (wg-current-switch-buffer-function))
-        (order wg-switch-buffer-fallback-type))
+        (order wg-switch-buffer-filter-order))
     (cond ((not (eq this-original-command 'switch-to-buffer))
            (funcall switch-buffer-fn 'filtered))
           ((or (null order) (not (wg-current-workgroup t)))
