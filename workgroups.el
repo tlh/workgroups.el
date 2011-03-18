@@ -55,8 +55,10 @@
 (require 'cl)
 
 (eval-when-compile
-  (require 'ido)
-  (require 'iswitchb))
+  ;; This prevents "assignment to free variable"
+  ;; and "function not known to exist" warnings.
+  (require 'ido nil t)
+  (require 'iswitchb nil t))
 
 
 ;;; consts
@@ -208,6 +210,7 @@ A value of nil means no limit."
   :type 'integer
   :group 'workgroups)
 
+;; FIXME: Either convert this to a hash table, or get rid of it
 (defcustom wg-commands-that-alter-window-configs
   '(split-window
     split-window-horizontally
@@ -1863,8 +1866,6 @@ current and previous workgroups."
 ;; (wg-add-filter (wg-current-workgroup) 'wg-add-irc-channel-buffers)
 ;; (wg-remove-filter (wg-current-workgroup) 'wg-add-irc-channel-buffers)
 
-;; FIXME: this is warning about assignment to a free var
-
 (defun wg-filter-ido-buffer-list ()
   "Set `ido-temp-list' to only the current workgroup's live buffers."
   (when (and wg-buffer-list-filtration-on (boundp 'ido-temp-list))
@@ -1917,9 +1918,10 @@ current and previous workgroups."
 ;;; iswitchb compatibility
 
 (defun wg-iswitchb-internal (&optional method prompt default init)
-  "The switch-buffer interface that *should* have been provided
-by something like ido's `ido-buffer-internal'.  Most this code is
-duplicated from `iswitchb' to provide identical shittiness."
+  "Provide the buffer switching interface to
+`iswitchb-read-buffer' (analogous to ido's `ido-buffer-internal')
+that iswitchb *should* have.  Most this code is duplicated from
+`iswitchb', so is similarly shitty."
   (let* ((iswitchb-method (or method iswitchb-default-method))
          (iswitchb-invalid-regexp nil)
          (buf (when 'iswitchb-read-buffer
@@ -1966,40 +1968,44 @@ Added to `minibuffer-setup-hook'."
     (fallback nil)
     (off nil)))
 
-(defun wg-ido-switch-buffer (current-state)
+(defun wg-ido-switch-buffer (method current-state)
   "Completion filtration interface to `ido-switch-buffer'."
   (if (eq current-state 'off) (ido-switch-buffer)
     (let ((wg-buffer-list-filtration-on (wg-filtration-on current-state)))
-      (ido-buffer-internal nil nil (wg-switch-to-buffer-prompt)))))
+      (ido-buffer-internal method nil (wg-switch-to-buffer-prompt)))))
 
-(defun wg-iswitchb-buffer (current-state)
+(defun wg-iswitchb-buffer (method current-state)
   "Completion filtration interface to `iswitchb-buffer'."
   (if (eq current-state 'off) (iswitchb-buffer)
     (let ((wg-buffer-list-filtration-on (wg-filtration-on current-state)))
-      (wg-iswitchb-internal nil (wg-switch-to-buffer-prompt)))))
+      (wg-iswitchb-internal method (wg-switch-to-buffer-prompt)))))
 
-(defun wg-fallback-switch-buffer (current-state)
+(defun wg-fallback-switch-to-buffer (method current-state)
   "Completion filtration interface to `switch-to-buffer'."
   (let ((read-buffer-function nil))
-    (call-interactively 'switch-to-buffer)))
+    (call-interactively
+     (case method
+       (other-window 'switch-to-buffer-other-window)
+       (other-frame  'switch-to-buffer-other-frame)
+       (otherwise    'switch-to-buffer)))))
 
 (defun wg-switch-buffer-function (&optional state)
   "Return the correct switch buffer fallback function."
   (case (if (eq state 'fallback) 'fallback
           (wg-current-switch-buffer-mode))
-    (fallback  'wg-fallback-switch-buffer)
+    (fallback  'wg-fallback-switch-to-buffer)
     (ido       'wg-ido-switch-buffer)
     (iswitchb  'wg-iswitchb-buffer)))
 
-(defun wg-switch-to-buffer ()
+(defun wg-switch-to-buffer (&optional method)
   "Switch to a buffer.  Call the current switch buffer function,
 completing on either all buffer names then current workgroup
 buffer names, or current workgroup buffer names then all buffer
 names.  See `wg-switch-buffer-filter-order'."
   (interactive)
-  (if (or (null wg-switch-buffer-filter-order)
+  (if (or (not wg-switch-buffer-filter-order)
           (not (wg-current-workgroup t)))
-      (funcall (wg-switch-buffer-function) 'off)
+      (funcall (wg-switch-buffer-function) method 'off)
     (let* ((wg-bind-cycle-filtration t)
            (order wg-switch-buffer-filter-order)
            (len (length order))
@@ -2008,8 +2014,18 @@ names.  See `wg-switch-buffer-filter-order'."
       (while (not done)
         (let ((state (nth (mod (incf counter) len) order)))
           (catch 'cycle-filtration
-            (funcall (wg-switch-buffer-function state) state)
+            (funcall (wg-switch-buffer-function state) method state)
             (setq done t)))))))
+
+(defun wg-switch-to-buffer-other-window ()
+  ""
+  (interactive)
+  (wg-switch-to-buffer 'other-window))
+
+(defun wg-switch-to-buffer-other-frame ()
+  ""
+  (interactive)
+  (wg-switch-to-buffer 'other-frame))
 
 (defun wg-next-buffer ()
   (interactive)
@@ -2750,7 +2766,14 @@ If ARG is anything else, turn on `workgroups-mode'."
     (wg-set-prefix-key)
     (wg-mode-line-add-display)
     (let ((map (make-sparse-keymap)))
-      (define-key map [remap switch-to-buffer] 'wg-switch-to-buffer)
+      (define-key map
+        [remap switch-to-buffer] 'wg-switch-to-buffer)
+      (define-key map
+        [remap switch-to-buffer-other-window]
+        'wg-switch-to-buffer-other-window)
+      (define-key map
+        [remap switch-to-buffer-other-frame]
+        'wg-switch-to-buffer-other-frame)
       (if wg-minor-mode-map-entry
           (setcdr wg-minor-mode-map-entry map)
         (setq wg-minor-mode-map-entry (cons 'workgroups-mode map))
