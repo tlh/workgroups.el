@@ -1832,29 +1832,45 @@ current and previous workgroups."
       (when (wg-wgbuf-refers-to-p wgbuf buffer-or-name)
         (throw 'found wgbuf)))))
 
-(defun wg-workgroup-live-buffers (buffers-or-names workgroup)
-  "Filter BUFFER-NAMES by WORKGROUP's live buffers' names."
+(defun wg-workgroup-live-buffers (workgroup &optional buffers)
+  "Filter BUFFERS-OR-NAMES by WORKGROUP's live buffers' names."
   (wg-filter (lambda (b) (wg-get-corresponding-wgbuf b workgroup))
-             buffers-or-names))
+             (or buffers (mapcar 'buffer-name (buffer-list)))))
 
-(defun wg-filter-buffer-list (workgroup &optional buffer-list)
-  "Run WORKGROUP's filters, optionally seeding with BUFFER-LIST."
-  (let ((wg-temp-buffer-list
-         (wg-workgroup-live-buffers
-          (or buffer-list (mapcar 'buffer-name (buffer-list)))
-          workgroup)))
+(defvar wg-message-on-filter-errors t
+  "Non-nil means catch all filter errors and `message' them,
+rather than leaving them uncaught.")
+
+(defvar wg-important-message-timeout 0.75
+  "Seconds to `sit-for' after an important message.")
+
+(defun wg-filter-buffer-list (workgroup &optional buffers)
+  "Run WORKGROUP's filters, optionally seeding with BUFFERS."
+  (let ((wg-temp-buffer-list (wg-workgroup-live-buffers workgroup buffers)))
     (dolist (filter (wg-filters workgroup) wg-temp-buffer-list)
-      (cond ((symbolp filter) (funcall filter))
-            ((atom filter) (error "Invalid filter"))
-            ((eq (car filter) 'lambda) (funcall (eval filter)))
-            (t (eval filter))))))
+      (condition-case err
+          (cond ((symbolp filter) (funcall filter))
+                ((atom filter) (error "Invalid filter type" filter))
+                ((eq (car filter) 'lambda) (funcall (eval filter)))
+                (t (eval filter)))
+        (error
+         (let ((msg (format "Error in workgroup %S filter %S - %S"
+                            (wg-name workgroup) filter (cadr err))))
+           (if (not wg-message-on-filter-errors) (error msg)
+             (message msg)
+             (sit-for wg-important-message-timeout))))))))
 
-;; (defun foo ()
+;; Custom buffer-list filter example:
+;;
+;; (defun wg-add-irc-channel-buffers ()
 ;;   (dolist (buffer-name (mapcar 'buffer-name (buffer-list)))
 ;;     (when (string-match "#" buffer-name)
 ;;       (pushnew buffer-name wg-temp-buffer-list))))
-
-;; (wg-add-filter (wg-current-workgroup) 'foo)
+;;
+;; (wg-add-filter (wg-current-workgroup) 'wg-add-irc-channel-buffers)
+;; (wg-remove-filter (wg-current-workgroup) 'wg-add-irc-channel-buffers)
+;; (wg-add-filter (wg-current-workgroup) 'asdfasdf)
+;; (wg-remove-filter (wg-current-workgroup) 'asdfasdf)
 
 
 (defun wg-filter-ido-buffer-list ()
