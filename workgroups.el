@@ -54,6 +54,10 @@
 
 (require 'cl)
 
+(eval-when-compile
+  (require 'ido)
+  (require 'iswitchb))
+
 
 ;;; consts
 
@@ -117,8 +121,8 @@ query-for-save behavior.  Use
   :type 'integer
   :group 'workgroups)
 
-(defcustom wg-warning-timeout 0.7
-  "Seconds to display minibuffer warning messages."
+(defcustom wg-warning-timeout 1.0
+  "Seconds to `sit-for' after a warning message."
   :type 'float
   :group 'workgroups)
 
@@ -248,7 +252,7 @@ info saved."
 
 ;; per-workgroup buffer-list customization
 
-(defcustom wg-switch-buffer-filter-order 'unfiltered-filtered-fallback
+(defcustom wg-switch-buffer-filter-order '(unfiltered filtered fallback)
   "Workgroups can filter `ido-switch-buffer's and
 `iswitchb-buffer's completions to only the names of those live
 buffers that are members of the current workgroup.
@@ -258,30 +262,26 @@ by the initial call to `wg-switch-to-buffer' (remapped from
 `switch-to-buffer'), and those presented after subsequently
 hitting \"C-b\".
 
+FIXME: This is all wrong now
+
 Allowable values:
-
-  unfiltered-filtered-fallback
+  unfiltered-filtered-fallback:
     Fallback from unfiltered to filtered to switch-to-buffer
-
-  filtered-unfiltered-fallback
+  filtered-unfiltered-fallback:
     Fallback from filtered to unfiltered to switch-to-buffer
-
-  unfiltered-filtered-cyclic
+  unfiltered-filtered-cyclic:
     Toggle between unfiltered and filtered, starting with unfiltered.
-
-  filtered-unfiltered-cyclic
+  filtered-unfiltered-cyclic:
     Toggle between filtered and unfiltered, starting with filtered.
-
   Anything else:
     Feature is completely disabled."
-
-  ;; (setq wg-switch-buffer-filter-order 'unfiltered-filtered-fallback)
-  ;; (setq wg-switch-buffer-filter-order 'filtered-unfiltered-fallback)
-  ;; (setq wg-switch-buffer-filter-order 'unfiltered-filtered-cyclic)
-  ;; (setq wg-switch-buffer-filter-order 'filtered-unfiltered-cyclic)
-  ;; (setq wg-switch-buffer-filter-order nil)
-
   :type 'symbol
+  :group 'workgroups)
+
+(defcustom wg-message-on-filter-errors t
+  "Non-nil means catch all filter errors and `message' them,
+rather than leaving them uncaught."
+  :type 'boolean
   :group 'workgroups)
 
 
@@ -1137,7 +1137,7 @@ Return the buffer if it was found, nil otherwise."
   (wg-abind buf (fname bname mark markx)
     (when (cond ((and fname (file-exists-p fname))
                  (find-file fname)
-                 (rename-buffer bname))
+                 (rename-buffer bname t))
                 ((wg-awhen (get-buffer bname) (switch-to-buffer it)))
                 (t (switch-to-buffer wg-default-buffer) nil))
       (set-mark mark)
@@ -1530,13 +1530,13 @@ Assumes both FROM and TO fit in `selected-frame'."
 ;; post-command-hook called
 ;;
 
-(defun wg-minibuffer-setup-hook ()
+(defun wg-unflag-window-config-has-changed ()
   "Reset `wg-window-config-has-changed' to nil to exempt from
 undoification those window-configuration changes caused by
 entering the minibuffer."
   (setq wg-window-config-has-changed nil))
 
-(defun wg-minibuffer-exit-hook ()
+(defun wg-flag-just-exited-minibuffer ()
   "Set `wg-just-exited-minibuffer' on minibuffer exit."
   (setq wg-just-exited-minibuffer t))
 
@@ -1837,20 +1837,13 @@ current and previous workgroups."
   (wg-filter (lambda (b) (wg-get-corresponding-wgbuf b workgroup))
              (or buffers (mapcar 'buffer-name (buffer-list)))))
 
-(defvar wg-message-on-filter-errors t
-  "Non-nil means catch all filter errors and `message' them,
-rather than leaving them uncaught.")
-
-(defvar wg-important-message-timeout 0.75
-  "Seconds to `sit-for' after an important message.")
-
 (defun wg-filter-buffer-list (workgroup &optional buffers)
   "Run WORKGROUP's filters, optionally seeding with BUFFERS."
   (let ((wg-temp-buffer-list (wg-workgroup-live-buffers workgroup buffers)))
     (dolist (filter (wg-filters workgroup) wg-temp-buffer-list)
       (condition-case err
           (cond ((symbolp filter) (funcall filter))
-                ((atom filter) (error "Invalid filter type" filter))
+                ((atom filter) (error "Invalid filter type"))
                 ((eq (car filter) 'lambda) (funcall (eval filter)))
                 (t (eval filter)))
         (error
@@ -1858,7 +1851,7 @@ rather than leaving them uncaught.")
                             (wg-name workgroup) filter (cadr err))))
            (if (not wg-message-on-filter-errors) (error msg)
              (message msg)
-             (sit-for wg-important-message-timeout))))))))
+             (sit-for wg-warning-timeout))))))))
 
 ;; Custom buffer-list filter example:
 ;;
@@ -1869,9 +1862,8 @@ rather than leaving them uncaught.")
 ;;
 ;; (wg-add-filter (wg-current-workgroup) 'wg-add-irc-channel-buffers)
 ;; (wg-remove-filter (wg-current-workgroup) 'wg-add-irc-channel-buffers)
-;; (wg-add-filter (wg-current-workgroup) 'asdfasdf)
-;; (wg-remove-filter (wg-current-workgroup) 'asdfasdf)
 
+;; FIXME: this is warning about assignment to a free var
 
 (defun wg-filter-ido-buffer-list ()
   "Set `ido-temp-list' to only the current workgroup's live buffers."
@@ -1882,7 +1874,7 @@ rather than leaving them uncaught.")
 
 (defun wg-filter-iswitchb-buffer-list ()
   "Set `iswitchb-temp-buflist' to only the current workgroup's live buffers."
-  (when (and wg-buffer-list-filtration-on (boundp 'iswitchb-temp-buflist))
+  (when wg-buffer-list-filtration-on
     (wg-awhen (wg-current-workgroup t)
       (setq iswitchb-temp-buflist
             (wg-filter-buffer-list it iswitchb-temp-buflist)))))
@@ -1922,80 +1914,17 @@ rather than leaving them uncaught.")
    (current-buffer) (wg-current-workgroup)))
 
 
-;;; buffer list filtration
+;;; iswitchb compatibility
 
-(defun wg-next-filter-state (state)
-  "Return the state after STATE in `wg-switch-buffer-filter-order'."
-  (case wg-switch-buffer-filter-order
-    (unfiltered-filtered-fallback
-     (case state
-       (unfiltered 'filtered)
-       (filtered 'fallback)
-       (fallback 'fallback)))
-    (filtered-unfiltered-fallback
-     (case state
-       (filtered 'unfiltered)
-       (unfiltered 'fallback)
-       (fallback 'fallback)))
-    ((unfiltered-filtered-cyclic filtered-unfiltered-cyclic)
-     (ecase state
-       (unfiltered 'filtered)
-       (filtered 'unfiltered)))
-    (otherwise 'off)))
-
-(defun wg-state-means-filtration-on (state)
-  "Return non-nil when STATE implies filtration of completions."
-  (ecase state
-    (filtered t)
-    (unfiltered nil)
-    (fallback nil)
-    (off nil)))
-
-
-;; ido buffer list filtration
-
-(defun wg-ido-switch-buffer (current-state)
-  "Completion filtration interface to `ido-switch-buffer'."
-  (let ((wg-buffer-list-filtration-on
-         (wg-state-means-filtration-on current-state))
-        (next-state (wg-next-filter-state current-state)))
-    (ido-buffer-internal
-     ido-default-buffer-method
-     (unless (memq next-state '(fallback off))
-       (lambda () (interactive)
-         (wg-ido-switch-buffer next-state)))
-     (when wg-buffer-list-filtration-on
-       (format "Workgroup buffer [%s]: "
-               (wg-name (wg-current-workgroup)))))))
-
-;; iswitchb buffer list filtration
-
-(defvar wg-iswitchb-bind-filtration-key t
-  "Non-nil means bind `wg-iswitch-fallback' in `iswitchb-mode-map'.")
-
-(defun wg-iswitchb-bind-filtration-key-hook ()
-  "Conditionally bind C-b to `wg-iswitchb-toggle-filtration'.
-Added to `iswitchb-minibuffer-setup-hook'."
-  (when wg-iswitchb-bind-filtration-key
-    (local-set-key (kbd "C-b") 'wg-iswitchb-toggle-filtration)))
-
-(defun wg-iswitchb-toggle-filtration ()
-  "When point is directly after the prompt, toggle filtration.
-Otherwise, call `backward-char'.  Bound to C-b in `iswitchb-mode-map'."
-  (interactive)
-  (if (or (> (point) (minibuffer-prompt-end)))
-      (backward-char)
-    (throw 'iswitchb-fallback (minibuffer-contents))))
-
-(defun wg-iswitchb-buffer-internal (&optional method prompt default
-                                              require-match init)
+(defun wg-iswitchb-internal (&optional method prompt default init)
   "The switch-buffer interface that *should* have been provided
 by something like ido's `ido-buffer-internal'.  Most this code is
 duplicated from `iswitchb' to provide identical shittiness."
-  (let* ((iswitchb-methos (or method iswitchb-default-method))
+  (let* ((iswitchb-method (or method iswitchb-default-method))
          (iswitchb-invalid-regexp nil)
-         (buf (iswitchb-read-buffer
-               (or prompt "iswitch ") default require-match init)))
+         (buf (when 'iswitchb-read-buffer
+                (iswitchb-read-buffer
+                 (or prompt "iswitch ") default nil init))))
     (cond ((eq iswitchb-exit 'findfile)
            (call-interactively 'find-file))
           (iswitchb-invalid-regexp
@@ -2004,47 +1933,63 @@ duplicated from `iswitchb' to provide identical shittiness."
                (if (get-buffer buf) (iswitchb-visit-buffer buf)
                  (iswitchb-possible-new-buffer buf)))))))
 
-;; TODO: replace ido fallback witha throw-catch, and add custom prompting
+
+;;; buffer list filtration
+
+(defvar wg-bind-cycle-filtration nil
+  "Non-nil means bind `wg-cycle-filtration' on minibuffer setup.")
+
+(defun wg-cycle-filtration ()
+  "When point is directly after the prompt, toggle filtration.
+Otherwise, call `backward-char'.  Bound to C-b in `iswitchb-mode-map'."
+  (interactive)
+  (if (> (point) (minibuffer-prompt-end)) (backward-char)
+    (throw 'cycle-filtration (minibuffer-contents))))
+
+(defun wg-bind-cycle-filtration-hook ()
+  "Conditionally bind C-b to `wg-cycle-filtration'.
+Added to `minibuffer-setup-hook'."
+  (when wg-bind-cycle-filtration
+    (local-set-key (kbd "C-b") 'wg-cycle-filtration)))
+
+(defun wg-switch-to-buffer-prompt (&optional workgroup)
+  "Return a prompt string indicating WORKGROUP and filtration status."
+  (format "%s [%s]: "
+          (if wg-buffer-list-filtration-on "Filtered" "Unfiltered")
+          (wg-name (or workgroup (wg-current-workgroup)))))
+
+(defun wg-filtration-on (state)
+  "Return non-nil when STATE implies filtration of completions."
+  (ecase state
+    (filtered t)
+    (unfiltered nil)
+    (fallback nil)
+    (off nil)))
+
+(defun wg-ido-switch-buffer (current-state)
+  "Completion filtration interface to `ido-switch-buffer'."
+  (if (eq current-state 'off) (ido-switch-buffer)
+    (let ((wg-buffer-list-filtration-on (wg-filtration-on current-state)))
+      (ido-buffer-internal nil nil (wg-switch-to-buffer-prompt)))))
 
 (defun wg-iswitchb-buffer (current-state)
-  "Fallback interface to `iswitchb-buffer'.
-A lot of the extra junk in here is because `iswitchb' is ugly and
-doesn't present a very configurable interface, so we have to
-duplicate it to set the prompt."
-  (setq iswitchb-method iswitchb-default-method)
-  (let ((next-state (wg-next-filter-state current-state))
-        (wg-iswitchb-bind-filtration-key (not (eq current-state 'off)))
-        (wg-buffer-list-filtration-on
-         (wg-state-means-filtration-on current-state))
-        (done nil))
-    (while (not done)
-      (catch 'iswitchb-fallback
-        (cond ((eq current-state 'off)
-               (iswitchb-buffer))
-              ((eq current-state 'fallback)
-               (wg-naked-switch-to-buffer current-state))
-              (t (wg-iswitchb-buffer-internal
-                  nil (when wg-buffer-list-filtration-on
-                        (format "Workgroup buffer [%s]: "
-                                (wg-name (wg-current-workgroup)))))))
-        (setq done t))
-      (setq wg-buffer-list-filtration-on
-            (wg-state-means-filtration-on next-state))
-      (setq current-state next-state)
-      (setq next-state (wg-next-filter-state current-state)))))
+  "Completion filtration interface to `iswitchb-buffer'."
+  (if (eq current-state 'off) (iswitchb-buffer)
+    (let ((wg-buffer-list-filtration-on (wg-filtration-on current-state)))
+      (wg-iswitchb-internal nil (wg-switch-to-buffer-prompt)))))
 
-;; switch-to-buffer buffer list filtration (not implemented)
+(defun wg-fallback-switch-buffer (current-state)
+  "Completion filtration interface to `switch-to-buffer'."
+  (let ((read-buffer-function nil))
+    (call-interactively 'switch-to-buffer)))
 
-(defun wg-naked-switch-to-buffer (&optional nofallback)
-  "Fallback interface to `switch-to-buffer'.  This a dummy wrapper."
-  (call-interactively 'switch-to-buffer))
-
-(defun wg-current-switch-buffer-function ()
+(defun wg-switch-buffer-function (&optional state)
   "Return the correct switch buffer fallback function."
-  (case (wg-current-switch-buffer-mode)
-    (ido 'wg-ido-switch-buffer)
-    (iswitchb 'wg-iswitchb-buffer)
-    (otherwise 'wg-naked-switch-to-buffer)))
+  (case (if (eq state 'fallback) 'fallback
+          (wg-current-switch-buffer-mode))
+    (fallback  'wg-fallback-switch-buffer)
+    (ido       'wg-ido-switch-buffer)
+    (iswitchb  'wg-iswitchb-buffer)))
 
 (defun wg-switch-to-buffer ()
   "Switch to a buffer.  Call the current switch buffer function,
@@ -2052,21 +1997,19 @@ completing on either all buffer names then current workgroup
 buffer names, or current workgroup buffer names then all buffer
 names.  See `wg-switch-buffer-filter-order'."
   (interactive)
-  (let ((switch-buffer-fn (wg-current-switch-buffer-function))
-        (order wg-switch-buffer-filter-order))
-    (cond ((not (eq this-original-command 'switch-to-buffer))
-           (funcall switch-buffer-fn 'filtered))
-          ((or (null order) (not (wg-current-workgroup t)))
-           (funcall switch-buffer-fn 'off))
-          ((eq order 'filtered-unfiltered-fallback)
-           (funcall switch-buffer-fn 'filtered))
-          ((eq order 'filtered-unfiltered-cyclic)
-           (funcall switch-buffer-fn 'filtered))
-          ((eq order 'unfiltered-filtered-fallback)
-           (funcall switch-buffer-fn 'unfiltered))
-          ((eq order 'unfiltered-filtered-cyclic)
-           (funcall switch-buffer-fn 'unfiltered))
-          (t (error "`wg-switch-buffer-filter-order' invalid: %s" order)))))
+  (if (or (null wg-switch-buffer-filter-order)
+          (not (wg-current-workgroup t)))
+      (funcall (wg-switch-buffer-function) 'off)
+    (let* ((wg-bind-cycle-filtration t)
+           (order wg-switch-buffer-filter-order)
+           (len (length order))
+           (counter -1)
+           (done nil))
+      (while (not done)
+        (let ((state (nth (mod (incf counter) len) order)))
+          (catch 'cycle-filtration
+            (funcall (wg-switch-buffer-function state) state)
+            (setq done t)))))))
 
 (defun wg-next-buffer ()
   (interactive)
@@ -2783,29 +2726,6 @@ Call `wg-query-for-save' when
   (or (not wg-query-for-save-on-workgroups-mode-exit)
       (wg-query-for-save)))
 
-;; (defun wg-add/remove-buffer-list-filtration-hooks (&optional remove)
-;;   "Add or remove buffer-list filtration hooks for ido or iswitchb."
-;;   (let ((oper (if remove #'remove-hook #'add-hook)))
-;;     (when (boundp 'ido-make-buffer-list-hook)
-;;       (funcall oper 'ido-make-buffer-list-hook
-;;                'wg-filter-ido-buffer-list))
-;;     (when (boundp 'iswitchb-make-buflist-hook)
-;;       (funcall oper 'iswitchb-make-buflist-hook
-;;                'wg-filter-iswitchb-buffer-list))))
-
-(defun wg-add/remove-buffer-list-filtration-hooks (&optional remove)
-  "Add or remove buffer-list filtration hooks for ido or iswitchb."
-  (let ((oper (if remove #'remove-hook #'add-hook)))
-    (when (boundp 'ido-make-buffer-list-hook)
-      (funcall oper 'ido-make-buffer-list-hook
-               'wg-filter-ido-buffer-list))
-    (when (boundp 'iswitchb-make-buflist-hook)
-      (funcall oper 'iswitchb-make-buflist-hook
-               'wg-filter-iswitchb-buffer-list))
-    (when (boundp 'iswitchb-minibuffer-setup-hook)
-      (funcall oper 'iswitchb-minibuffer-setup-hook
-               'wg-iswitchb-bind-filtration-key-hook))))
-
 (define-minor-mode workgroups-mode
   "This turns `workgroups-mode' on and off.
 If ARG is null, toggle `workgroups-mode'.
@@ -2822,9 +2742,11 @@ If ARG is anything else, turn on `workgroups-mode'."
     (add-hook 'window-configuration-change-hook 'wg-flag-wconfig-change)
     (add-hook 'pre-command-hook 'wg-update-undo-state-before-command)
     (add-hook 'post-command-hook 'wg-push-new-undo-state-after-command)
-    (add-hook 'minibuffer-setup-hook 'wg-minibuffer-setup-hook)
-    (add-hook 'minibuffer-exit-hook 'wg-minibuffer-exit-hook)
-    (wg-add/remove-buffer-list-filtration-hooks)
+    (add-hook 'minibuffer-setup-hook 'wg-unflag-window-config-has-changed)
+    (add-hook 'minibuffer-setup-hook 'wg-bind-cycle-filtration-hook)
+    (add-hook 'minibuffer-exit-hook 'wg-flag-just-exited-minibuffer)
+    (add-hook 'ido-make-buffer-list-hook 'wg-filter-ido-buffer-list)
+    (add-hook 'iswitchb-make-buflist-hook 'wg-filter-iswitchb-buffer-list)
     (wg-set-prefix-key)
     (wg-mode-line-add-display)
     (let ((map (make-sparse-keymap)))
@@ -2839,9 +2761,11 @@ If ARG is anything else, turn on `workgroups-mode'."
     (remove-hook 'window-configuration-change-hook 'wg-flag-wconfig-change)
     (remove-hook 'pre-command-hook 'wg-update-undo-state-before-command)
     (remove-hook 'post-command-hook 'wg-push-new-undo-state-after-command)
-    (remove-hook 'minibuffer-setup-hook 'wg-minibuffer-setup-hook)
-    (remove-hook 'minibuffer-exit-hook 'wg-minibuffer-exit-hook)
-    (wg-add/remove-buffer-list-filtration-hooks t)
+    (remove-hook 'minibuffer-setup-hook 'wg-unflag-window-config-has-changed)
+    (remove-hook 'minibuffer-setup-hook 'wg-bind-cycle-filtration-hook)
+    (remove-hook 'minibuffer-exit-hook 'wg-flag-just-exited-minibuffer)
+    (remove-hook 'ido-make-buffer-list-hook 'wg-filter-ido-buffer-list)
+    (remove-hook 'iswitchb-make-buflist-hook 'wg-filter-iswitchb-buffer-list)
     (wg-unset-prefix-key)
     (wg-mode-line-remove-display))))
 
