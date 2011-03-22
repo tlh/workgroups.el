@@ -66,7 +66,7 @@
 (defconst wg-version "0.2.1"
   "Current version of workgroups.")
 
-(defconst wg-persisted-workgroups-tag '-*-workgroups-*-
+(defconst wg-persisted-workgroups-tag 'workgroups
   "Tag appearing at the beginning of any list of persisted workgroups.")
 
 (defconst wg-persisted-workgroups-format-version "2.0"
@@ -159,6 +159,12 @@ which is why this variable exists."
 
 ;; workgroup restoration customization
 
+(defcustom wg-restore-assigned-buffers t
+  "Non-nil means restore all buffers assigned to the workgroup
+on workgroup restore."
+  :type 'boolean
+  :group 'workgroups)
+
 (defcustom wg-default-buffer "*scratch*"
   "Buffer switched to when a blank workgroup is created.
 Also used when a window's buffer can't be restored."
@@ -238,7 +244,7 @@ invocation."
   :group 'workgroups)
 
 
-;; per-workgroup buffer-list customization
+;; completion set customization
 
 (defcustom wg-completion-sets-on t
   "Non-nil means the completions sets feature is on.
@@ -278,6 +284,18 @@ fallback:
 (defcustom wg-error-on-filter-errors nil
   "Nil means catch all filter errors and `message' them,
 rather than leaving them uncaught."
+  :type 'boolean
+  :group 'workgroups)
+
+(defcustom wg-auto-add-buffers-on-find-file nil
+  "Non-nil means automatically add to the current workgroup those
+buffers created by `find-file' and friends."
+  :type 'boolean
+  :group 'workgroups)
+
+(defcustom wg-auto-remove-buffers-on-kill-buffer nil
+  "Non-nil means automatically remove from the current workgroup
+buffers killed with `kill-buffer' and friends."
   :type 'boolean
   :group 'workgroups)
 
@@ -1685,7 +1703,8 @@ is non-nil.  Added to `post-command-hook'."
 
 (defun wg-restore-workgroup (workgroup)
   "Restore WORKGROUP in `selected-frame'."
-  (wg-restore-workgroup-buffers-internal workgroup)
+  (when wg-restore-assigned-buffers
+    (wg-restore-workgroup-buffers-internal workgroup))
   (wg-restore-wconfig-undoably (wg-workgroup-working-config workgroup) t))
 
 
@@ -1911,7 +1930,9 @@ current and previous workgroups."
           ((buffer-file-name ebuf) nil)
           ((equal (wg-aget wgbuf 'bname) (buffer-name ebuf))))))
 
-(defun wg-get-corresponding-wgbuf (buffer-or-name workgroup)
+;; FIXME: Refactor all this.
+
+(defun wg-get-corresponding-wgbuf (workgroup buffer-or-name)
   "Return the wgbuf in WORKGROUP's buffer list corresponding to EBUF."
   (catch 'found
     (dolist (wgbuf (wg-workgroup-assigned-buffers workgroup))
@@ -1920,7 +1941,7 @@ current and previous workgroups."
 
 (defun wg-workgroup-live-buffers (workgroup &optional buffer-names)
   "Return a list of WORKGROUP's live buffers' names."
-  (wg-filter (lambda (b) (wg-get-corresponding-wgbuf b workgroup))
+  (wg-filter (lambda (bname) (wg-get-corresponding-wgbuf workgroup bname))
              (or buffer-names (wg-emacs-buffer-names))))
 
 (defun wg-filter-buffer-list (filters &optional buffer-list)
@@ -1966,41 +1987,85 @@ current and previous workgroups."
     (setq iswitchb-temp-buflist
           (wg-construct-buffer-list iswitchb-temp-buflist))))
 
-(defun wg-add-buffer-to-workgroup (ebuf workgroup &optional force)
-  "Add EBUF to WORKGROUP's buffer list."
-  (interactive (list (wg-read-buffer) (wg-read-workgroup) current-prefix-arg))
-  (let ((buflist (wg-workgroup-assigned-buffers workgroup))
-        (wgname (wg-workgroup-name workgroup))
-        (bname (buffer-name ebuf)))
-    (wg-awhen (wg-get-corresponding-wgbuf ebuf workgroup)
-      (if force (setq buflist (remove it buflist))
-        (error "%S has already been added to %s" bname wgname)))
-    (wg-set-workgroup-assigned-buffers
-     workgroup (cons (wg-serialize-buffer ebuf) buflist))
-    (message "Added %S to %s" bname wgname)))
+(defun wg-workgroup-add-buffer (workgroup buffer-or-name &optional noerror)
+  "Add BUFFER-OR-NAME to WORKGROUP."
+  (let* ((wg (wg-get-workgroup-flexibly workgroup))
+         (buffer (get-buffer buffer-or-name))
+         (assigned (wg-workgroup-assigned-buffers wg))
+         (wg-buffer (wg-get-corresponding-wgbuf wg buffer)))
+    (cond ((not wg-buffer)
+           (wg-set-workgroup-assigned-buffers
+            wg (cons (wg-serialize-buffer buffer) assigned)))
+          ((and wg-buffer noerror)
+           (wg-set-workgroup-assigned-buffers
+            wg (cons (wg-serialize-buffer buffer) (remove wg-buffer assigned)))
+           nil)
+          (t (error "%S has already been added to %S"
+                    (buffer-name buffer) (wg-workgroup-name wg))))))
 
-(defun wg-remove-buffer-from-workgroup (ebuf workgroup)
-  "Remove EBUF from WORKGROUP's buffer list."
-  (interactive (list (wg-read-buffer) (wg-read-workgroup)))
-  (let ((wgbuf (wg-get-corresponding-wgbuf ebuf workgroup))
-        (wgname (wg-workgroup-name workgroup))
-        (bname (buffer-name ebuf)))
-    (unless wgbuf (error "%S is not a member of %s" bname wgname))
-    (wg-set-workgroup-assigned-buffers
-     workgroup (remove wgbuf (wg-workgroup-assigned-buffers workgroup)))
-    (message "Removed %S from %s" bname wgname)))
+(defun wg-workgroup-remove-buffer (workgroup buffer-or-name &optional noerror)
+  "Remove BUFFER-OR-NAME from WORKGROUP."
+  (let* ((wg (wg-get-workgroup-flexibly workgroup))
+         (buffer (get-buffer buffer-or-name))
+         (wg-buffer (wg-get-corresponding-wgbuf workgroup buffer)))
+    (if (not wg-buffer)
+        (unless noerror (error "%S has not been assigned to %S"
+                               (buffer-name buffer) (wg-workgroup-name wg)))
+      (wg-set-workgroup-assigned-buffers
+       wg (remove wg-buffer (wg-workgroup-assigned-buffers wg))))))
+
+(defun wg-add-buffer-to-workgroup (workgroup buffer)
+  "Add BUFFER to WORKGROUP."
+  (interactive (list (wg-arg) (wg-read-buffer)))
+  (let ((wgname (wg-workgroup-name workgroup))
+        (bname (buffer-name buffer)))
+    (if (wg-workgroup-add-buffer workgroup buffer t)
+        (message "Added %S to %s" bname wgname)
+      (message "Updated %S in %s" bname wgname))))
+
+(defun wg-remove-buffer-from-workgroup (workgroup buffer)
+  "Remove BUFFER from WORKGROUP."
+  (interactive (list (wg-arg) (wg-read-buffer)))
+  (let ((wgname (wg-workgroup-name workgroup))
+        (bname (buffer-name buffer)))
+    (if (wg-workgroup-remove-buffer workgroup buffer t)
+        (message "Removed %S from %s" bname wgname)
+      (message "%S isn't assigned to %s" bname wgname))))
 
 (defun wg-add-current-buffer-to-current-workgroup ()
   "Do what the name says."
   (interactive)
   (wg-add-buffer-to-workgroup
-   (current-buffer) (wg-current-workgroup)))
+   (wg-current-workgroup) (current-buffer)))
 
 (defun wg-remove-current-buffer-from-current-workgroup ()
   "Do what the name says."
   (interactive)
   (wg-remove-buffer-from-workgroup
-   (current-buffer) (wg-current-workgroup)))
+   (wg-current-workgroup) (current-buffer)))
+
+(defun wg-kill-buffer-hook ()
+  "`kill-buffer-hook' that automatically removes buffers from workgroups."
+  (when wg-auto-remove-buffers-on-kill-buffer
+    (wg-awhen (wg-current-workgroup t)
+      (wg-workgroup-remove-buffer it (current-buffer) t))))
+
+(defun wg-find-file-hook ()
+  "`find-file-hook' that automatically adds buffers to workgroups."
+  (when wg-auto-add-buffers-on-find-file
+    (wg-awhen (wg-current-workgroup t)
+      (wg-workgroup-add-buffer it (current-buffer) t))))
+
+;; (setq wg-auto-remove-buffers-on-kill-buffer t)
+;; (setq wg-auto-add-buffers-on-find-file t)
+
+(setq wg-file nil)
+
+;; (add-hook 'kill-buffer-hook 'wg-kill-buffer-hook)
+;; (remove-hook 'kill-buffer-hook 'wg-kill-buffer-hook)
+
+;; (add-hook 'find-file-hook 'wg-find-file-hook)
+;; (remove-hook ' find-file-hook 'wg-find-file-hook)
 
 
 ;;; iswitchb compatibility
@@ -3068,6 +3133,7 @@ If ARG is anything else, turn on `workgroups-mode'."
     (add-hook 'minibuffer-exit-hook 'wg-flag-just-exited-minibuffer)
     (add-hook 'ido-make-buffer-list-hook 'wg-construct-ido-buffer-list)
     (add-hook 'iswitchb-make-buflist-hook 'wg-construct-iswitchb-buffer-list)
+    (add-hook 'kill-buffer-hook 'wg-kill-buffer-hook)
     (wg-set-prefix-key)
     (wg-mode-line-add-display)
     (let ((map (make-sparse-keymap)))
@@ -3095,6 +3161,7 @@ If ARG is anything else, turn on `workgroups-mode'."
     (remove-hook 'minibuffer-exit-hook 'wg-flag-just-exited-minibuffer)
     (remove-hook 'ido-make-buffer-list-hook 'wg-construct-ido-buffer-list)
     (remove-hook 'iswitchb-make-buflist-hook 'wg-construct-iswitchb-buffer-list)
+    (remove-hook 'kill-buffer-hook 'wg-kill-buffer-hook)
     (wg-unset-prefix-key)
     (wg-mode-line-remove-display)
     (run-hooks 'workgroups-mode-exit-hook))))
