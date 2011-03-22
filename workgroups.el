@@ -60,7 +60,7 @@
 (defconst wg-version "0.2.0"
   "Current version of workgroups.")
 
-(defconst wg-persisted-workgroups-tag '-*-workgroups-*-
+(defconst wg-persisted-workgroups-tag 'workgroups
   "This should be the car of any list of persisted workgroups.")
 
 
@@ -1791,7 +1791,14 @@ is non-nil, use `wg-file'. Otherwise read a filename."
    (list (if (and current-prefix-arg (wg-file t))
              (wg-file) (read-file-name "File: "))))
   (wg-dbind (tag . workgroups) (wg-read-sexp-from-file file)
-    (unless (eq tag wg-persisted-workgroups-tag)
+    (unless (or (eq tag wg-persisted-workgroups-tag)
+                ;; Added for compatibility with old save files.  This tag had to
+                ;; be changed because it's formatted like a file-local variable,
+                ;; causing workgroups-mode to toggle on or off when a file of
+                ;; saved workgroups is visited (even though the symbol
+                ;; `workgroups' denotes nothing in Workgroups except its
+                ;; customization group -- yow!
+                (eq tag '-*-workgroups-*-))
       (error "%S is not a workgroups file." file))
     (wg-reset t)
     (setq wg-list workgroups wg-file file))
