@@ -2123,6 +2123,7 @@ The string is passed through a format arg to escape %'s."
 
     "C-s"        'wg-save
     "C-l"        'wg-load
+    "S"          'wg-update-all-workgroups-and-save
     "C-f"        'wg-find-file
     "S-C-f"      'wg-find-file-read-only
     "C-b"        'wg-get-by-buffer
