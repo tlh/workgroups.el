@@ -1213,17 +1213,17 @@ value in `wg-frame-table'."
 (defun wg-frame-val (key)
   "Return KEY's value in `selected-frame's state in `wg-frame-table'."
   (wg-with-frame-state frame state
-    (gethash key state)))
+                       (gethash key state)))
 
 (defun wg-set-frame-val (key val)
   "Set KEY to VAL in `selected-frame's state in `wg-frame-table'."
   (wg-with-frame-state frame state
-    (puthash key val state)))
+                       (puthash key val state)))
 
 (defun wg-delete-frame-key (key)
   "Remove KEY from `selected-frame's state in `wg-frame-table'."
   (wg-with-frame-state frame state
-    (remhash key state)))
+                       (remhash key state)))
 
 (defun wg-delete-frame (frame)
   "Remove FRAME from `wg-frame-table'."
@@ -1417,7 +1417,7 @@ Query to overwrite if a workgroup with the same name exists."
 (defun wg-find-buffer (bname)
   "Return the first workgroup in which a buffer named BNAME is visible."
   (wg-get-some (wg (wg-list))
-    (member bname (wg-workgroup-buffer-list wg))))
+               (member bname (wg-workgroup-buffer-list wg))))
 
 
 ;;; mode-line
@@ -1830,6 +1830,14 @@ is non-nil, use `wg-file'. Otherwise read a filename."
   (interactive (list (read-directory-name "Dired: ") current-prefix-arg))
   (wg-create-workgroup dir)
   (dired dir switches))
+
+(defun wg-update-all-workgroups-and-save ()
+  "Call `wg-update-all-workgroups', the `wg-save'.
+Keep in mind that workgroups will be updated with their
+working-config in the current frame."
+  (interactive)
+  (wg-update-all-workgroups)
+  (call-interactively 'wg-save))
 
 
 ;;; mode-line commands
