@@ -658,6 +658,10 @@ SPEC is a list with the var as the car and the list as the cadr."
         ((null (cdr args)) (car args))
         (t `(aif ,(car args) (aand ,@(cdr args))))))
 
+(defmacro wg-toggle (var)
+  "Set VAR to its opposite truthiness."
+  `(setq ,var (not ,var)))
+
 (defun wg-step-to (n m step)
   "Increment or decrement N toward M by STEP.
 Return M when the difference between N and M is less than STEP."
@@ -1752,34 +1756,38 @@ overwrite it.  Otherwise error."
 
 (defun wg-buffer-method-string ()
   "Return a string indicating current buffer method."
-  (case wg-current-buffer-method
-    (selected-window "Buffer")
-    (other-window "Switch to buffer in other window")
-    (other-frame "Switch to buffer in other frame")
-    (insert "Insert buffer")
-    (display "Display buffer")
-    (kill "Kill buffer")
-    (next "Next buffer")
-    (prev "Previous buffer")))
+  (wg-fontify
+    (:cmd (case wg-current-buffer-method
+            (selected-window "Buffer")
+            (other-window "Switch to buffer in other window")
+            (other-frame "Switch to buffer in other frame")
+            (insert "Insert buffer")
+            (display "Display buffer")
+            (kill "Kill buffer")
+            (next "Next buffer")
+            (prev "Previous buffer")))))
 
 (defun wg-buffer-set-string (&optional workgroup)
   "Return a string indicating WORKGROUP's name and the current buffer set."
-  (format
-   "(%s %s)"
-   (wg-workgroup-name (wg-get-workgroup-flexibly workgroup))
-   (case wg-current-buffer-set
-     (all wg-all-buffer-set-designator)
-     (assigned wg-assigned-buffer-set-designator)
-     (filtered wg-filtered-buffer-set-designator)
-     (assigned-and-filtered wg-assigned-and-filtered-buffer-set-designator)
-     (fallback wg-fallback-buffer-set-designator))))
+  (wg-fontify
+    (:div "(")
+    (:msg (wg-workgroup-name (wg-get-workgroup-flexibly workgroup)))
+    (:div ":")
+    (:msg (case wg-current-buffer-set
+            (all wg-all-buffer-set-designator)
+            (assigned wg-assigned-buffer-set-designator)
+            (filtered wg-filtered-buffer-set-designator)
+            (assigned-and-filtered wg-assigned-and-filtered-buffer-set-designator)
+            (fallback wg-fallback-buffer-set-designator)))
+    (:div ")")))
 
 (defun wg-buffer-set-prompt (&optional prompt workgroup)
   "Return a prompt string indicating WORKGROUP and buffer set."
   (when (wg-buffer-sets-p)
-    (format "%s %s: "
-            (or prompt (wg-buffer-method-string))
-            (wg-buffer-set-string workgroup))))
+    (wg-fontify
+      (:cmd (or prompt (wg-buffer-method-string)))
+      " " (wg-buffer-set-string workgroup)
+      (:msg ":  "))))
 
 ;; FIXME: assigned-then-filtered, filtered-then-assigned and recent
 ;; FIXME: generalize all this stuff, so there aren't so many special cases
@@ -1882,7 +1890,7 @@ overwrite it.  Otherwise error."
 
 
 
-;;; workgroup working config and window config undo/redo
+;;; workgroup working-wconfig and window config undo/redo
 
 (defun wg-workgroup-table (&optional frame)
   "Return FRAME's workgroup table, creating it first if necessary."
@@ -1895,9 +1903,12 @@ overwrite it.  Otherwise error."
   "Return FRAME's WORKGROUP's state table."
   (let ((uid (wg-uid workgroup)) (wt (wg-workgroup-table frame)))
     (or (gethash uid wt)
-        (let ((wst (make-hash-table)))
+        (let ((wst (make-hash-table))
+              (working-wconfig
+               (or (wg-workgroup-parameter workgroup 'working-wconfig)
+                   (wg-workgroup-base-wconfig workgroup))))
           (puthash 'undo-pointer 0 wst)
-          (puthash 'undo-list (list (wg-workgroup-base-wconfig workgroup)) wst)
+          (puthash 'undo-list (list working-wconfig) wst)
           (puthash uid wst wt)
           wst))))
 
@@ -1910,27 +1921,29 @@ overwrite it.  Otherwise error."
             (,undo-list (gethash 'undo-list ,state-table)))
        ,@body)))
 
-(defun wg-set-workgroup-working-wconfig (workgroup config)
-  "Set the working config of WORKGROUP to CONFIG."
+(defun wg-set-workgroup-working-wconfig (workgroup wconfig)
+  "Set the working-wconfig of WORKGROUP to WCONFIG."
+  (wg-set-workgroup-parameter workgroup 'working-wconfig wconfig)
   (wg-with-undo workgroup (state-table undo-pointer undo-list)
-    (setcar (nthcdr undo-pointer undo-list) config)))
+    (setcar (nthcdr undo-pointer undo-list) wconfig)))
 
 (defun wg-update-workgroup-working-wconfig (&optional workgroup)
-  "Update WORKGROUP's working config with CONFIG or `wg-make-wconfig'."
+  "Update WORKGROUP's working-wconfig with `wg-make-wconfig'."
   (let ((cur (wg-current-workgroup t)))
     (when (and cur (or (not workgroup) (eq workgroup cur)))
       (wg-set-workgroup-working-wconfig cur (wg-make-wconfig)))))
 
 (defun wg-workgroup-working-wconfig (workgroup)
-  "Return WORKGROUP's working config, which is its current undo state."
+  "Return WORKGROUP's working-wconfig, which is its current undo state."
   (or (wg-update-workgroup-working-wconfig workgroup)
       (wg-with-undo workgroup (state-table undo-pointer undo-list)
         (nth undo-pointer undo-list))))
 
-(defun wg-push-new-workgroup-working-wconfig (workgroup config)
-  "Push CONFIG onto WORKGROUP's undo list, truncating its future if necessary."
+(defun wg-push-new-workgroup-working-wconfig (workgroup wconfig)
+  "Push WCONFIG onto WORKGROUP's undo list, truncating its future if necessary."
   (wg-with-undo workgroup (state-table undo-pointer undo-list)
-    (let ((undo-list (cons config (nthcdr undo-pointer undo-list))))
+    (wg-set-workgroup-parameter workgroup 'working-wconfig wconfig)
+    (let ((undo-list (cons wconfig (nthcdr undo-pointer undo-list))))
       (when (and wg-wconfig-undo-list-max
                  (> (length undo-list) wg-wconfig-undo-list-max))
         (setq undo-list (wg-take undo-list wg-wconfig-undo-list-max)))
@@ -1979,7 +1992,7 @@ Added to `window-configuration-change-hook'."
   (setq wg-just-exited-minibuffer nil))
 
 (defun wg-update-working-wconfig-before-command ()
-  "Update the current workgroup's working config before
+  "Update the current workgroup's working-wconfig before
 `wg-commands-that-alter-window-configs'. Added to
 `pre-command-hook'."
   (when (gethash this-command wg-commands-that-alter-window-configs)
@@ -2037,7 +2050,7 @@ is non-nil.  Added to `post-command-hook'."
 
 ;;; workgroup construction and restoration
 
-;; FIXME: working configs should include assigned-buffers ... this needs thinking through
+;; FIXME: working-wconfigs should include assigned-buffers ... this needs thinking through
 (defun wg-make-workgroup (&rest key-value-pairs)
   "Return a new workgroup with KEY-VALUE-PAIRS."
   `(workgroup ,@(mapcar (lambda (kvp) (cons (car kvp) (cadr kvp)))
@@ -2347,7 +2360,7 @@ workgroup as well.  For that, use `wg-clone-workgroup'."
       (wg-disp))))
 
 (defun wg-kill-workgroup (workgroup)
-  "Kill WORKGROUP, saving its working config to the kill ring."
+  "Kill WORKGROUP, saving its working-wconfig to the kill ring."
   (interactive (list (wg-arg)))
   (let ((to (or (wg-previous-workgroup t)
                 (wg-cyclic-nth-from-workgroup workgroup))))
@@ -2372,14 +2385,14 @@ workgroup as well.  For that, use `wg-clone-workgroup'."
     (:msg "base config to the kill ring")))
 
 (defun wg-kill-ring-save-working-wconfig (workgroup)
-  "Save WORKGROUP's working config to `wg-kill-ring'."
+  "Save WORKGROUP's working-wconfig to `wg-kill-ring'."
   (interactive (list (wg-arg)))
   (wg-add-to-kill-ring (wg-workgroup-working-wconfig workgroup))
   (wg-fontified-msg
     (:cmd "Saved: ")
     (:cur (wg-workgroup-name workgroup))
     (:cur "'s ")
-    (:msg "working config to the kill ring")))
+    (:msg "working-wconfig to the kill ring")))
 
 (defun wg-yank-wconfig ()
   "Restore a wconfig from `wg-kill-ring'.
@@ -2398,7 +2411,7 @@ ring, starting at the front."
       (wg-disp))))
 
 (defun wg-kill-workgroup-and-buffers (workgroup)
-  "Kill WORKGROUP and the buffers in its working config."
+  "Kill WORKGROUP and the buffers in its working-wconfig."
   (interactive (list (wg-arg)))
   (let ((bufs (save-window-excursion
                 (wg-restore-workgroup workgroup)
@@ -2425,7 +2438,7 @@ ring, starting at the front."
       (:cur (wg-workgroup-name workgroup)))))
 
 (defun wg-update-workgroup (workgroup)
-  "Set the base config of WORKGROUP to its working config in `selected-frame'."
+  "Set the base config of WORKGROUP to its working-wconfig in `selected-frame'."
   (interactive (list (wg-arg)))
   (wg-set-workgroup-base-wconfig
    workgroup (wg-workgroup-working-wconfig workgroup))
@@ -2435,7 +2448,7 @@ ring, starting at the front."
 
 (defun wg-update-all-workgroups ()
   "Update all workgroups' base configs.
-Worgroups are updated with their working configs in the
+Worgroups are updated with their working-wconfigs in the
 `selected-frame'."
   (interactive)
   (mapc #'wg-update-workgroup (wg-list))
@@ -2444,7 +2457,7 @@ Worgroups are updated with their working configs in the
     (:msg "All")))
 
 (defun wg-revert-workgroup (workgroup)
-  "Set the working config of WORKGROUP to its base config in `selected-frame'."
+  "Set the working-wconfig of WORKGROUP to its base config in `selected-frame'."
   (interactive (list (wg-arg)))
   (if (wg-current-workgroup-p workgroup t)
       (wg-restore-wconfig-undoably (wg-workgroup-base-wconfig workgroup))
@@ -2619,35 +2632,33 @@ symetry with `wg-undo-one-wconfig-change-on-all-workgroups'."
 
 ;; workgroup assigned buffers commands
 
-(defun wg-add-buffer-to-workgroup (workgroup buffer)
-  "Add BUFFER to WORKGROUP."
-  (interactive (list (wg-arg) (wg-read-buffer "Buffer to add: ")))
+(defun wg-add-buffer-to-workgroup (buffer workgroup)
+  "Add BUFFER to WORKGROUP.
+With a prefix arg, query for BUFFER and WORKGROUP. Without one,
+use `current-buffer' and `wg-current-workgroup'."
+  (interactive (if current-prefix-arg
+                   (list (wg-read-buffer "Buffer to add: ")
+                         (wg-read-workgroup))
+                 (list (current-buffer) (wg-current-workgroup))))
   (let ((wgname (wg-workgroup-name workgroup))
-        (bname (buffer-name buffer)))
+        (bname (buffer-name (get-buffer buffer))))
     (if (wg-workgroup-add-buffer workgroup buffer t t)
         (message "Added %S to %s" bname wgname)
       (message "Updated %S in %s" bname wgname))))
 
-(defun wg-remove-buffer-from-workgroup (workgroup buffer)
-  "Remove BUFFER from WORKGROUP."
-  (interactive (list (wg-arg) (wg-read-buffer "Buffer to remove: ")))
+(defun wg-remove-buffer-from-workgroup (buffer workgroup)
+  "Remove BUFFER from WORKGROUP.
+With a prefix arg, query for BUFFER and WORKGROUP. Without one,
+use `current-buffer' and `wg-current-workgroup'."
+  (interactive (if current-prefix-arg
+                   (list (wg-read-buffer "Buffer to remove: ")
+                         (wg-read-workgroup))
+                 (list (current-buffer) (wg-current-workgroup))))
   (let ((wgname (wg-workgroup-name workgroup))
-        (bname (buffer-name buffer)))
+        (bname (buffer-name (get-buffer buffer))))
     (if (wg-workgroup-remove-buffer workgroup buffer t)
         (message "Removed %S from %s" bname wgname)
       (message "%S isn't assigned to %s" bname wgname))))
-
-(defun wg-add-current-buffer-to-current-workgroup ()
-  "Do what the name says."
-  (interactive)
-  (wg-add-buffer-to-workgroup
-   (wg-current-workgroup) (current-buffer)))
-
-(defun wg-remove-current-buffer-from-current-workgroup ()
-  "Do what the name says."
-  (interactive)
-  (wg-remove-buffer-from-workgroup
-   (wg-current-workgroup) (current-buffer)))
 
 ;; FIXME: Use wg-disp for the msg
 (defun wg-restore-workgroup-buffers (workgroup)
@@ -2818,7 +2829,6 @@ Added to `minibuffer-setup-hook'."
      (lambda (b) (eq (get-buffer b) (current-buffer)))
      (lambda (b) nil))))
 
-;; FIXME: Odd behavior when switching from a buffer not in the completions set
 (defun wg-next-buffer (&optional prev)
   "Switch to the next buffer in Workgroups' filtered buffer list."
   (interactive)
@@ -2831,10 +2841,10 @@ Added to `minibuffer-setup-hook'."
                        (car set))))
         (switch-to-buffer next)
         (unless prev (bury-buffer cur))
-        (wg-fontified-msg
-          (:cmd (wg-buffer-set-prompt
-                 (if prev "Previous buffer" "Next buffer")))
-          (wg-display-internal 'wg-buffer-display (wg-make-buffer-set)))))))
+        (message
+         (concat
+          (wg-buffer-set-prompt (if prev "Prev buffer" "Next buffer"))
+          (wg-display-internal 'wg-buffer-display (wg-make-buffer-set))))))))
 
 (defun wg-previous-buffer (&optional fallback)
   "Switch to the next buffer in Workgroups' filtered buffer list."
@@ -2921,24 +2931,30 @@ working-wconfig in the current frame."
   (call-interactively 'wg-save))
 
 
-;;; mode-line commands
+
+;;; toggle commands
+
+(defun wg-toggle-buffer-sets ()
+  "Turn Workgroups' buffer-sets feature on or off."
+  (interactive)
+  (wg-toggle wg-buffer-sets-on)
+  (wg-fontified-msg
+    (:cmd "Buffer sets: ")
+    (:msg (if wg-buffer-sets-on "on" "off"))))
 
 (defun wg-toggle-mode-line ()
   "Toggle Workgroups' mode-line display."
   (interactive)
-  (setq wg-mode-line-on (not wg-mode-line-on))
+  (wg-toggle wg-mode-line-on)
   (force-mode-line-update)
   (wg-fontified-msg
-    (:cmd "mode-line: ")
+    (:cmd "Mode-line display: ")
     (:msg (if wg-mode-line-on "on" "off"))))
-
-
-;;; morph commands
 
 (defun wg-toggle-morph ()
   "Toggle `wg-morph', Workgroups' morphing animation."
   (interactive)
-  (setq wg-morph-on (not wg-morph-on))
+  (wg-toggle wg-morph-on)
   (wg-fontified-msg
     (:cmd "Morph: ")
     (:msg (if wg-morph-on "on" "off"))))
@@ -3027,7 +3043,7 @@ The string is passed through a format arg to escape %'s."
     "\\[wg-kill-ring-save-base-wconfig]"
     "Save the current workgroup's base config to the kill ring"
     "\\[wg-kill-ring-save-working-wconfig]"
-    "Save the current workgroup's working config to the kill ring"
+    "Save the current workgroup's working-wconfig to the kill ring"
     "\\[wg-yank-wconfig]"
     "Yank a wconfig from the kill ring into the current frame"
     "\\[wg-kill-workgroup-and-buffers]"
@@ -3035,13 +3051,13 @@ The string is passed through a format arg to escape %'s."
     "\\[wg-delete-other-workgroups]"
     "Delete all but the specified workgroup"
     "\\[wg-update-workgroup]"
-    "Update a workgroup's base config with its working config"
+    "Update a workgroup's base config with its working-wconfig"
     "\\[wg-update-all-workgroups]"
-    "Update all workgroups' base configs with their working configs"
+    "Update all workgroups' base configs with their working-wconfigs"
     "\\[wg-revert-workgroup]"
-    "Revert a workgroup's working config to its base config"
+    "Revert a workgroup's working-wconfig to its base config"
     "\\[wg-revert-all-workgroups]"
-    "Revert all workgroups' working configs to their base configs"
+    "Revert all workgroups' working-wconfigs to their base configs"
     "\\[wg-switch-to-workgroup-at-index]"
     "Jump to a workgroup by its index in the workgroups list"
     "\\[wg-switch-to-workgroup-at-index-0]"
@@ -3211,9 +3227,9 @@ The string is passed through a format arg to escape %'s."
 
     ;; buffer-list
 
-    "o"          'wg-add-current-buffer-to-current-workgroup
-    "O"          'wg-remove-current-buffer-from-current-workgroup
-    "M-o"        'wg-toggle-per-workgroup-buffer-lists
+    "+"          'wg-add-buffer-to-workgroup
+    "-"          'wg-remove-buffer-from-workgroup
+    "M-b"        'wg-toggle-buffer-sets
     "("          'wg-next-buffer
     ")"          'wg-previous-buffer
 
@@ -3241,11 +3257,12 @@ The string is passed through a format arg to escape %'s."
 
     ;; window moving and frame reversal
 
+    ;; FIXME: These keys are too prime for these commands
     "<"          'wg-backward-transpose-window
     ">"          'wg-transpose-window
     "|"          'wg-reverse-frame-horizontally
-    "-"          'wg-reverse-frame-vertically
-    "+"          'wg-reverse-frame-horizontally-and-vertically
+    ;; "-"          'wg-reverse-frame-vertically
+    ;; "+"          'wg-reverse-frame-horizontally-and-vertically
 
 
     ;; toggling
