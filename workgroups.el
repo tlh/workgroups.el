@@ -335,6 +335,14 @@ the head of the matches list."
   :type 'list
   :group 'workgroups)
 
+(defcustom wg-center-rotate-buffer-list-display t
+  "Non-nil means rotate the buffer list display so that the
+current buffer is in the center (and nearer the front if the
+list's length is even).  This makes it easier to see where
+`wg-previous-buffer' will take you."
+  :type 'boolean
+  :group 'workgroups)
+
 (defcustom wg-barf-on-filter-error nil
   "Nil means catch all filter errors and `message' them,
 rather than leaving them uncaught."
@@ -764,8 +772,15 @@ HI-INCLUSIVE non-nil means the HI bound is inclusive."
 
 (defun wg-rotlst (list &optional offset)
   "Rotate LIST by OFFSET.  Positive OFFSET rotates left, negative right."
-  (let ((split (mod (or offset 1) (length list))))
-    (append (nthcdr split list) (wg-take list split))))
+  (when list
+    (let ((split (mod (or offset 1) (length list))))
+      (append (nthcdr split list) (wg-take list split)))))
+
+(defun wg-center-rotate-list (list)
+  "Rotate LIST so it's first elt is in the center.  When LIST's
+length is even, the first elt is left nearer the front."
+  (when list
+    (wg-rotlst list (- (/ (1- (length list)) 2)))))
 
 (defun wg-cyclic-nth (list n)
   "Return the Nth element of LIST, modded by the length of list."
@@ -1906,7 +1921,6 @@ If a filter named FILTER-NAME already exists, `error' unless noerror."
   "Return the buffer-set `filtered' from WORKGROUP and INITIAL."
   (wg-workgroup-filtered-buffer-list workgroup initial))
 
-;; FIXME: this is ugly
 (defun wg-make-buffer-set
   (&optional workgroup buffer-set-symbol initial-buffer-list)
   "Return the final list of buffer name completions."
@@ -1947,9 +1961,13 @@ If a filter named FILTER-NAME already exists, `error' unless noerror."
         (wg-aget wg-buffer-set-order-alist  method)
         (wg-aget wg-buffer-set-order-alist 'default))))
 
-(defun wg-prior-mapping (method)
-  "Return what METHOD would call if `workgroups-mode' wasn't on."
-  (or (let (workgroups-mode) (command-remapping method)) method))
+;; (defun wg-prior-mapping (method)
+;;   "Return what METHOD would call if `workgroups-mode' wasn't on."
+;;   (or (let (workgroups-mode) (command-remapping method)) method))
+
+(defmacro wg-prior-mapping (mode command)
+  "Return whatever COMMAND would call if MODE wasn't on."
+  `(or (let (,mode) (command-remapping ,command)) ,command))
 
 (defmacro wg-with-buffer-sets (method &rest body)
   "Establish buffer-set context for buffer-method METHOD, and eval BODY.
@@ -1959,7 +1977,7 @@ Binds `wg-current-workgroup', `wg-current-buffer-method' and
   (wg-with-gensyms (order status)
     `(let ((wg-current-workgroup (wg-current-workgroup t)))
        (if (or (not wg-buffer-sets-on) (not wg-current-workgroup))
-           (call-interactively (wg-prior-mapping ,method))
+           (call-interactively (wg-prior-mapping workgroups-mode ,method))
          (let* ((wg-current-buffer-method ,method)
                 (,order (wg-buffer-set-order wg-current-workgroup ,method)))
            (catch 'result
@@ -1970,31 +1988,6 @@ Binds `wg-current-workgroup', `wg-current-buffer-method' and
                    (done (throw 'result (cadr ,status)))
                    (next (setq ,order (wg-rotlst ,order (cadr ,status))))
                    (prev (setq ,order (wg-rotlst ,order (cadr ,status)))))))))))))
-
-
-;; (defmacro wg-with-buffer-sets (method &rest body)
-;;   "Establish buffer-set context for buffer-method METHOD, and eval BODY.
-;; Binds `wg-current-workgroup', `wg-current-buffer-method' and
-;; `wg-current-buffer-set-symbol' in BODY."
-;;   (declare (indent 1))
-;;   (wg-with-gensyms (order status)
-;;     `(let ((wg-current-workgroup (wg-current-workgroup t)))
-;;        (if (or (not wg-buffer-sets-on) (not wg-current-workgroup))
-;;            (call-interactively (wg-prior-mapping ,method))
-;;          (let* ((wg-current-buffer-method ,method)
-;;                 (,order (wg-buffer-set-order wg-current-workgroup ,method)))
-;;            (catch 'result
-;;              (while 'your-mom
-;;                (let* ((wg-current-buffer-set-symbol (car ,order))
-;;                       (,status (catch 'action (list 'done (progn ,@body)))))
-;;                  (case (car ,status)
-;;                    (done (throw 'result (cadr ,status)))
-;;                    (next (setq ,order (wg-rotlst ,order (cadr ,status))))
-;;                    (prev (setq ,order (wg-rotlst ,order (cadr ,status))))
-;;                    (dissociate
-;;                     (let ((buffer (cadr ,status)))
-;;                       (wg-awhen (and (stringp buffer) (get-buffer buffer))
-;;                         (wg-banish-buffer it)))))))))))))
 
 
 
@@ -2368,21 +2361,6 @@ Query to overwrite if a workgroup with the same name exists."
     (wg-awhen (wg-current-workgroup t) (wg-workgroup-name it)))
    noerror))
 
-(defun wg-read-object (prompt test warning &optional initial-contents keymap
-                              read hist default-value inherit-input-method)
-  "PROMPT for an object that satisfies TEST, WARNING if necessary.
-ARGS are `read-from-minibuffer's args, after PROMPT."
-  (flet ((read () (read-from-minibuffer
-                   prompt initial-contents keymap read hist
-                   default-value inherit-input-method)))
-    (let ((obj (read)))
-      (when (and (equal obj "") default-value) (setq obj default-value))
-      (while (not (funcall test obj))
-        (message warning)
-        (sit-for wg-warning-timeout)
-        (setq obj (read)))
-      obj)))
-
 (defun wg-new-default-workgroup-name ()
   "Return a new, unique, default workgroup name."
   (let ((names (wg-workgroup-names t)) (index -1) result)
@@ -2404,7 +2382,7 @@ ARGS are `read-from-minibuffer's args, after PROMPT."
      (or prompt (format "Name (default: %S): " default))
      (lambda (new) (and (stringp new)
                    (not (equal new ""))
-                   (wg-workgroup-name-is-unique new)))
+                   (wg-unique-workgroup-name-p new)))
      "Please enter a unique, non-empty name"
      nil nil nil nil default)))
 
@@ -2473,6 +2451,17 @@ Also save the msg to `wg-last-message'."
       (if (not list) (funcall elt-fn nil nil)
         (wg-doconcat (elt list div) (funcall elt-fn elt (incf i))))
       (:brace (wg-aget wg-decor-alist 'right-brace)))))
+
+;; FIXME: Scroll animation for the buffer list display during `wg-next-buffer'
+;;        and `wg-previous-buffer'?
+
+(defun wg-buffer-list-display ()
+  "Return the buffer-list display string."
+  (let ((set (wg-make-buffer-set)))
+    (wg-display-internal
+     'wg-buffer-display
+     (if wg-center-rotate-buffer-list-display
+         (wg-center-rotate-list set) set))))
 
 
 
@@ -2919,7 +2908,7 @@ and switch to the next buffer in the buffer-set."
         (:cmd "Banished ")
         (:cur (format "%S" (buffer-name buffer)))
         (:cmd ":  ")
-        (wg-display-internal 'wg-buffer-display (wg-make-buffer-set))))))
+        (wg-buffer-list-display)))))
 
 (defun wg-purge-auto-associated-buffers ()
   "Remove buffers from the current workgroup that were added automatically."
@@ -2984,15 +2973,8 @@ duplicated from `iswitchb', so is similarly shitty."
           (t (iswitchb-visit-buffer buffer)))))
 
 
-;; completion map
 
-;; (defun wg-next-buffer-set (&optional num)
-;;   "Trigger a forward cycling through the buffer-set order.
-;; Call `backward-char' unless `point' is right after the prompt.
-;; NUM is the number of buffer sets to cycle forward."
-;;   (interactive "P")
-;;   (if (> (point) (minibuffer-prompt-end)) (backward-char)
-;;     (throw 'action (list 'next (or num 1)))))
+;;; wg-minibuffer-mode commands
 
 (defun wg-next-buffer-set (&optional num)
   "Trigger a forward cycling through the buffer-set order.
@@ -3002,14 +2984,6 @@ NUM is the number of buffer sets to cycle forward."
   (if (> (point) (minibuffer-prompt-end)) (backward-char)
     (throw 'action (list 'next (or num 1)))))
 
-;; (defun wg-previous-buffer-set (&optional num)
-;;   "Trigger a backward cycling through the buffer-set order.
-;; Call `backward-char' unless `point' is right after the prompt.
-;; NUM is the number of states to cycle backward."
-;;   (interactive "P")
-;;   (if (> (point) (minibuffer-prompt-end)) (backward-char)
-;;     (throw 'action (list 'prev (- (or num 1))))))
-
 (defun wg-previous-buffer-set (&optional num)
   "Trigger a backward cycling through the buffer-set order.
 Call `backward-char' unless `point' is right after the prompt.
@@ -3017,11 +2991,6 @@ NUM is the number of states to cycle backward."
   (interactive "P")
   (if (> (point) (minibuffer-prompt-end)) (backward-char)
     (throw 'action (list 'prev (- (or num 1))))))
-
-;; FIXME: Put all these minibuffer commands in a minor-mode that's activated in
-;; minibuffer-setup-hook, and deactivated in minibuffer-exit-hook.  That way,
-;; rather than explicit (backward-char)'s and whatnot, you can find the original
-;; binding of the key with (let (workgroups-mode) (key-binding (kbd "C-H-j")))
 
 (defun wg-current-matches (&optional read-buffer-mode)
   "Return READ-BUFFER-MODE's current matches."
@@ -3045,102 +3014,62 @@ NUM is the number of states to cycle backward."
        (setq iswitchb-buflist match-list iswitchb-rescan t)))
     (fallback nil)))
 
-;; FIXME: If this works, maybe we don't need to throw in the other two commands,
-;; either
-;;
-;; FIXME: `wg-make-buffer-set's single rotatation of the list on certain
-;; buffer-methods if the car of the list equal the current-buffer is breaking
-;; this:
 (defun wg-dissociate-first-match ()
   "Dissociate the first match from current workgroup."
   (interactive)
-  (if (> (point) (minibuffer-prompt-end)) (backward-word)
-    (wg-when-let ((mode (wg-current-read-buffer-mode))
-                  (buffer (wg-current-match mode)))
-      (let* ((buffer-set (wg-make-buffer-set))
-             (pos (position buffer buffer-set :test 'equal))
-             (new (cdr (wg-rotlst buffer-set pos))))
-        (wg-workgroup-dissociate-buffer nil buffer t)
-        (bury-buffer buffer)
-        (wg-set-current-matches new mode)))))
+  (wg-when-let ((mode (wg-current-read-buffer-mode))
+                (buffer (wg-current-match mode))
+                (pos (position buffer (wg-make-buffer-set) :test 'equal)))
+    (wg-workgroup-dissociate-buffer nil buffer t)
+    (wg-set-current-matches (wg-rotlst (wg-make-buffer-set) pos) mode)))
 
-;; FIXME: add `wg-associate-first-match'
+(defun wg-associate-first-match ()
+  "Associate the first match with or update it in the current workgroup."
+  (interactive)
+  (wg-when-let ((mode (wg-current-read-buffer-mode))
+                (buffer (wg-current-match mode))
+                (pos (position buffer (wg-make-buffer-set) :test 'equal)))
+    (wg-workgroup-update-or-associate-buffer nil buffer 'manual)
+    (wg-set-current-matches (wg-rotlst (wg-make-buffer-set) pos) mode)))
+
 
 ;; FIXME: Add commands to jump to specific buffer-sets
+(defvar wg-minibuffer-mode-map
+  (fill-keymap (make-sparse-keymap)
+               "C-b"       'wg-next-buffer-set
+               "C-c n"     'wg-next-buffer-set
+               "C-c C-n"   'wg-next-buffer-set
+               "C-S-b"     'wg-previous-buffer-set
+               "C-c p"     'wg-previous-buffer-set
+               "C-c C-p"   'wg-previous-buffer-set
+               "C-c a"     'wg-associate-first-match
+               "C-c C-a"   'wg-associate-first-match
+               "C-c d"     'wg-dissociate-first-match
+               "C-c C-d"   'wg-dissociate-first-match
+               )
+  "`wg-minibuffer-mode's keymap.")
 
-;; THE GOOD ONE
-(defun wg-bind-minibuffer-commands ()
-  "Conditionally bind various commands in `minibuffer-local-map'.
-Added to `minibuffer-setup-hook'."
+(defvar wg-minibuffer-mode-minor-mode-map-entry
+  (cons 'wg-minibuffer-mode wg-minibuffer-mode-map)
+  "`wg-minibuffer-mode's entry in `minor-mode-map-alist'.")
+
+(define-minor-mode wg-minibuffer-mode
+  ""
+  :global t
+  :group 'workgroups
+  (when wg-minibuffer-mode
+    (add-to-list 'minor-mode-map-alist
+                 wg-minibuffer-mode-minor-mode-map-entry)))
+
+(defun wg-turn-on-minibuffer-mode ()
+  ""
   (when wg-current-buffer-set-symbol
-    ;; These might be useful:
-    ;;   ido-setup-completion-map
-    ;;   iswitchb-define-mode-map-hook
-    (let* ((mode (wg-current-read-buffer-mode))
-           (map (case mode
-                  (ido ido-completion-map)
-                  (iswitchb iswitchb-mode-map)
-                  (fallback (make-sparse-keymap)))))
-      (define-key map (kbd "C-b")   'wg-next-buffer-set)
-      (define-key map (kbd "C-S-b") 'wg-previous-buffer-set)
-      (define-key map (kbd "M-b")   'wg-dissociate-first-match)
-      (when (eq mode 'fallback)
-        (set-keymap-parent map minibuffer-local-completion-map)
-        (use-local-map map)))))
+    (wg-minibuffer-mode 1)))
 
-;; (defun wg-make-minibuffer-keymap ()
-;;   (let ((map (make-sparse-keymap)))
-;;     (define-key map (kbd "C-b")   'wg-next-buffer-set)
-;;     (define-key map (kbd "C-S-b") 'wg-previous-buffer-set)
-;;     (define-key map (kbd "M-b")   'wg-dissociate-first-match)
-;;     map))
-
-;; (defun wg-bind-minibuffer-commands ()
-;;   (when wg-current-buffer-set-symbol
-;;     (let ((map (wg-make-minibuffer-keymap)))
-;;       (set-keymap-parent map (case (wg-current-read-buffer-mode)
-;;                                (ido ido-completion-map)
-;;                                (iswitchb iswitchb-mode-map)
-;;                                (fallback original-mlc-map)))
-;;       (setq minibuffer-local-completion-map map))))
-
-;; (defun wg-bind-minibuffer-commands ()
-;;   "Conditionally bind various commands in `minibuffer-local-map'.
-;; Added to `minibuffer-setup-hook'."
-;;   (when wg-current-buffer-set-symbol
-;;     (let ((map (make-sparse-keymap)))
-;;       (define-key map (kbd "C-b")   'wg-next-buffer-set)
-;;       (define-key map (kbd "C-S-b") 'wg-previous-buffer-set)
-;;       (define-key map (kbd "M-b")   'wg-dissociate-first-match)
-;;       (case (wg-current-read-buffer-mode)
-;;         (ido
-;;          (set-keymap-parent map ido-completion-map)
-;;          (setq minibuffer-local-completion-map map))
-;;         (iswitchb
-;;          (set-keymap-parent map iswitchb-mode-map)
-;;          (setq minibuffer-local-completion-map map))
-;;         (fallback
-;;          (set-keymap-parent map minibuffer-local-completion-map)
-;;          (setq minibuffer-local-completion-map map))))))
-
-;; (defun wg-bind-minibuffer-commands ()
-;;   "Conditionally bind various commands in `minibuffer-local-map'.
-;; Added to `minibuffer-setup-hook'."
-;;   (when wg-current-buffer-set-symbol
-;;     (let ((map (make-sparse-keymap)))
-;;       (define-key map (kbd "C-b")   'wg-next-buffer-set)
-;;       (define-key map (kbd "C-S-b") 'wg-previous-buffer-set)
-;;       (define-key map (kbd "M-b")   'wg-dissociate-first-match)
-;;       (set-keymap-parent
-;;        map (case (wg-current-read-buffer-mode)
-;;              (ido ido-completion-map)
-;;              (iswitchb iswitchb-mode-map)
-;;              (fallback original-mlc-map)))
-;;       (setq minibuffer-local-completion-map map))))
-
-
-
-;; FIXME: banish-buffer's msg should be "Banished <buffer>: ( ... )"
+(defun wg-turn-off-minibuffer-mode ()
+  ""
+  (when wg-current-buffer-set-symbol
+    (wg-minibuffer-mode -1)))
 
 
 ;; buffer-set commands
@@ -3221,14 +3150,8 @@ will take you."
   (interactive)
   (wg-with-buffer-sets (if prev 'previous-buffer 'next-buffer)
     (wg-awhen (wg-make-buffer-set)
-      (wg-next-buffer-internal it prev)
-      (let* ((set (wg-make-buffer-set))
-             (split (/ (1- (length set)) 2))
-             (set (append (wg-leave set split) (butlast set split))))
-        (message ;; FIXME: factor this out
-         (concat
-          (wg-buffer-set-prompt)
-          (wg-display-internal 'wg-buffer-display set)))))))
+      (wg-next-buffer-internal it prev))
+    (message (concat (wg-buffer-set-prompt) (wg-buffer-list-display)))))
 
 (defun wg-previous-buffer (&optional fallback)
   "Switch to the next buffer in Workgroups' filtered buffer list."
@@ -3810,8 +3733,10 @@ If ARG is anything else, turn on `workgroups-mode'."
     (add-hook 'pre-command-hook 'wg-update-working-wconfig-before-command)
     (add-hook 'post-command-hook 'wg-save-undo-after-wconfig-change)
     (add-hook 'minibuffer-setup-hook 'wg-unflag-window-config-changed)
-    (add-hook 'minibuffer-setup-hook 'wg-bind-minibuffer-commands)
+    (add-hook 'minibuffer-setup-hook 'wg-turn-on-minibuffer-mode)
+    ;; (add-hook 'minibuffer-setup-hook 'wg-bind-minibuffer-commands)
     (add-hook 'minibuffer-exit-hook 'wg-flag-just-exited-minibuffer)
+    (add-hook 'minibuffer-exit-hook 'wg-turn-off-minibuffer-mode)
     (add-hook 'ido-make-buffer-list-hook 'wg-set-ido-buffer-list)
     (add-hook 'iswitchb-make-buflist-hook 'wg-set-iswitchb-buffer-list)
     (add-hook 'kill-buffer-hook 'wg-auto-dissociate-buffer-hook)
@@ -3827,7 +3752,8 @@ If ARG is anything else, turn on `workgroups-mode'."
     (remove-hook 'pre-command-hook 'wg-update-working-wconfig-before-command)
     (remove-hook 'post-command-hook 'wg-save-undo-after-wconfig-change)
     (remove-hook 'minibuffer-setup-hook 'wg-unflag-window-config-changed)
-    (remove-hook 'minibuffer-setup-hook 'wg-bind-minibuffer-commands)
+    (remove-hook 'minibuffer-setup-hook 'wg-turn-on-minibuffer-mode)
+    ;; (remove-hook 'minibuffer-setup-hook 'wg-bind-minibuffer-commands)
     (remove-hook 'minibuffer-exit-hook 'wg-flag-just-exited-minibuffer)
     (remove-hook 'ido-make-buffer-list-hook 'wg-set-ido-buffer-list)
     (remove-hook 'iswitchb-make-buflist-hook 'wg-set-iswitchb-buffer-list)
