@@ -863,15 +863,20 @@ variable, and the cadr as the key."
     (goto-char (point-min))
     (read (current-buffer))))
 
-(defun wg-read-object (prompt test warning &rest args)
+(defun wg-read-object (prompt test warning &optional initial-contents keymap
+                              read hist default-value inherit-input-method)
   "PROMPT for an object that satisfies TEST, WARNING if necessary.
 ARGS are `read-from-minibuffer's args, after PROMPT."
-  (let ((obj (apply #'read-from-minibuffer prompt args)))
-    (wg-until (funcall test obj)
-      (message warning)
-      (sit-for wg-warning-timeout)
-      (setq obj (apply #'read-from-minibuffer prompt args)))
-    obj))
+  (flet ((read () (read-from-minibuffer
+                   prompt initial-contents keymap read hist
+                   default-value inherit-input-method)))
+    (let ((obj (read)))
+      (when (and (equal obj "") default-value) (setq obj default-value))
+      (while (not (funcall test obj))
+        (message warning)
+        (sit-for wg-warning-timeout)
+        (setq obj (read)))
+      obj)))
 
 (defun wg-file-under-root-path-p (root-path file-path)
   "Return t when FILE-PATH is under ROOT-PATH, nil otherwise."
@@ -2363,12 +2368,45 @@ Query to overwrite if a workgroup with the same name exists."
     (wg-awhen (wg-current-workgroup t) (wg-workgroup-name it)))
    noerror))
 
+(defun wg-read-object (prompt test warning &optional initial-contents keymap
+                              read hist default-value inherit-input-method)
+  "PROMPT for an object that satisfies TEST, WARNING if necessary.
+ARGS are `read-from-minibuffer's args, after PROMPT."
+  (flet ((read () (read-from-minibuffer
+                   prompt initial-contents keymap read hist
+                   default-value inherit-input-method)))
+    (let ((obj (read)))
+      (when (and (equal obj "") default-value) (setq obj default-value))
+      (while (not (funcall test obj))
+        (message warning)
+        (sit-for wg-warning-timeout)
+        (setq obj (read)))
+      obj)))
+
+(defun wg-new-default-workgroup-name ()
+  "Return a new, unique, default workgroup name."
+  (let ((names (wg-workgroup-names t)) (index -1) result)
+    (while (not result)
+      (let ((new-name (format "workgroup-%s" (incf index))))
+        (unless (member new-name names)
+          (setq result new-name))))
+    result))
+
+(defun wg-unique-workgroup-name-p (new-name)
+  "Return t if NEW-NAME is unique in `wg-list', nil otherwise."
+  (every (lambda (existing-name) (not (equal new-name existing-name)))
+         (wg-workgroup-names t)))
+
 (defun wg-read-new-workgroup-name (&optional prompt)
   "Read a non-empty name string from the minibuffer."
-  (wg-read-object
-   (or prompt "Name: ")
-   (lambda (obj) (and (stringp obj) (not (equal obj ""))))
-   "Please enter a unique, non-empty name"))
+  (let ((default (wg-new-default-workgroup-name)))
+    (wg-read-object
+     (or prompt (format "Name (default: %S): " default))
+     (lambda (new) (and (stringp new)
+                   (not (equal new ""))
+                   (wg-workgroup-name-is-unique new)))
+     "Please enter a unique, non-empty name"
+     nil nil nil nil default)))
 
 (defun wg-read-workgroup-index ()
   "Prompt for the index of a workgroup."
