@@ -51,6 +51,20 @@
 ;;
 
 
+;; FIXME: Convert `wg-list' to an alist.  The key `workgroups's value is what
+;; was previously the value of `wg-list' -- the list of workgroups.  That way
+;; there can be other metadata in there, too, like the path to an .rc file to
+;; load when the workgroups file is loaded, a name for the set of workgroups,
+;; general `wg-workgroup-list-parameter' and `wg-set-workgroup-list-parameter',
+;; etc.  The file can contain filtration function definitions, set variables,
+;; etc.  Once that's done, buffer-set definitions should be converted to a list
+;; of lists containing the buffer-set symbol, its prompt string, and the
+;; function called to produce it. The function can be a function-symbol or a lambda,
+;; and should take two arguments: a workgroup and an initial buffer-list.  Once
+;; that's done, the wg-workgroup-buffer-list-filters stuff can finally be
+;; removed.
+
+
 
 ;;; Code:
 
@@ -68,12 +82,6 @@
 
 (defconst wg-version "0.2.1"
   "Current version of workgroups.")
-
-(defconst wg-persisted-workgroups-tag 'workgroups
-  "Tag appearing at the beginning of any list of persisted workgroups.")
-
-(defconst wg-persisted-workgroups-format-version "2.0"
-  "Current version number of the format of persisted workgroup lists.")
 
 
 
@@ -262,7 +270,7 @@ See `wg-buffer-set-order-alist'."
   :group 'workgroups)
 
 (defcustom wg-buffer-set-order-alist
-  '((default associated all))
+  '((default associated unassociated all fallback))
   "Alist mapping buffer methods to lists defining the order in
 which buffer sets are presented.
 
@@ -277,24 +285,23 @@ buffer-set order for all buffer methods not present.
 The value of each key-value-pair should be a list containing any
 combination of the following buffer-set symbols:
 
-`all'             All buffer names
+`all'           All buffer names
 
-`associated'      Only the names of those live buffers that have
-                  been associated with the current workgroup
+`associated'    Only the names of those live buffers that have
+                been associated with the current workgroup
 
-`unassociated'    FIXME: Add this buffer-set. It'd be nice to be
-                  able to see only those buffers that *aren't*
-                  associated with the current workgroup.
+`unassociated'  Only the names of those live buffer that have not
+                been associated with the current workgroup
 
-`filtered'        Only the buffer names resulting from running the
-                  current workgroup's buffer-list filters over
-                  the entire buffer-list
+`filtered'      Only the buffer names resulting from running the
+                current workgroup's buffer-list filters over
+                the entire buffer-list
 
 `associated-and-filtered'
-                  The union of the `associated' and `filtered' sets
+                The union of the `associated' and `filtered' sets
 
-`fallback'        Fallback to the non-ido or non-iswitchb version of
-                  the command, completing on all buffer names"
+`fallback'      Fallback to the non-ido or non-iswitchb version of
+                the command, completing on all buffer names"
   :type 'alist
   :group 'workgroups)
 
@@ -315,11 +322,20 @@ combination of the following buffer-set symbols:
 (defcustom wg-buffer-set-indicator-alist
   '((all                     . "all")
     (associated              . "a--")
+    (unassociated            . "-u-")
     (filtered                . "--f")
-    (associated-and-filtered . "a+f")
+    (associated-and-filtered . "a-f")
     (fallback                . "<--"))
   "Alist mapping buffer set symbols to their display strings."
   :type 'alist
+  :group 'workgroups)
+
+(defcustom wg-center-rotate-buffer-list-display t
+  "Non-nil means rotate the buffer list display so that the
+current buffer is in the center (and nearer the front if the
+list's length is even).  This makes it easier to see where
+`wg-previous-buffer' will take you."
+  :type 'boolean
   :group 'workgroups)
 
 (defcustom wg-barf-on-filter-error nil
@@ -456,8 +472,13 @@ decoration strings."
 
 ;; file and dirty flag vars
 
-(defvar wg-file nil
+;; FIXME: change this to `wg-visited-file-name'
+(defvar wg-visited-file-name nil
   "Current workgroups file.")
+
+(defvar wg-workgroup-set '(workgroup-set)
+  "Current workgroup-set object, containing all currently defined
+workgroup objects and other information.")
 
 (defvar wg-list nil
   "List of currently defined workgroups.")
@@ -729,6 +750,14 @@ HI-INCLUSIVE non-nil means the HI bound is inclusive."
     (mapc (lambda (elt) (wg-awhen (funcall pred elt) (push it acc))) seq)
     (nreverse acc)))
 
+(defun wg-stable-union (test &rest lists)
+  "Return the stable-ordered `union' of LISTS, testing membership with TEST."
+  (let (result)
+    (nreverse
+     (dolist (list lists result)
+       (dolist (elt list)
+         (pushnew elt result :test test))))))
+
 (defun wg-last1 (list)
   "Return the last element of LIST."
   (car (last list)))
@@ -743,8 +772,15 @@ HI-INCLUSIVE non-nil means the HI bound is inclusive."
 
 (defun wg-rotlst (list &optional offset)
   "Rotate LIST by OFFSET.  Positive OFFSET rotates left, negative right."
-  (let ((split (mod (or offset 1) (length list))))
-    (append (nthcdr split list) (wg-take list split))))
+  (when list
+    (let ((split (mod (or offset 1) (length list))))
+      (append (nthcdr split list) (wg-take list split)))))
+
+(defun wg-center-rotate-list (list)
+  "Rotate LIST so it's first elt is in the center.  When LIST's
+length is even, the first elt is left nearer the front."
+  (when list
+    (wg-rotlst list (- (/ (1- (length list)) 2)))))
 
 (defun wg-cyclic-nth (list n)
   "Return the Nth element of LIST, modded by the length of list."
@@ -842,15 +878,20 @@ variable, and the cadr as the key."
     (goto-char (point-min))
     (read (current-buffer))))
 
-(defun wg-read-object (prompt test warning &rest args)
+(defun wg-read-object (prompt test warning &optional initial-contents keymap
+                              read hist default-value inherit-input-method)
   "PROMPT for an object that satisfies TEST, WARNING if necessary.
 ARGS are `read-from-minibuffer's args, after PROMPT."
-  (let ((obj (apply #'read-from-minibuffer prompt args)))
-    (wg-until (funcall test obj)
-      (message warning)
-      (sit-for wg-warning-timeout)
-      (setq obj (apply #'read-from-minibuffer prompt args)))
-    obj))
+  (flet ((read () (read-from-minibuffer
+                   prompt initial-contents keymap read hist
+                   default-value inherit-input-method)))
+    (let ((obj (read)))
+      (when (and (equal obj "") default-value) (setq obj default-value))
+      (while (not (funcall test obj))
+        (message warning)
+        (sit-for wg-warning-timeout)
+        (setq obj (read)))
+      obj)))
 
 (defun wg-file-under-root-path-p (root-path file-path)
   "Return t when FILE-PATH is under ROOT-PATH, nil otherwise."
@@ -876,6 +917,12 @@ NAME non-nil means return their names instead."
                        (if names name buffer))))
                  (buffer-list)))
 
+(defun wg-add-or-remove-hooks (remove &rest pairs)
+  "Add FUNCTION to or remove it from HOOK, depending on REMOVE."
+  (dolist (pair (wg-partition pairs 2))
+    (funcall (if remove 'remove-hook 'add-hook)
+             (car pair) (cadr pair))))
+
 
 
 ;;; workgroups utils
@@ -897,6 +944,7 @@ NAME non-nil means return their names instead."
 (defun wg-get (obj param &optional default)
   "Return OBJ's value for PARAM.
 If PARAM is not found, return DEFAULT which defaults to nil."
+  (unless (wg-type-of obj) (error "%S is not a Workgroups object" obj))
   (wg-aget (cdr obj) param default))
 
 (defun wg-put (obj param val)
@@ -970,6 +1018,10 @@ minibuffer is active.")))
 (defun wg-workgroup-p (obj)
   "Return t if OBJ is a workgroup, nil otherwise."
   (wg-type-p obj 'workgroup))
+
+(defun wg-workgroup-set-p (obj)
+  "Return t if OBJ is a workgroup-set, nil otherwise."
+  (wg-type-p obj 'workgroup-set))
 
 
 
@@ -1257,7 +1309,7 @@ BUFFER or `wg-default-buffer' is visible in the only window."
 
 ;;; wconfig restoration
 
-;; FIXME: Add restoration of *Info* buffers as a first stab at complex buffer
+;; TODO: Add restoration of *Info* buffers as a first stab at complex buffer
 ;; restoration
 (defun wg-restore-buffer (wg-buffer)
   "Restore WG-BUFFER and return it."
@@ -1277,6 +1329,32 @@ BUFFER or `wg-default-buffer' is visible in the only window."
           (unless markx (deactivate-mark))
           buffer)))))
 
+;; (defun wg-restore-window (wg-window)
+;;   "Restore WG-WINDOW in `selected-window'."
+;;   (wg-bind-params wg-window ((wg-buffer buffer) point wstart hscroll
+;;                              sbars fringes margins selwin mbswin)
+;;     (let ((sw (selected-window))
+;;           (buffer (wg-restore-buffer wg-buffer)))
+;;       (when selwin (setq wg-selected-window sw))
+;;       (if (not buffer) (switch-to-buffer wg-default-buffer t)
+;;         (switch-to-buffer buffer t)
+;;         (set-window-start sw wstart t)
+;;         (set-window-point
+;;          sw (cond ((not wg-restore-point) wstart)
+;;                   ((eq point :max) (point-max))
+;;                   (t point)))
+;;         (when (>= wstart (point-max)) (recenter))
+;;         (when (and wg-restore-mbs-window mbswin)
+;;           (setq minibuffer-scroll-window sw))
+;;         (when wg-restore-scroll-bars
+;;           (wg-dbind (width cols vtype htype) sbars
+;;             (set-window-scroll-bars sw width vtype htype)))
+;;         (when wg-restore-fringes
+;;           (apply #'set-window-fringes sw fringes))
+;;         (when wg-restore-margins
+;;           (set-window-margins sw (car margins) (cdr margins)))
+;;         (set-window-hscroll sw hscroll)))))
+
 (defun wg-restore-window (wg-window)
   "Restore WG-WINDOW in `selected-window'."
   (wg-bind-params wg-window ((wg-buffer buffer) point wstart hscroll
@@ -1284,8 +1362,8 @@ BUFFER or `wg-default-buffer' is visible in the only window."
     (let ((sw (selected-window))
           (buffer (wg-restore-buffer wg-buffer)))
       (when selwin (setq wg-selected-window sw))
-      (if (not buffer) (switch-to-buffer wg-default-buffer t)
-        (switch-to-buffer buffer t)
+      (if (not buffer) (set-window-buffer sw wg-default-buffer)
+        (set-window-buffer sw buffer)
         (set-window-start sw wstart t)
         (set-window-point
          sw (cond ((not wg-restore-point) wstart)
@@ -1350,7 +1428,7 @@ BUFFER or `wg-default-buffer' is visible in the only window."
 
 ;;; morph
 
-;; FIXME: Add upward and left morphing.  And once it's been added, add selection
+;; TODO: Add upward and left morphing.  And once it's been added, add selection
 ;;        of a random morph direction.
 
 (defun wg-morph-p ()
@@ -1515,34 +1593,56 @@ Emacs buffer-name string."
 
 ;;; global error wrappers
 
-(defun wg-file (&optional noerror)
-  "Return `wg-file' or error."
-  (or wg-file
+(defun wg-visited-file-name (&optional noerror)
+  "Return `wg-visited-file-name' or error."
+  (or wg-visited-file-name
       (unless noerror
         (error "Workgroups isn't visiting a file"))))
 
+;; (defun wg-list (&optional noerror)
+;;   "Return `wg-list' or error."
+;;   (or wg-list
+;;       (unless noerror
+;;         (error "No workgroups are defined."))))
+
 (defun wg-list (&optional noerror)
   "Return `wg-list' or error."
-  (or wg-list
+  (or (wg-get wg-workgroup-set 'workgroup-list)
       (unless noerror
         (error "No workgroups are defined."))))
 
-(defun wg-get-workgroup (key val)
+(defun wg-set-workgroup-list (new-workgroup-list)
+  "Set `wg-workgroup-set's workgroup-list param to NEW-WORKGROUP-LIST."
+  (unless wg-workgroup-set (error "`wg-workgroup-set' is nil"))
+  (wg-set wg-workgroup-set 'workgroup-list new-workgroup-list))
+
+;; asdf
+;; (wg-workgroup-set-p nil)
+;; wg-list
+;; (setq wg-workgroup-set `(workgroup-set (workgroup-list ,@wg-list) (version . ,wg-version)))
+;; (wg-list)
+;; wg-workgroup-set
+
+
+
+(defun wg-get-workgroup (key val &optional noerror)
   "Return the workgroup whose KEY equals VAL or error."
   (catch 'found
-    (dolist (wg wg-list)
+    (dolist (wg (wg-list noerror))
       (when (equal val (wg-get wg key))
-        (throw 'found wg)))))
+        (throw 'found wg)))
+    (unless noerror
+      (error "No workgroups defined with key %S and value %S" key val))))
 
 (defun wg-get-workgroup-by-name (name &optional noerror)
   "Return the workgroup with name NAME."
-  (or (wg-get-workgroup 'name name)
+  (or (wg-get-workgroup 'name name noerror)
       (unless noerror
         (error "There's no workgroup named %S" name))))
 
 (defun wg-get-workgroup-by-uid (uid &optional noerror)
   "Return the workgroup with uid UID."
-  (or (wg-get-workgroup 'uid uid)
+  (or (wg-get-workgroup 'uid uid noerror)
       (unless noerror
         (error "There's no workgroup with a UID of %S" uid))))
 
@@ -1594,7 +1694,7 @@ WORKGROUP should be a value accepted by
 
 (defun wg-dirty-p ()
   "Return t when `wg-dirty' or any workgroup dirty parameter all is non-nil."
-  (or wg-dirty (some 'wg-workgroup-dirty-p wg-list)))
+  (or wg-dirty (some 'wg-workgroup-dirty-p (wg-list t))))
 
 (defun wg-mark-workgroup-dirty (workgroup)
   "Set WORKGROUP's dirty flag to t."
@@ -1606,7 +1706,7 @@ WORKGROUP should be a value accepted by
 
 (defun wg-mark-everything-clean ()
   "Set `wg-dirty' and all workgroup dirty flags to nil."
-  (mapc 'wg-mark-workgroup-clean wg-list)
+  (mapc 'wg-mark-workgroup-clean (wg-list t))
   (setq wg-dirty nil))
 
 
@@ -1697,12 +1797,12 @@ See `wg-get-bufobj' for allowable values for BUFOBJ."
   (or (wg-workgroup-update-buffer workgroup bufobj type t)
       (progn (wg-workgroup-associate-buffer workgroup bufobj type t) nil)))
 
-(defun wg-workgroup-live-buffers (workgroup &optional names)
+(defun wg-workgroup-live-buffers (workgroup &optional not-names)
   "Return a list of WORKGROUP's live associated buffers."
   (let ((associated-buffers (wg-workgroup-associated-buffers workgroup)))
     (wg-filter-map (lambda (buffer)
                      (when (wg-get-bufobj buffer associated-buffers)
-                       (if names (buffer-name buffer) buffer)))
+                       (if not-names buffer (buffer-name buffer))))
                    (buffer-list))))
 
 (defun wg-auto-dissociate-buffer-hook ()
@@ -1718,8 +1818,8 @@ See `wg-get-bufobj' for allowable values for BUFOBJ."
 (defun wg-workgroup-purge-auto-associated-buffers (workgroup)
   "Remove from WORKGROUP all wg-buffers with nil `persist' parameters."
   (wg-set-workgroup-associated-buffers
-   workgroup (remove-if-not 'wg-buffer-auto-associated-p
-                            (wg-workgroup-associated-buffers workgroup))))
+   workgroup (remove-if 'wg-buffer-auto-associated-p
+                        (wg-workgroup-associated-buffers workgroup))))
 
 
 
@@ -1853,9 +1953,6 @@ If a filter named FILTER-NAME already exists, `error' unless noerror."
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-;; FIXME: Add an `unassociated' buffer-set, containing only buffer that
-;; aren't associated with the current workgroup.
-;;
 ;; FIXME: associated-then-filtered, filtered-then-associated and recent
 ;;
 ;; FIXME: generalize all this stuff, so there aren't so many special cases
@@ -1866,27 +1963,43 @@ If a filter named FILTER-NAME already exists, `error' unless noerror."
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defun wg-make-buffer-set-all (workgroup initial)
+  "Return buffer-set `all' from WORKGROUP and INITIAL."
+  initial)
+
+(defun wg-make-buffer-set-associated (workgroup initial)
+  "Return the buffer-set `associated' from WORKGROUP and INITAL."
+  (wg-workgroup-live-buffers workgroup))
+
+(defun wg-make-buffer-set-unassociated (workgroup initial)
+  "Return the buffer-set `unassociated' from WORKGROUP and INITIAL."
+  (let ((buflist (wg-workgroup-live-buffers workgroup)))
+    (remove-if (lambda (buf) (member buf buflist)) initial)))
+
+(defun wg-make-buffer-set-filtered (workgroup initial)
+  "Return the buffer-set `filtered' from WORKGROUP and INITIAL."
+  (wg-workgroup-filtered-buffer-list workgroup initial))
+
 (defun wg-make-buffer-set
   (&optional workgroup buffer-set-symbol initial-buffer-list)
   "Return the final list of buffer name completions."
-  (let ((wg (wg-get-workgroup-flexibly workgroup))
-        (buffer-set-symbol
-         (or buffer-set-symbol wg-current-buffer-set-symbol 'all))
-        (initial (or initial-buffer-list (wg-interesting-buffers t)))
-        (final nil))
-    (when (eq buffer-set-symbol 'all)
-      (setq final (nreverse initial)))
-    (when (memq buffer-set-symbol '(associated associated-and-filtered))
-      (setq final (nreverse (wg-workgroup-live-buffers wg t))))
-    (when (memq buffer-set-symbol '(filtered associated-and-filtered))
-      (dolist (buffer-name (wg-workgroup-filtered-buffer-list wg initial))
-        (pushnew buffer-name final)))
-    (setq final (nreverse final))
-    (case wg-current-buffer-method
-      ((selected-window other-window other-frame insert display)
-       (when (equal (car final) (buffer-name (current-buffer)))
-         (setq final (wg-rotlst final)))))
-    final))
+  (let* ((workgroup (wg-get-workgroup-flexibly workgroup))
+         (buffer-set-symbol
+          (or buffer-set-symbol wg-current-buffer-set-symbol 'all))
+         (initial (or initial-buffer-list (wg-interesting-buffers t))))
+    (case buffer-set-symbol
+      (all
+       (wg-make-buffer-set-all workgroup initial))
+      (associated
+       (wg-make-buffer-set-associated workgroup initial))
+      (unassociated
+       (wg-make-buffer-set-unassociated workgroup initial))
+      (filtered
+       (wg-make-buffer-set-filtered workgroup initial))
+      (associated-and-filtered
+       (wg-stable-union 'equal
+                        (wg-make-buffer-set-associated workgroup initial)
+                        (wg-make-buffer-set-filtered workgroup initial))))))
 
 
 ;; buffer-set context
@@ -1899,9 +2012,13 @@ If a filter named FILTER-NAME already exists, `error' unless noerror."
         (wg-aget wg-buffer-set-order-alist  method)
         (wg-aget wg-buffer-set-order-alist 'default))))
 
-(defun wg-prior-mapping (method)
-  "Return what METHOD would call if `workgroups-mode' wasn't on."
-  (or (let (workgroups-mode) (command-remapping method)) method))
+;; (defun wg-prior-mapping (method)
+;;   "Return what METHOD would call if `workgroups-mode' wasn't on."
+;;   (or (let (workgroups-mode) (command-remapping method)) method))
+
+(defmacro wg-prior-mapping (mode command)
+  "Return whatever COMMAND would call if MODE wasn't on."
+  `(or (let (,mode) (command-remapping ,command)) ,command))
 
 (defmacro wg-with-buffer-sets (method &rest body)
   "Establish buffer-set context for buffer-method METHOD, and eval BODY.
@@ -1911,7 +2028,7 @@ Binds `wg-current-workgroup', `wg-current-buffer-method' and
   (wg-with-gensyms (order status)
     `(let ((wg-current-workgroup (wg-current-workgroup t)))
        (if (or (not wg-buffer-sets-on) (not wg-current-workgroup))
-           (call-interactively (wg-prior-mapping ,method))
+           (call-interactively (wg-prior-mapping workgroups-mode ,method))
          (let* ((wg-current-buffer-method ,method)
                 (,order (wg-buffer-set-order wg-current-workgroup ,method)))
            (catch 'result
@@ -1922,31 +2039,6 @@ Binds `wg-current-workgroup', `wg-current-buffer-method' and
                    (done (throw 'result (cadr ,status)))
                    (next (setq ,order (wg-rotlst ,order (cadr ,status))))
                    (prev (setq ,order (wg-rotlst ,order (cadr ,status)))))))))))))
-
-
-;; (defmacro wg-with-buffer-sets (method &rest body)
-;;   "Establish buffer-set context for buffer-method METHOD, and eval BODY.
-;; Binds `wg-current-workgroup', `wg-current-buffer-method' and
-;; `wg-current-buffer-set-symbol' in BODY."
-;;   (declare (indent 1))
-;;   (wg-with-gensyms (order status)
-;;     `(let ((wg-current-workgroup (wg-current-workgroup t)))
-;;        (if (or (not wg-buffer-sets-on) (not wg-current-workgroup))
-;;            (call-interactively (wg-prior-mapping ,method))
-;;          (let* ((wg-current-buffer-method ,method)
-;;                 (,order (wg-buffer-set-order wg-current-workgroup ,method)))
-;;            (catch 'result
-;;              (while 'your-mom
-;;                (let* ((wg-current-buffer-set-symbol (car ,order))
-;;                       (,status (catch 'action (list 'done (progn ,@body)))))
-;;                  (case (car ,status)
-;;                    (done (throw 'result (cadr ,status)))
-;;                    (next (setq ,order (wg-rotlst ,order (cadr ,status))))
-;;                    (prev (setq ,order (wg-rotlst ,order (cadr ,status))))
-;;                    (dissociate
-;;                     (let ((buffer (cadr ,status)))
-;;                       (wg-awhen (and (stringp buffer) (get-buffer buffer))
-;;                         (wg-banish-buffer it)))))))))))))
 
 
 
@@ -2186,6 +2278,18 @@ is non-nil.  Added to `post-command-hook'."
 
 ;;; workgroups list ops
 
+;; (defun wg-delete-workgroup (workgroup)
+;;   "Remove WORKGROUP from `wg-list'.
+;; Also delete all references to it by `wg-workgroup-table',
+;; `wg-current-workgroup' and `wg-previous-workgroup'."
+;;   (dolist (frame (frame-list))
+;;     (remhash (wg-uid workgroup) (wg-workgroup-table frame))
+;;     (when (eq workgroup (wg-current-workgroup t frame))
+;;       (wg-set-current-workgroup nil frame))
+;;     (when (eq workgroup (wg-previous-workgroup t frame))
+;;       (wg-set-previous-workgroup nil frame)))
+;;   (setq wg-list (remove workgroup (wg-list)) wg-dirty t))
+
 (defun wg-delete-workgroup (workgroup)
   "Remove WORKGROUP from `wg-list'.
 Also delete all references to it by `wg-workgroup-table',
@@ -2196,16 +2300,27 @@ Also delete all references to it by `wg-workgroup-table',
       (wg-set-current-workgroup nil frame))
     (when (eq workgroup (wg-previous-workgroup t frame))
       (wg-set-previous-workgroup nil frame)))
-  (setq wg-list (remove workgroup (wg-list)) wg-dirty t))
+  (wg-set-workgroup-list (remove workgroup (wg-list)))
+  (setq wg-dirty t))
+
+;; (defun wg-add-workgroup (new &optional pos)
+;;   "Add WORKGROUP to `wg-list'.
+;; If a workgroup with the same name exists, overwrite it."
+;;   (wg-awhen (wg-get-workgroup-by-name (wg-workgroup-name new) t)
+;;     (unless pos (setq pos (position it (wg-list))))
+;;     (wg-delete-workgroup it))
+;;   (wg-set-uid new (wg-new-uid))
+;;   (setq wg-list (wg-insert-elt new (wg-list t) pos) wg-dirty t))
 
 (defun wg-add-workgroup (new &optional pos)
   "Add WORKGROUP to `wg-list'.
 If a workgroup with the same name exists, overwrite it."
   (wg-awhen (wg-get-workgroup-by-name (wg-workgroup-name new) t)
-    (unless pos (setq pos (position it wg-list)))
+    (unless pos (setq pos (position it (wg-list))))
     (wg-delete-workgroup it))
   (wg-set-uid new (wg-new-uid))
-  (setq wg-list (wg-insert-elt new wg-list pos) wg-dirty t))
+  (wg-set-workgroup-list (wg-insert-elt new (wg-list t) pos))
+  (setq wg-dirty t))
 
 (defun wg-check-and-add-workgroup (workgroup)
   "Add WORKGROUP to `wg-list'.
@@ -2217,17 +2332,32 @@ Query to overwrite if a workgroup with the same name exists."
         (error "Cancelled"))))
   (wg-add-workgroup workgroup))
 
+;; (defun wg-cyclic-offset-workgroup (workgroup n)
+;;   "Offset WORKGROUP's position in `wg-list' by N."
+;;   (wg-aif (wg-cyclic-offset-elt workgroup (wg-list) n)
+;;       (setq wg-list it wg-dirty t)
+;;     (error "Workgroup isn't present in `wg-list'.")))
+
 (defun wg-cyclic-offset-workgroup (workgroup n)
   "Offset WORKGROUP's position in `wg-list' by N."
   (wg-aif (wg-cyclic-offset-elt workgroup (wg-list) n)
-      (setq wg-list it wg-dirty t)
+      (progn (wg-set-workgroup-list it)
+             (setq wg-dirty t))
     (error "Workgroup isn't present in `wg-list'.")))
+
+;; (defun wg-list-swap (w1 w2)
+;;   "Swap the positions of W1 and W2 in `wg-list'."
+;;   (when (eq w1 w2) (error "Can't swap a workgroup with itself"))
+;;   (wg-aif (wg-util-swap w1 w2 (wg-list))
+;;       (setq wg-list it wg-dirty t)
+;;     (error "Both workgroups aren't present in `wg-list'.")))
 
 (defun wg-list-swap (w1 w2)
   "Swap the positions of W1 and W2 in `wg-list'."
   (when (eq w1 w2) (error "Can't swap a workgroup with itself"))
   (wg-aif (wg-util-swap w1 w2 (wg-list))
-      (setq wg-list it wg-dirty t)
+      (progn (wg-set-workgroup-list it)
+             (setq wg-dirty t))
     (error "Both workgroups aren't present in `wg-list'.")))
 
 
@@ -2320,12 +2450,30 @@ Query to overwrite if a workgroup with the same name exists."
     (wg-awhen (wg-current-workgroup t) (wg-workgroup-name it)))
    noerror))
 
+(defun wg-new-default-workgroup-name ()
+  "Return a new, unique, default workgroup name."
+  (let ((names (wg-workgroup-names t)) (index -1) result)
+    (while (not result)
+      (let ((new-name (format "workgroup-%s" (incf index))))
+        (unless (member new-name names)
+          (setq result new-name))))
+    result))
+
+(defun wg-unique-workgroup-name-p (new-name)
+  "Return t if NEW-NAME is unique in `wg-list', nil otherwise."
+  (every (lambda (existing-name) (not (equal new-name existing-name)))
+         (wg-workgroup-names t)))
+
 (defun wg-read-new-workgroup-name (&optional prompt)
   "Read a non-empty name string from the minibuffer."
-  (wg-read-object
-   (or prompt "Name: ")
-   (lambda (obj) (and (stringp obj) (not (equal obj ""))))
-   "Please enter a unique, non-empty name"))
+  (let ((default (wg-new-default-workgroup-name)))
+    (wg-read-object
+     (or prompt (format "Name (default: %S): " default))
+     (lambda (new) (and (stringp new)
+                        (not (equal new ""))
+                        (wg-unique-workgroup-name-p new)))
+     "Please enter a unique, non-empty name"
+     nil nil nil nil default)))
 
 (defun wg-read-workgroup-index ()
   "Prompt for the index of a workgroup."
@@ -2368,11 +2516,12 @@ Also save the msg to `wg-last-message'."
 
 (defun wg-workgroup-display (workgroup index)
   "Return display string for WORKGROUP at INDEX."
-  (wg-element-display
-   workgroup
-   (format "%d: %s" index (wg-workgroup-name workgroup))
-   (lambda (wg) (wg-current-workgroup-p wg t))
-   (lambda (wg) (wg-previous-workgroup-p wg t))))
+  (if (not workgroup) "No workgroups"
+    (wg-element-display
+     workgroup
+     (format "%d: %s" index (wg-workgroup-name workgroup))
+     (lambda (wg) (wg-current-workgroup-p wg t))
+     (lambda (wg) (wg-previous-workgroup-p wg t)))))
 
 (defun wg-buffer-display (buffer index)
   "Return display string for BUFFER. INDEX is ignored."
@@ -2392,6 +2541,33 @@ Also save the msg to `wg-last-message'."
       (if (not list) (funcall elt-fn nil nil)
         (wg-doconcat (elt list div) (funcall elt-fn elt (incf i))))
       (:brace (wg-aget wg-decor-alist 'right-brace)))))
+
+(defun wg-disp ()
+  "Return the Workgroups list display string.
+The string contains the names of all workgroups in `wg-list',
+decorated with faces, dividers and strings identifying the
+current and previous workgroups."
+  (wg-display-internal 'wg-workgroup-display (wg-list t)))
+
+;; TODO: Scroll animation for the buffer list display during `wg-next-buffer'
+;; and `wg-previous-buffer'?
+
+(defun wg-buffer-list-display ()
+  "Return the buffer-list display string."
+  (let ((set (wg-make-buffer-set)))
+    (wg-display-internal
+     'wg-buffer-display
+     (if wg-center-rotate-buffer-list-display
+         (wg-center-rotate-list set) set))))
+
+(defun wg-buffer-command-display (msg &optional buffer)
+  "Return the buffer command display string."
+  (wg-fontify
+    (:cmd msg) " "
+    (:cur (format "%S " (buffer-name (or buffer (current-buffer)))))
+    (wg-buffer-set-display)
+    ": "
+    (wg-buffer-list-display)))
 
 
 
@@ -2418,13 +2594,6 @@ begavior is reversed."
   (wg-when-let ((wg (or workgroup (wg-current-workgroup t))))
     (wg-cyclic-nth-from-elt wg (wg-list) (or n 1))))
 
-(defun wg-disp ()
-  "Return the Workgroups list display string.
-The string contains the names of all workgroups in `wg-list',
-decorated with faces, dividers and strings identifying the
-current and previous workgroups."
-  (wg-display-internal 'wg-workgroup-display wg-list))
-
 
 
 ;;; commands
@@ -2436,7 +2605,6 @@ WORKGROUP1 and WORKGROUP2 can be any value accepted by
   (eq (wg-get-workgroup-flexibly workgroup1)
       (wg-get-workgroup-flexibly workgroup2)))
 
-;; FIXME: the (and current ... ) bit is ugly
 (defun wg-switch-to-workgroup (workgroup)
   "Switch to WORKGROUP."
   (interactive (list (wg-read-workgroup)))
@@ -2688,10 +2856,26 @@ Worgroups are updated with their working-wconfigs in the
       (:msg " to ")
       (:cur (wg-workgroup-name workgroup)))))
 
+;; (defun wg-reset (&optional force)
+;;   "Reset workgroups.
+;; Deletes all state saved in frame parameters, and nulls out
+;; `wg-list', `wg-visited-file-name' and `wg-kill-ring'."
+;;   (interactive "P")
+;;   (unless (or force wg-no-confirm (y-or-n-p "Are you sure? "))
+;;     (error "Canceled"))
+;;   (dolist (frame (frame-list))
+;;     (set-frame-parameter frame 'wg-workgroup-table nil)
+;;     (set-frame-parameter frame 'wg-current-workgroup-uid nil)
+;;     (set-frame-parameter frame 'wg-previous-workgroup-uid nil))
+;;   (setq wg-list nil wg-visited-file-name nil wg-dirty nil)
+;;   (wg-fontified-msg
+;;     (:cmd "Reset: ")
+;;     (:msg "Workgroups")))
+
 (defun wg-reset (&optional force)
   "Reset workgroups.
 Deletes all state saved in frame parameters, and nulls out
-`wg-list', `wg-file' and `wg-kill-ring'."
+`wg-list', `wg-visited-file-name' and `wg-kill-ring'."
   (interactive "P")
   (unless (or force wg-no-confirm (y-or-n-p "Are you sure? "))
     (error "Canceled"))
@@ -2699,7 +2883,9 @@ Deletes all state saved in frame parameters, and nulls out
     (set-frame-parameter frame 'wg-workgroup-table nil)
     (set-frame-parameter frame 'wg-current-workgroup-uid nil)
     (set-frame-parameter frame 'wg-previous-workgroup-uid nil))
-  (setq wg-list nil wg-file nil wg-dirty nil)
+  (setq wg-workgroup-set '(workgroup-set)
+        wg-visited-file-name nil
+        wg-dirty nil)
   (wg-fontified-msg
     (:cmd "Reset: ")
     (:msg "Workgroups")))
@@ -2750,14 +2936,14 @@ Deletes all state saved in frame parameters, and nulls out
 accidentally call `wg-revert-all-workgroups' and want to return
 all workgroups to their un-reverted state."
   (interactive)
-  (mapc 'wg-undo-wconfig-change wg-list)
+  (mapc 'wg-undo-wconfig-change (wg-list))
   (message "Undid once on all workgroups."))
 
 (defun wg-redo-once-all-workgroups ()
   "Do what the name says.  Probably useless.  Included for
 symetry with `wg-undo-once-all-workgroups'."
   (interactive)
-  (mapc 'wg-redo-wconfig-change wg-list)
+  (mapc 'wg-redo-wconfig-change (wg-list))
   (message "Redid once on all workgroups."))
 
 
@@ -2834,11 +3020,7 @@ and switch to the next buffer in the buffer-set."
       (wg-workgroup-dissociate-buffer wg-current-workgroup buffer t)
       (wg-next-buffer-internal (wg-make-buffer-set))
       (bury-buffer buffer)
-      (wg-fontified-msg
-        (:cmd "Banished ")
-        (:cur (format "%S" (buffer-name buffer)))
-        (:cmd ":  ")
-        (wg-display-internal 'wg-buffer-display (wg-make-buffer-set))))))
+      (message (wg-buffer-command-display "Banished" buffer)))))
 
 (defun wg-purge-auto-associated-buffers ()
   "Remove buffers from the current workgroup that were added automatically."
@@ -2864,19 +3046,25 @@ and switch to the next buffer in the buffer-set."
 
 ;;; wg-switch-to-buffer
 
+(defun wg-rotate-buffer-set-if-necessary (buffer-set &optional buffer-method)
+  "Rotate BUFFER-SET if BUFFER-METHOD is "
+  (when buffer-set
+    (if (not (eq wg-current-buffer-method 'kill-buffer)) buffer-set
+      (wg-rotlst buffer-set))))
+
 (defun wg-set-ido-buffer-list ()
   "Set `ido-temp-list' to the return value of `wg-make-ffer-set'.
 Added to `ido-make-buffer-list-hook'."
   (when (and wg-current-buffer-set-symbol (boundp 'ido-temp-list))
     (setq ido-temp-list
-          (wg-make-buffer-set nil nil ido-temp-list))))
+          (wg-rotate-buffer-set-if-necessary (wg-make-buffer-set)))))
 
 (defun wg-set-iswitchb-buffer-list ()
   "Set `iswitchb-temp-buflist' to the return value of `wg-make-buffer-set'.
 Added to `iswitchb-make-buflist-hook'."
   (when (and wg-current-buffer-set-symbol (boundp 'iswitchb-temp-buflist))
     (setq iswitchb-temp-buflist
-          (wg-make-buffer-set nil nil iswitchb-temp-buflist))))
+          (wg-rotate-buffer-set-if-necessary (wg-make-buffer-set)))))
 
 
 ;; iswitchb compatibility
@@ -2903,15 +3091,8 @@ duplicated from `iswitchb', so is similarly shitty."
           (t (iswitchb-visit-buffer buffer)))))
 
 
-;; completion map
 
-;; (defun wg-next-buffer-set (&optional num)
-;;   "Trigger a forward cycling through the buffer-set order.
-;; Call `backward-char' unless `point' is right after the prompt.
-;; NUM is the number of buffer sets to cycle forward."
-;;   (interactive "P")
-;;   (if (> (point) (minibuffer-prompt-end)) (backward-char)
-;;     (throw 'action (list 'next (or num 1)))))
+;;; wg-minibuffer-mode commands
 
 (defun wg-next-buffer-set (&optional num)
   "Trigger a forward cycling through the buffer-set order.
@@ -2921,14 +3102,6 @@ NUM is the number of buffer sets to cycle forward."
   (if (> (point) (minibuffer-prompt-end)) (backward-char)
     (throw 'action (list 'next (or num 1)))))
 
-;; (defun wg-previous-buffer-set (&optional num)
-;;   "Trigger a backward cycling through the buffer-set order.
-;; Call `backward-char' unless `point' is right after the prompt.
-;; NUM is the number of states to cycle backward."
-;;   (interactive "P")
-;;   (if (> (point) (minibuffer-prompt-end)) (backward-char)
-;;     (throw 'action (list 'prev (- (or num 1))))))
-
 (defun wg-previous-buffer-set (&optional num)
   "Trigger a backward cycling through the buffer-set order.
 Call `backward-char' unless `point' is right after the prompt.
@@ -2937,111 +3110,84 @@ NUM is the number of states to cycle backward."
   (if (> (point) (minibuffer-prompt-end)) (backward-char)
     (throw 'action (list 'prev (- (or num 1))))))
 
-;; FIXME: Put all these minibuffer commands in a minor-mode that's activated in
-;; minibuffer-setup-hook, and deactivated in minibuffer-exit-hook.  That way,
-;; rather than explicit (backward-char)'s and whatnot, you can find the original
-;; binding of the key with (let (workgroups-mode) (key-binding (kbd "C-H-j")))
+(defun wg-current-matches (&optional read-buffer-mode)
+  "Return READ-BUFFER-MODE's current matches."
+  (ecase (or read-buffer-mode (wg-current-read-buffer-mode))
+    (ido (when (boundp 'ido-cur-list) ido-cur-list))
+    (iswitchb (when (boundp 'iswitchb-buflist) (car iswitchb-buflist)))
+    (fallback (list minibuffer-default))))
 
-;; FIXME: If this works, maybe we don't need to throw in the other two commands,
-;; either
+(defun wg-current-match (&optional read-buffer-mode)
+  "Return READ-BUFFER-MODE's current match."
+  (car (wg-current-matches read-buffer-mode)))
+
+(defun wg-set-current-matches (match-list &optional read-buffer-mode)
+  "Set READ-BUFFER-MODE's current matches, and flag a rescan."
+  (case (or read-buffer-mode (wg-current-read-buffer-mode))
+    (ido
+     (when (boundp 'ido-cur-list)
+       (setq ido-cur-list match-list ido-rescan t)))
+    (iswitchb
+     (when (boundp 'iswitchb-buflist)
+       (setq iswitchb-buflist match-list iswitchb-rescan t)))
+    (fallback nil)))
+
 (defun wg-dissociate-first-match ()
   "Dissociate the first match from current workgroup."
   (interactive)
-  (if (> (point) (minibuffer-prompt-end)) (backward-word)
-    (wg-when-let ((mode (wg-current-read-buffer-mode))
-                  (buffer (ecase mode
-                            (ido (car ido-cur-list))
-                            (iswitchb (car iswitchb-buflist))
-                            (fallback minibuffer-default))))
-      (let* ((buffer-set (wg-make-buffer-set))
-             (pos (position buffer buffer-set :test 'equal))
-             (new (cdr (wg-rotlst buffer-set pos))))
-        (wg-workgroup-dissociate-buffer nil buffer t)
-        (bury-buffer buffer)
-        (case mode
-          (ido
-           (when (boundp 'ido-cur-list)
-             (setq ido-cur-list new ido-rescan t)))
-          (iswitchb
-           (when (boundp 'iswitchb-buflist)
-             (setq iswitchb-buflist new iswitchb-rescan t))))))))
+  (wg-when-let ((mode (wg-current-read-buffer-mode))
+                (buffer (wg-current-match mode))
+                (pos (position buffer (wg-make-buffer-set) :test 'equal)))
+    (wg-workgroup-dissociate-buffer nil buffer t)
+    (wg-set-current-matches (wg-rotlst (wg-make-buffer-set) pos) mode)))
+
+(defun wg-associate-first-match ()
+  "Associate the first match with or update it in the current workgroup."
+  (interactive)
+  (wg-when-let ((mode (wg-current-read-buffer-mode))
+                (buffer (wg-current-match mode))
+                (pos (position buffer (wg-make-buffer-set) :test 'equal)))
+    (wg-workgroup-update-or-associate-buffer nil buffer 'manual)
+    (wg-set-current-matches (wg-rotlst (wg-make-buffer-set) pos) mode)))
 
 
 ;; FIXME: Add commands to jump to specific buffer-sets
+(defvar wg-minibuffer-mode-map
+  (fill-keymap (make-sparse-keymap)
+               "C-b"       'wg-next-buffer-set
+               "C-c n"     'wg-next-buffer-set
+               "C-c C-n"   'wg-next-buffer-set
+               "C-S-b"     'wg-previous-buffer-set
+               "C-c p"     'wg-previous-buffer-set
+               "C-c C-p"   'wg-previous-buffer-set
+               "C-c a"     'wg-associate-first-match
+               "C-c C-a"   'wg-associate-first-match
+               "C-c d"     'wg-dissociate-first-match
+               "C-c C-d"   'wg-dissociate-first-match
+               )
+  "`wg-minibuffer-mode's keymap.")
 
-;; THE GOOD ONE
-(defun wg-bind-minibuffer-commands ()
-  "Conditionally bind various commands in `minibuffer-local-map'.
-Added to `minibuffer-setup-hook'."
+(defvar wg-minibuffer-mode-minor-mode-map-entry
+  (cons 'wg-minibuffer-mode wg-minibuffer-mode-map)
+  "`wg-minibuffer-mode's entry in `minor-mode-map-alist'.")
+
+(define-minor-mode wg-minibuffer-mode
+  ""
+  :global t
+  :group 'workgroups
+  (when wg-minibuffer-mode
+    (add-to-list 'minor-mode-map-alist
+                 wg-minibuffer-mode-minor-mode-map-entry)))
+
+(defun wg-turn-on-minibuffer-mode ()
+  ""
   (when wg-current-buffer-set-symbol
-    ;; These might be useful:
-    ;;   ido-setup-completion-map
-    ;;   iswitchb-define-mode-map-hook
-    (let* ((mode (wg-current-read-buffer-mode))
-           (map (case mode
-                  (ido ido-completion-map)
-                  (iswitchb iswitchb-mode-map)
-                  (fallback (make-sparse-keymap)))))
-      (define-key map (kbd "C-b")   'wg-next-buffer-set)
-      (define-key map (kbd "C-S-b") 'wg-previous-buffer-set)
-      (define-key map (kbd "M-b")   'wg-dissociate-first-match)
-      (when (eq mode 'fallback)
-        (set-keymap-parent map minibuffer-local-completion-map)
-        (use-local-map map)))))
+    (wg-minibuffer-mode 1)))
 
-;; (defun wg-make-minibuffer-keymap ()
-;;   (let ((map (make-sparse-keymap)))
-;;     (define-key map (kbd "C-b")   'wg-next-buffer-set)
-;;     (define-key map (kbd "C-S-b") 'wg-previous-buffer-set)
-;;     (define-key map (kbd "M-b")   'wg-dissociate-first-match)
-;;     map))
-
-;; (defun wg-bind-minibuffer-commands ()
-;;   (when wg-current-buffer-set-symbol
-;;     (let ((map (wg-make-minibuffer-keymap)))
-;;       (set-keymap-parent map (case (wg-current-read-buffer-mode)
-;;                                (ido ido-completion-map)
-;;                                (iswitchb iswitchb-mode-map)
-;;                                (fallback original-mlc-map)))
-;;       (setq minibuffer-local-completion-map map))))
-
-;; (defun wg-bind-minibuffer-commands ()
-;;   "Conditionally bind various commands in `minibuffer-local-map'.
-;; Added to `minibuffer-setup-hook'."
-;;   (when wg-current-buffer-set-symbol
-;;     (let ((map (make-sparse-keymap)))
-;;       (define-key map (kbd "C-b")   'wg-next-buffer-set)
-;;       (define-key map (kbd "C-S-b") 'wg-previous-buffer-set)
-;;       (define-key map (kbd "M-b")   'wg-dissociate-first-match)
-;;       (case (wg-current-read-buffer-mode)
-;;         (ido
-;;          (set-keymap-parent map ido-completion-map)
-;;          (setq minibuffer-local-completion-map map))
-;;         (iswitchb
-;;          (set-keymap-parent map iswitchb-mode-map)
-;;          (setq minibuffer-local-completion-map map))
-;;         (fallback
-;;          (set-keymap-parent map minibuffer-local-completion-map)
-;;          (setq minibuffer-local-completion-map map))))))
-
-;; (defun wg-bind-minibuffer-commands ()
-;;   "Conditionally bind various commands in `minibuffer-local-map'.
-;; Added to `minibuffer-setup-hook'."
-;;   (when wg-current-buffer-set-symbol
-;;     (let ((map (make-sparse-keymap)))
-;;       (define-key map (kbd "C-b")   'wg-next-buffer-set)
-;;       (define-key map (kbd "C-S-b") 'wg-previous-buffer-set)
-;;       (define-key map (kbd "M-b")   'wg-dissociate-first-match)
-;;       (set-keymap-parent
-;;        map (case (wg-current-read-buffer-mode)
-;;              (ido ido-completion-map)
-;;              (iswitchb iswitchb-mode-map)
-;;              (fallback original-mlc-map)))
-;;       (setq minibuffer-local-completion-map map))))
-
-
-
-;; FIXME: banish-buffer's msg should be "Banished <buffer>: ( ... )"
+(defun wg-turn-off-minibuffer-mode ()
+  ""
+  (when wg-current-buffer-set-symbol
+    (wg-minibuffer-mode -1)))
 
 
 ;; buffer-set commands
@@ -3062,9 +3208,9 @@ MODE should be either `ido' or `iswitchb'."
       (ecase mode
         (ido      (ido-buffer-internal translated-method nil prompt default init))
         (iswitchb (wg-iswitchb-internal translated-method prompt default init))
-        (fallback (let (read-buffer-function) (call-interactively method)))))))
+        (fallback (let (read-buffer-function) (call-interactively method))))
+      (message (wg-buffer-command-display "Switched to")))))
 
-;; FIXME: add pretty messaging?
 (defun wg-switch-to-buffer ()
   "Workgroups' version of `switch-to-buffer'."
   (interactive)
@@ -3083,7 +3229,7 @@ MODE should be either `ido' or `iswitchb'."
 (defun wg-kill-buffer ()
   "Workgroups' version of `kill-buffer'."
   (interactive)
-  (wg-buffer-internal 'kill-buffer))
+  (wg-buffer-internal 'kill-buffer nil (buffer-name (current-buffer))))
 
 (defun wg-display-buffer ()
   "Workgroups' version of `display-buffer'."
@@ -3095,9 +3241,6 @@ MODE should be either `ido' or `iswitchb'."
   (interactive)
   (wg-buffer-internal 'insert-buffer))
 
-;; FIXME: refactor all the messaging stuff and make it less dependent on
-;; dynamic bindings
-;;
 ;; FIXME: If you C-h i for info, then wg-next-buffer, it's not the buffer you
 ;; were on previously.
 ;;
@@ -3121,14 +3264,8 @@ will take you."
   (interactive)
   (wg-with-buffer-sets (if prev 'previous-buffer 'next-buffer)
     (wg-awhen (wg-make-buffer-set)
-      (wg-next-buffer-internal it prev)
-      (let* ((set (wg-make-buffer-set))
-             (split (/ (1- (length set)) 2))
-             (set (append (wg-leave set split) (butlast set split))))
-        (message ;; FIXME: factor this out
-         (concat
-          (wg-buffer-set-prompt)
-          (wg-display-internal 'wg-buffer-display set)))))))
+      (wg-next-buffer-internal it prev))
+    (message (wg-buffer-command-display "Switched to"))))
 
 (defun wg-previous-buffer (&optional fallback)
   "Switch to the next buffer in Workgroups' filtered buffer list."
@@ -3139,51 +3276,95 @@ will take you."
 
 ;;; file commands
 
+;; (defun wg-save (file &optional force)
+;;   "Save workgroups to FILE.
+;; Called interactively with a prefix arg, or if `wg-visited-file-name'
+;; is nil, read a filename.  Otherwise use `wg-visited-file-name'."
+;;   (interactive
+;;    (list (if (or current-prefix-arg (not (wg-visited-file-name t)))
+;;              (read-file-name "File: ") (wg-visited-file-name))))
+;;   (if (and (not force) (not (wg-dirty-p)))
+;;       (message "(No workgroups need to be saved)")
+;;     (wg-mark-everything-clean)
+;;     (setq wg-visited-file-name file)
+;;     (wg-write-sexp-to-file
+;;      `(,wg-persisted-workgroups-tag
+;;        ,wg-persisted-workgroups-format-version
+;;        ,@(wg-list))
+;;      file)
+;;     (wg-fontified-msg (:cmd "Wrote: ") (:file file))))
+
+;; asdf
+
 (defun wg-save (file &optional force)
   "Save workgroups to FILE.
-Called interactively with a prefix arg, or if `wg-file'
-is nil, read a filename.  Otherwise use `wg-file'."
+Called interactively with a prefix arg, or if `wg-visited-file-name'
+is nil, read a filename.  Otherwise use `wg-visited-file-name'."
   (interactive
-   (list (if (or current-prefix-arg (not (wg-file t)))
-             (read-file-name "File: ") (wg-file))))
+   (list (if (or current-prefix-arg (not (wg-visited-file-name t)))
+             (read-file-name "File: ") (wg-visited-file-name))))
   (if (and (not force) (not (wg-dirty-p)))
       (message "(No workgroups need to be saved)")
+    (setq wg-visited-file-name file)
+    (wg-set wg-workgroup-set 'version wg-version)
+    (wg-write-sexp-to-file wg-workgroup-set file)
     (wg-mark-everything-clean)
-    (setq wg-file file)
-    (wg-write-sexp-to-file
-     `(,wg-persisted-workgroups-tag
-       ,wg-persisted-workgroups-format-version
-       ,@(wg-list))
-     file)
     (wg-fontified-msg (:cmd "Wrote: ") (:file file))))
+
+;; ;; FIXME: write file converter
+;; ;; FIXME: just use the version number, instead of a separate file version #
+;; ;; FIXME: obfuscate wg-persisted-workgroups-tag a little more
+;; (defun wg-load (filename)
+;;   "Load workgroups from FILENAME.
+;; Called interactively with a prefix arg, and if `wg-visited-file-name'
+;; is non-nil, use `wg-visited-file-name'. Otherwise read a filename."
+;;   (interactive
+;;    (list (if (and current-prefix-arg (wg-visited-file-name t)) (wg-visited-file-name)
+;;            (read-file-name "File: "))))
+;;   (setq filename (expand-file-name filename))
+;;   (if (not (file-exists-p filename))
+;;       (when (wg-query-for-save)
+;;         (wg-reset t)
+;;         (setq wg-visited-file-name filename))
+;;     (let ((contents (wg-read-sexp-from-file filename)))
+;;       (unless (consp contents)
+;;         (error "%S is not a workgroups file." filename))
+;;       (wg-dbind (tag version . workgroup-list) contents
+;;         (unless (eq tag wg-persisted-workgroups-tag)
+;;           (error "%S is not a workgroups file." filename))
+;;         (unless (and (stringp version)
+;;                      (string= version wg-persisted-workgroups-format-version))
+;;           (error "%S is incompatible with this version of Workgroups.  \
+;; Please create a new workgroups file." filename))
+;;         (wg-reset t)
+;;         (setq wg-list workgroup-list wg-visited-file-name filename)))
+;;     (when wg-switch-on-load
+;;       (wg-awhen (wg-list t)
+;;         (wg-switch-to-workgroup (car it))))
+;;     (wg-fontified-msg
+;;       (:cmd "Loaded: ")
+;;       (:file filename))))
 
 ;; FIXME: write file converter
 ;; FIXME: just use the version number, instead of a separate file version #
 ;; FIXME: obfuscate wg-persisted-workgroups-tag a little more
 (defun wg-load (filename)
   "Load workgroups from FILENAME.
-Called interactively with a prefix arg, and if `wg-file'
-is non-nil, use `wg-file'. Otherwise read a filename."
+Called interactively with a prefix arg, and if `wg-visited-file-name'
+is non-nil, use `wg-visited-file-name'. Otherwise read a filename."
   (interactive
-   (list (if (and current-prefix-arg (wg-file t)) (wg-file)
+   (list (if (and current-prefix-arg (wg-visited-file-name t)) (wg-visited-file-name)
            (read-file-name "File: "))))
   (setq filename (expand-file-name filename))
   (if (not (file-exists-p filename))
       (when (wg-query-for-save)
         (wg-reset t)
-        (setq wg-file filename))
+        (setq wg-visited-file-name filename))
     (let ((contents (wg-read-sexp-from-file filename)))
-      (unless (consp contents)
+      (unless (wg-workgroup-set-p contents)
         (error "%S is not a workgroups file." filename))
-      (wg-dbind (tag version . workgroups-list) contents
-        (unless (eq tag wg-persisted-workgroups-tag)
-          (error "%S is not a workgroups file." filename))
-        (unless (and (stringp version)
-                     (string= version wg-persisted-workgroups-format-version))
-          (error "%S is incompatible with this version of Workgroups.  \
-Please create a new workgroups file." filename))
-        (wg-reset t)
-        (setq wg-list workgroups-list wg-file filename)))
+      (wg-reset t)
+      (setq wg-workgroup-set contents wg-visited-file-name filename))
     (when wg-switch-on-load
       (wg-awhen (wg-list t)
         (wg-switch-to-workgroup (car it))))
@@ -3693,6 +3874,22 @@ Called when `workgroups-mode' is turned off."
     (query (wg-query-for-save) t)
     (nosave t)))
 
+(defun wg-add-or-remove-workgroups-hooks (remove)
+  "Add or remove all of Workgroups' hooks, depending on REMOVE."
+  (wg-add-or-remove-hooks
+   remove
+   'kill-emacs-query-functions       'wg-save-on-emacs-exit
+   'window-configuration-change-hook 'wg-flag-wconfig-change
+   'pre-command-hook                 'wg-update-working-wconfig-before-command
+   'post-command-hook                'wg-save-undo-after-wconfig-change
+   'minibuffer-setup-hook            'wg-unflag-window-config-changed
+   'minibuffer-setup-hook            'wg-turn-on-minibuffer-mode
+   'minibuffer-exit-hook             'wg-flag-just-exited-minibuffer
+   'minibuffer-exit-hook             'wg-turn-off-minibuffer-mode
+   'ido-make-buffer-list-hook        'wg-set-ido-buffer-list
+   'iswitchb-make-buflist-hook       'wg-set-iswitchb-buffer-list
+   'kill-buffer-hook                 'wg-auto-dissociate-buffer-hook))
+
 (define-minor-mode workgroups-mode
   "This turns `workgroups-mode' on and off.
 If ARG is null, toggle `workgroups-mode'.
@@ -3705,16 +3902,7 @@ If ARG is anything else, turn on `workgroups-mode'."
   :group       'workgroups
   (cond
    (workgroups-mode
-    (add-hook 'kill-emacs-query-functions 'wg-save-on-emacs-exit)
-    (add-hook 'window-configuration-change-hook 'wg-flag-wconfig-change)
-    (add-hook 'pre-command-hook 'wg-update-working-wconfig-before-command)
-    (add-hook 'post-command-hook 'wg-save-undo-after-wconfig-change)
-    (add-hook 'minibuffer-setup-hook 'wg-unflag-window-config-changed)
-    (add-hook 'minibuffer-setup-hook 'wg-bind-minibuffer-commands)
-    (add-hook 'minibuffer-exit-hook 'wg-flag-just-exited-minibuffer)
-    (add-hook 'ido-make-buffer-list-hook 'wg-set-ido-buffer-list)
-    (add-hook 'iswitchb-make-buflist-hook 'wg-set-iswitchb-buffer-list)
-    (add-hook 'kill-buffer-hook 'wg-auto-dissociate-buffer-hook)
+    (wg-add-or-remove-workgroups-hooks nil)
     (wg-enable-all-advice)
     (wg-set-prefix-key)
     (wg-mode-line-add-display)
@@ -3722,16 +3910,7 @@ If ARG is anything else, turn on `workgroups-mode'."
     (run-hooks 'workgroups-mode-hook))
    (t
     (wg-save-on-workgroups-mode-exit)
-    (remove-hook 'kill-emacs-query-functions 'wg-save-on-emacs-exit)
-    (remove-hook 'window-configuration-change-hook 'wg-flag-wconfig-change)
-    (remove-hook 'pre-command-hook 'wg-update-working-wconfig-before-command)
-    (remove-hook 'post-command-hook 'wg-save-undo-after-wconfig-change)
-    (remove-hook 'minibuffer-setup-hook 'wg-unflag-window-config-changed)
-    (remove-hook 'minibuffer-setup-hook 'wg-bind-minibuffer-commands)
-    (remove-hook 'minibuffer-exit-hook 'wg-flag-just-exited-minibuffer)
-    (remove-hook 'ido-make-buffer-list-hook 'wg-set-ido-buffer-list)
-    (remove-hook 'iswitchb-make-buflist-hook 'wg-set-iswitchb-buffer-list)
-    (remove-hook 'kill-buffer-hook 'wg-auto-dissociate-buffer-hook)
+    (wg-add-or-remove-workgroups-hooks t)
     (wg-disable-all-advice)
     (wg-unset-prefix-key)
     (wg-mode-line-remove-display)
