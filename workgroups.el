@@ -2942,6 +2942,8 @@ NUM is the number of states to cycle backward."
     ;; the switched-to buffer is no longer a part of, which feels all wrong.
     (wg-buffer-command-message)))
 
+;; foo test
+
 (defun wg-switch-to-buffer ()
   "Workgroups' version of `switch-to-buffer'."
   (interactive)
