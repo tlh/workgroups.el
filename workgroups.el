@@ -257,20 +257,42 @@ See `wg-buffer-list-filter-order-alist'."
 
 (defcustom wg-buffer-list-filter-order-alist
   '((default associated unassociated all fallback))
-  "Alist mapping buffer methods to lists defining the order in
-which filtered buffer-lists are presented.
+  "Alist defining the order in which filtered buffer-lists are presented.
 
-The key of each key-value-pair should be the command-symbol of
-the original, unadorned Emacs command -- i.e. one of
+The car of each entry should be the symbol of the original Emacs
+command (not the ido or iswitchb remappings) -- i.e. one of
 `switch-to-buffer', `switch-to-buffer-other-window',
 `switch-to-buffer-other-frame', `kill-buffer', `next-buffer',
 `previous-buffer', `display-buffer', `insert-buffer',
 `read-buffer', or the special symbol `default', which defines the
-buffer-list-filter order for all buffer methods not present in this
+buffer-list-filter order for all commands not present in this
 alist.
 
-The value of each key-value-pair should be a list containing any
-combination of the following buffer-list-filter symbols:
+The cdr of each entry should be a list of buffer-list-filter
+identifiers defining the order in which filtered buffer-lists are
+presented for the command.  See
+`wg-buffer-list-filter-definitions'."
+  :type 'alist
+  :group 'workgroups)
+
+(defcustom wg-buffer-list-filter-definitions
+  '((all "all" wg-buffer-list-filter-all)
+    (associated "associated" wg-buffer-list-filter-associated)
+    (unassociated "unassociated" wg-buffer-list-filter-unassociated)
+    (fallback "fallback" nil))
+  "List of buffer-list-filter definitions.
+Each entry should be a list containing the buffer-list-filter
+identifier symbol, its prompt string, and the function-symbol of
+the function that returns the filtered buffer-list.
+
+The prompt string is displayed in the minibuffer-prompt when its
+filter is active.
+
+The function-symbol should fbound to a function taking two
+arguments: a workgroup and an initial buffer-list. Use of these
+arguments by the function is optional, though.
+
+Default buffer-list-filters include:
 
 `all'           All buffer names
 
@@ -280,21 +302,30 @@ combination of the following buffer-list-filter symbols:
 `unassociated'  Only the names of those live buffers that are
                 unassociated with the current workgroup
 
-`fallback'      Fallback to the non-ido or non-iswitchb version of
-                the command, completing on all buffer names"
-  :type 'alist
+`fallback'      A special case used to fallback to the
+                original (non-ido/iswitchb) Emacs command.
+                `fallback' isn't actually a buffer-list-filter.
+
+There are a few example buffer-list filtration functions
+included, like `wg-buffer-list-filter-home-dir',
+`wg-buffer-list-filter-irc' and `wg-buffer-list-filter-elisp'.
+See their definitions for more info.
+
+Here's an example of how to define an `elisp'
+buffer-list-filter, using the included function
+`wg-buffer-list-filter-elisp':
+
+(add-to-list
+ 'wg-buffer-list-filter-definitions
+ '(elisp \"elisp\" wg-buffer-list-filter-elisp))
+
+After this form has been evaluated, `elisp' can be used wherever
+other buffer-list-filter identifiers are used, like in
+`wg-buffer-list-filter-order-alist'."
+  :type 'list
   :group 'workgroups)
 
-(defcustom wg-buffer-list-filter-definitions
-  '((all "all" wg-buffer-list-filter-all)
-    (associated "associated" wg-buffer-list-filter-associated)
-    (unassociated "unassociated" wg-buffer-list-filter-unassociated)
-    (fallback "fallback" nil))
-  "TODO: write big docstring here"
-  :type 'alist
-  :group 'workgroups)
-
-(defcustom wg-buffer-method-prompt-alist
+(defcustom wg-buffer-command-prompt-alist
   '((switch-to-buffer              . "Buffer")
     (switch-to-buffer-other-window . "Switch to buffer in other window")
     (switch-to-buffer-other-frame  . "Switch to buffer in other frame")
@@ -1179,11 +1210,6 @@ Otherwise, reverse WTREE vertically."
                                (nreverse wl2) wl2)))))))
     (wg-normalize-wtree (inner w))))
 
-(defun wg-reverse-wconfig (&optional dir wconfig)
-  "Reverse WCONFIG's wtree's wlist in direction DIR."
-  (let ((wc (or wconfig (wg-make-wconfig))))
-    (wg-put wc 'wtree (wg-reverse-wlist (wg-get wc 'wtree) dir))))
-
 (defun wg-wtree-move-window (wtree offset)
   "Offset `selected-window' OFFSET places in WTREE."
   (flet ((inner (w) (if (wg-window-p w) w
@@ -1195,10 +1221,13 @@ Otherwise, reverse WTREE vertically."
                            (mapcar #'inner wlist)))))))
     (wg-normalize-wtree (inner wtree))))
 
-(defun wg-wconfig-move-window (offset &optional wconfig)
+(defun wg-reverse-wconfig (wconfig &optional dir)
+  "Reverse WCONFIG's wtree's wlist in direction DIR."
+  (wg-put wconfig 'wtree (wg-reverse-wlist (wg-get wconfig 'wtree) dir)))
+
+(defun wg-wconfig-move-window (wconfig offset)
   "Offset `selected-window' OFFSET places in WCONFIG."
-  (let ((wc (or wconfig (wg-make-wconfig))))
-    (wg-put wc 'wtree (wg-wtree-move-window (wg-get wc 'wtree) offset))))
+  (wg-put wconfig 'wtree (wg-wtree-move-window (wg-get wconfig 'wtree) offset)))
 
 
 
@@ -1256,18 +1285,17 @@ EWIN should be an Emacs window object."
         (error "Workgroups can't operate on minibuffer-only frames."))
       (inner w))))
 
-;; FIXME: Add an optional FRAME argument
-(defun wg-make-wconfig ()
+(defun wg-make-wconfig (&optional frame)
   "Return a new Workgroups window config from `selected-frame'."
-  `(wconfig
-    ;; (timestamp  .  ,(current-time)) ;; what was the timestamp idea for?
-    (left       .  ,(frame-parameter nil 'left))
-    (top        .  ,(frame-parameter nil 'top))
-    (width      .  ,(frame-parameter nil 'width))
-    (height     .  ,(frame-parameter nil 'height))
-    (sbars      .  ,(frame-parameter nil 'vertical-scroll-bars))
-    (sbwid      .  ,(frame-parameter nil 'scroll-bar-width))
-    (wtree      .  ,(wg-serialize-window-tree (window-tree)))))
+  (let ((frame (or frame (selected-frame))))
+    `(wconfig
+      (left       .  ,(frame-parameter frame 'left))
+      (top        .  ,(frame-parameter frame 'top))
+      (width      .  ,(frame-parameter frame 'width))
+      (height     .  ,(frame-parameter frame 'height))
+      (sbars      .  ,(frame-parameter frame 'vertical-scroll-bars))
+      (sbwid      .  ,(frame-parameter frame 'scroll-bar-width))
+      (wtree      .  ,(wg-serialize-window-tree (window-tree frame))))))
 
 (defun wg-make-blank-wconfig (&optional buffer)
   "Return a new blank wconfig.
@@ -1299,7 +1327,7 @@ BUFFER or `wg-default-buffer' is visible in the only window."
                          (error "%S doesn't exist" fname)))))
       (when buffer
         (with-current-buffer buffer
-          (goto-char point)
+          ;; (goto-char point) ;; this causes problems
           (set-mark mark)
           (unless markx (deactivate-mark))
           buffer)))))
@@ -1792,14 +1820,14 @@ Lots of possible errors here because
                        key id))))))))
 
 (defun wg-buffer-method-prompt (&optional method)
-  "Return METHOD's value in `wg-buffer-method-prompt-alist'."
-  (wg-aget wg-buffer-method-prompt-alist (or method wg-current-buffer-method)))
+  "Return METHOD's value in `wg-buffer-command-prompt-alist'."
+  (wg-aget wg-buffer-command-prompt-alist (or method wg-current-buffer-method)))
 
 (defun wg-buffer-list-filter-display (&optional workgroup blf-id)
   "Return a buffer-list-filter display string from WORKGROUP and BLF-ID."
   (wg-fontify
     (:div "(")
-    (:msg (wg-workgroup-name (or workgroup wg-current-workgroup)))
+    (:msg (wg-workgroup-name (or workgroup (wg-current-workgroup))))
     (:div ":")
     (:msg (wg-get-buffer-list-filter-val blf-id 'indicator))
     (:div ")")))
@@ -1930,14 +1958,13 @@ Binds `wg-current-workgroup', `wg-current-buffer-method' and
 
 ;;; current and previous workgroup ops
 
-;; FIXME: If `wg-current-workgroup' is bound, return it instead, allowing a
-;; `wg-with-current-workgroup' macro
 (defun wg-current-workgroup (&optional noerror frame)
   "Return the current workgroup."
-  (let ((uid (frame-parameter frame 'wg-current-workgroup-uid)))
-    (if uid (wg-get-workgroup-by-uid uid noerror)
-      (unless noerror
-        (error "There's no current workgroup in this frame.")))))
+  (or wg-current-workgroup
+      (let ((uid (frame-parameter frame 'wg-current-workgroup-uid)))
+        (if uid (wg-get-workgroup-by-uid uid noerror)
+          (unless noerror
+            (error "There's no current workgroup in this frame."))))))
 
 (defun wg-previous-workgroup (&optional noerror frame)
   "Return the previous workgroup."
@@ -1967,6 +1994,15 @@ Binds `wg-current-workgroup', `wg-current-buffer-method' and
   "Return t when WORKGROUP is the previous workgroup, nil otherwise."
   (wg-awhen (wg-previous-workgroup noerror)
     (eq it workgroup)))
+
+(defmacro wg-with-current-workgroup (workgroup &rest body)
+  "Execute forms in BODY with WORKGROUP temporarily current.
+WORKGROUP should be any workgroup identifier accepted by
+`wg-get-workgroup-flexibly'.  The value returned is the last form
+in BODY."
+  (declare (indent 1))
+  `(let ((wg-current-workgroup (wg-get-workgroup-flexibly ,workgroup)))
+     ,@body))
 
 
 
@@ -2538,8 +2574,8 @@ current and previous workgroups."
     (wg-read-object
      (or prompt (format "Name (default: %S): " default))
      (lambda (new) (and (stringp new)
-                        (not (equal new ""))
-                        (wg-unique-workgroup-name-p new)))
+                   (not (equal new ""))
+                   (wg-unique-workgroup-name-p new)))
      "Please enter a unique, non-empty name"
      nil nil nil nil default)))
 
@@ -3155,27 +3191,36 @@ working-wconfig in the current frame."
 (defun wg-backward-transpose-window (offset)
   "Move `selected-window' backward by OFFSET in its wlist."
   (interactive (list (or current-prefix-arg -1)))
-  (wg-restore-wconfig-undoably (wg-wconfig-move-window offset)))
+  (wg-restore-wconfig-undoably
+   (wg-wconfig-move-window
+    (wg-workgroup-working-wconfig (wg-current-workgroup))
+    offset)))
 
 (defun wg-transpose-window (offset)
   "Move `selected-window' forward by OFFSET in its wlist."
   (interactive (list (or current-prefix-arg 1)))
-  (wg-restore-wconfig-undoably (wg-wconfig-move-window offset)))
+  (wg-restore-wconfig-undoably
+   (wg-wconfig-move-window
+    (wg-workgroup-working-wconfig (wg-current-workgroup))
+    offset)))
 
-(defun wg-reverse-frame-horizontally ()
+(defun wg-reverse-frame-horizontally (workgroup)
   "Reverse the order of all horizontally split wtrees."
-  (interactive)
-  (wg-restore-wconfig-undoably (wg-reverse-wconfig)))
+  (interactive (list (wg-arg)))
+  (wg-restore-wconfig-undoably
+   (wg-reverse-wconfig (wg-workgroup-working-wconfig workgroup))))
 
-(defun wg-reverse-frame-vertically ()
+(defun wg-reverse-frame-vertically (workgroup)
   "Reverse the order of all vertically split wtrees."
-  (interactive)
-  (wg-restore-wconfig-undoably (wg-reverse-wconfig t)))
+  (interactive (list (wg-arg)))
+  (wg-restore-wconfig-undoably
+   (wg-reverse-wconfig (wg-workgroup-working-wconfig workgroup) t)))
 
-(defun wg-reverse-frame-horizontally-and-vertically ()
+(defun wg-reverse-frame-horizontally-and-vertically (workgroup)
   "Reverse the order of all wtrees."
-  (interactive)
-  (wg-restore-wconfig-undoably (wg-reverse-wconfig 'both)))
+  (interactive (list (wg-arg)))
+  (wg-restore-wconfig-undoably
+   (wg-reverse-wconfig (wg-workgroup-working-wconfig workgroup) 'both)))
 
 
 ;;; echo commands
