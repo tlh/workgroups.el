@@ -36,7 +36,6 @@
 ;;; Usage:
 ;;
 
-;; TODO: update these conventions
 ;;; Symbol naming conventions:
 ;;
 ;; W always refers to a Workgroups window or window tree.
@@ -47,7 +46,7 @@
 ;;   edges of an edge list, where N is a differentiating integer.
 ;; LS, HS, LB and HB always refer to the LOW-SIDE, HIGH-SIDE, LOW-BOUND
 ;;   and HIGH-BOUND of a bounds list.  See `wg-with-bounds'.
-;; WGBUF always refers to a workgroups buffer object.
+;; WGBUF always refers to a Workgroups buffer object.
 
 
 
@@ -76,6 +75,7 @@
   "Workgroup for Windows -- Emacs session manager"
   :group 'convenience
   :version wg-version)
+
 
 
 ;; keybinding customization
@@ -111,15 +111,16 @@
 
 ;; save and load customization
 
-(defcustom wg-switch-on-load t
-  "Non-nil means switch to the first workgroup in a file when it's loaded."
+(defcustom wg-switch-to-first-workgroup-on-find-workgroups-file t
+  "Non-nil means switch to the first workgroup in a file when
+it's found with `wg-find-workgroups-file'."
   :type 'boolean
   :group 'workgroups)
 
 (defcustom wg-emacs-exit-save-behavior 'query
   "The way save is handled when Emacs exits.
 Possible values:
-`save'     Call `wg-save' when there are unsaved changes
+`save'     Call `wg-save-workgroups' when there are unsaved changes
 `nosave'   Exit Emacs without saving changes
 `query'    Query the user if there are unsaved changes"
   :type 'symbol
@@ -128,7 +129,7 @@ Possible values:
 (defcustom wg-workgroups-mode-exit-save-behavior 'query
   "The way save is handled when Workgroups exits.
 Possible values:
-`save'     Call `wg-save' when there are unsaved changes
+`save'     Call `wg-save-workgroups' when there are unsaved changes
 `nosave'   Exit `workgroups-mode' without saving changes
 `query'    Query the user if there are unsaved changes"
   :type 'symbol
@@ -1095,13 +1096,13 @@ EWIN should be an Emacs window object."
   "Return a serialized wconfig from FRAME or `selected-frame'."
   (let ((frame (or frame (selected-frame))))
     `(wconfig
-      (left       .  ,(frame-parameter frame 'left))
-      (top        .  ,(frame-parameter frame 'top))
-      (width      .  ,(frame-parameter frame 'width))
-      (height     .  ,(frame-parameter frame 'height))
-      (sbars      .  ,(frame-parameter frame 'vertical-scroll-bars))
-      (sbwid      .  ,(frame-parameter frame 'scroll-bar-width))
-      (wtree      .  ,(wg-serialize-window-tree (window-tree frame))))))
+      (left    .  ,(frame-parameter frame 'left))
+      (top     .  ,(frame-parameter frame 'top))
+      (width   .  ,(frame-parameter frame 'width))
+      (height  .  ,(frame-parameter frame 'height))
+      (sbars   .  ,(frame-parameter frame 'vertical-scroll-bars))
+      (sbwid   .  ,(frame-parameter frame 'scroll-bar-width))
+      (wtree   .  ,(wg-serialize-window-tree (window-tree frame))))))
 
 (defun wg-make-blank-wconfig (&optional buffer)
   "Return a new blank wconfig.
@@ -1590,6 +1591,7 @@ Emacs buffer-name string."
 
 
 
+
 ;;; workgroup utils
 
 (defun wg-get-workgroup (key val &optional noerror)
@@ -1735,42 +1737,60 @@ WORKGROUP should be a value accepted by
   "Set WORKGROUP's `associated-buffers' to WGBUFS."
   (wg-set-workgroup-parameter workgroup 'associated-buffers wgbufs))
 
+(defun wg-workgroup-get-wgbuf (workgroup bufobj &optional noerror)
+  "Return the wgbuf corresponding to BUFOBJ in WORKGROUP's
+associated-buffers list, or error unless NOERROR."
+  (or (wg-get-bufobj bufobj (wg-workgroup-associated-buffers workgroup))
+      (unless noerror
+        (error "%S is not associated with %S"
+               (wg-bufobj-name bufobj)
+               (wg-workgroup-name workgroup)))))
+
 (defun wg-workgroup-buffer-association-type (workgroup bufobj)
   "Return BUFOBJ's association-type in WORKGROUP, or nil if unassociated."
-  (wg-awhen (wg-get-bufobj bufobj (wg-workgroup-associated-buffers workgroup))
+  (wg-awhen (wg-workgroup-get-wgbuf workgroup bufobj t)
     (wg-get it 'association-type)))
+
+(defun wg-wgbuf-auto-associated-p (wgbuf)
+  "Return t if WGBUF's `association-type' is `auto'."
+  (eq (wg-get wgbuf 'association-type) 'auto))
+
+(defun wg-wgbuf-manually-associated-p (wgbuf)
+  "Return t if WGBUF's `association-type' is `manual'."
+  (eq (wg-get wgbuf 'association-type) 'manual))
+
+(defun wg-buffer-auto-associated-p (workgroup bufobj)
+  "Return t if BUFOBJ was automatically associated with WORKGROUP."
+  (wg-awhen (wg-workgroup-get-wgbuf workgroup bufobj t)
+    (wg-wgbuf-auto-associated-p it)))
+
+(defun wg-buffer-manually-associated-p (workgroup bufobj)
+  "Return t if BUFOBJ was manually associated with WORKGROUP."
+  (wg-awhen (wg-workgroup-get-wgbuf workgroup bufobj t)
+    (wg-wgbuf-manually-associated-p it)))
 
 (defun wg-workgroup-associate-buffer (workgroup bufobj type &optional noerror)
   "Add BUFOBJ to WORKGROUP.
 If TYPE is non-nil, set BUFOBJ's `association-type' parameter to it.
 See `wg-get-bufobj' for allowable values for BUFOBJ."
-  (let ((assoc-bufs (wg-workgroup-associated-buffers workgroup)))
-    (if (wg-get-bufobj bufobj assoc-bufs)
-        (unless noerror
-          (error "%S is already associated with %S"
-                 (wg-bufobj-name bufobj)
-                 (wg-workgroup-name workgroup)))
-      (let ((wgbuf (wg-get-wgbuf bufobj)))
-        (when type (wg-set wgbuf 'association-type type))
-        (wg-set-workgroup-associated-buffers
-         workgroup (cons wgbuf assoc-bufs))
-        wgbuf))))
-
-;; FIXME: All these primitives should return the new associated-buffers list,
-;; rather than the bufobj that was added or removed.
+  (if (wg-workgroup-get-wgbuf workgroup bufobj t)
+      (unless noerror
+        (error "%S is already associated with %S"
+               (wg-bufobj-name bufobj)
+               (wg-workgroup-name workgroup)))
+    (let ((wgbuf (wg-get-wgbuf bufobj)))
+      (wg-set wgbuf 'association-type type)
+      (wg-set-workgroup-associated-buffers
+       workgroup (cons wgbuf (wg-workgroup-associated-buffers workgroup)))
+      wgbuf)))
 
 (defun wg-workgroup-dissociate-buffer (workgroup bufobj &optional noerror)
   "Dissociate BUFOBJ from WORKGROUP.
 See `wg-get-bufobj' for allowable values for BUFOBJ."
-  (let ((assoc-bufs (wg-workgroup-associated-buffers workgroup)))
-    (wg-aif (wg-get-bufobj bufobj assoc-bufs)
-        (progn
-          (wg-set-workgroup-associated-buffers workgroup (remove it assoc-bufs))
-          it)
-      (unless noerror
-        (error "%S is not associated with %S"
-               (wg-bufobj-name bufobj)
-               (wg-workgroup-name workgroup))))))
+  (wg-awhen (wg-workgroup-get-wgbuf workgroup bufobj noerror)
+    (wg-set-workgroup-associated-buffers
+     workgroup (remove it (wg-workgroup-associated-buffers workgroup)))
+    it))
 
 (defun wg-workgroup-update-buffer (workgroup bufobj type &optional noerror)
   "Update BUFOBJ in WORKGROUP.
@@ -1792,39 +1812,21 @@ See `wg-get-bufobj' for allowable values for BUFOBJ."
     (wg-filter-map (lambda (bname) (when (wg-get-bufobj bname assoc-bufs) bname))
                    (wg-interesting-buffers t))))
 
-(defun wg-wgbuf-auto-associated-p (wgbuf)
-  "Return t if WGBUF's `association-type' is `auto'."
-  (eq (wg-get wgbuf 'association-type) 'auto))
-
-(defun wg-buffer-auto-associated-p (workgroup bufobj)
-  "Return t if BUFOBJ's `association-type' is `auto'."
-  (wg-awhen (wg-get-bufobj bufobj (wg-workgroup-associated-buffers workgroup))
-    (wg-wgbuf-auto-associated-p it)))
-
-(defun wg-workgroup-cycle-buffer-association-type (workgroup buffer)
-  "Cycle the BUFFER's association type in WORKGROUP.
+(defun wg-workgroup-cycle-buffer-association-type (workgroup bufobj)
+  "Cycle the BUFOBJ's association type in WORKGROUP.
 If it's not associated with the workgroup, mark it as manually associated.
 If it's auto-associated with the workgroup, remove it from the workgroup.
 If it's manually associated with the workgroup, mark it as auto-associated."
-  (let ((wgbuf (wg-get-bufobj
-                buffer (wg-workgroup-associated-buffers workgroup))))
-    (cond ((not wgbuf)
-           (wg-workgroup-associate-buffer workgroup buffer 'manual))
-          ((wg-wgbuf-auto-associated-p wgbuf)
-           (wg-workgroup-dissociate-buffer workgroup wgbuf))
-          (t (wg-workgroup-update-buffer workgroup wgbuf 'auto)))))
+  (case (wg-workgroup-buffer-association-type workgroup bufobj)
+    (manual (wg-workgroup-update-buffer workgroup bufobj 'auto))
+    (auto (wg-workgroup-dissociate-buffer workgroup bufobj))
+    (otherwise (wg-workgroup-associate-buffer workgroup bufobj 'manual))))
 
-;; FIXME: this should also return the new associated-buffers list
 (defun wg-workgroup-purge-auto-associated-buffers (workgroup)
   "Remove from WORKGROUP all wgbufs with `association-type' `auto'."
-  (let (purged)
-    (wg-set-workgroup-associated-buffers
-     workgroup (remove-if (lambda (wgbuf)
-                            (when (wg-wgbuf-auto-associated-p wgbuf)
-                              (wg-awhen (get-buffer (wg-get wgbuf 'bname))
-                                (push it purged))))
-                          (wg-workgroup-associated-buffers workgroup)))
-    purged))
+  (wg-set-workgroup-associated-buffers
+   workgroup (remove-if 'wg-wgbuf-auto-associated-p
+                        (wg-workgroup-associated-buffers workgroup))))
 
 (defun wg-auto-dissociate-buffer-hook ()
   "`kill-buffer-hook' that automatically removes buffers from workgroups."
@@ -2328,13 +2330,10 @@ Query to overwrite if a workgroup with the same name exists."
 
 (defun wg-mode-line-buffer-association-indicator (workgroup)
   "Return a string indicating `current-buffer's association-type in WORKGROUP."
-  (let ((wgbuf (wg-get-bufobj
-                (current-buffer) (wg-workgroup-associated-buffers workgroup))))
-    (cond ((not wgbuf)
-           (wg-mode-line-decor 'unassociated))
-          ((wg-wgbuf-auto-associated-p wgbuf)
-           (wg-mode-line-decor 'auto-associated))
-          (t (wg-mode-line-decor 'manually-associated)))))
+  (case (wg-workgroup-buffer-association-type workgroup (current-buffer))
+    (manual (wg-mode-line-decor 'manually-associated))
+    (auto (wg-mode-line-decor 'auto-associated))
+    (otherwise (wg-mode-line-decor 'unassociated))))
 
 (defun wg-mode-line-string ()
   "Return the string to be displayed in the mode-line."
@@ -2674,9 +2673,6 @@ Added to `iswitchb-make-buflist-hook'."
 ;;;                                                                          ;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-
-;;   FIXME: make sure all WORKGROUP args are resolved with
-;;   `wg-get-workgroup-flexibly'
 
 
 ;;; workgroup switching commands
@@ -3136,13 +3132,13 @@ See `wg-workgroup-cycle-buffer-association-type' for details."
               (otherwise " dissociated from ")))
       (:cur (wg-workgroup-name workgroup)))))
 
-(defun wg-purge-auto-associated-buffers ()
+(defun wg-purge-auto-associated-buffers (workgroup)
   "Remove buffers from the current workgroup that were added automatically."
-  (interactive)
+  (interactive (list nil))
+  (wg-workgroup-purge-auto-associated-buffers workgroup)
   (wg-fontified-message
-    (:cmd "Purged: ")
-    (wg-buffer-list-display
-     (wg-workgroup-purge-auto-associated-buffers nil))))
+    (:cmd "Remaining buffers: ")
+    (wg-buffer-list-display (wg-workgroup-live-buffers workgroup))))
 
 
 
@@ -3184,7 +3180,7 @@ Deletes all state saved in frame parameters, and nulls out
 
 ;;; file commands
 
-(defun wg-save (file &optional force)
+(defun wg-save-workgroups (file &optional force)
   "Save workgroups to FILE.
 Called interactively with a prefix arg, or if `wg-visited-file-name'
 is nil, read a filename.  Otherwise use `wg-visited-file-name'."
@@ -3201,29 +3197,31 @@ is nil, read a filename.  Otherwise use `wg-visited-file-name'."
       (wg-mark-everything-clean)
       (wg-fontified-message (:cmd "Wrote: ") (:file file)))))
 
-;; FIXME: write file converter
-;; FIXME: rejigger the interactive form
-(defun wg-load (filename)
-  "Load workgroups from FILENAME.
-Called interactively with a prefix arg, and if `wg-visited-file-name'
-is non-nil, use `wg-visited-file-name'. Otherwise read a filename."
-  (interactive
-   (list (let ((fname (wg-visited-file-name t)))
-           (if (and current-prefix-arg fname) fname
-             (read-file-name "File: ")))))
-  (setq filename (expand-file-name filename))
+(defun wg-find-new-workgroups-file (filename)
+  "Reset Workgroups and set `wg-visited-file-name' to FILENAME."
+  (interactive "FNew workgroups file: ")
+  (when (file-exists-p filename)
+    (error "%S already exists" filename))
+  (when (wg-query-for-save)
+    (wg-reset t)
+    (setq wg-visited-file-name filename)
+    (wg-fontified-message
+      (:cmd "Visited new workgroups file: ")
+      (:file (format "%S" filename)))))
+
+(defun wg-find-workgroups-file (filename)
+  "Load workgroups from FILENAME."
+  (interactive "FWorkgroups file: ")
   (if (not (file-exists-p filename))
-      (when (wg-query-for-save)
-        (wg-reset t)
-        (setq wg-visited-file-name filename))
+      (wg-find-new-workgroups-file filename)
     (let ((sexp (wg-read-sexp-from-file filename)))
       (unless (wg-workgroup-set-p sexp)
         (error "%S is not a workgroups file." filename))
       (wg-reset t)
       (setq wg-workgroup-set sexp wg-visited-file-name filename))
-    (when wg-switch-on-load
-      (wg-awhen (wg-workgroup-list t)
-        (wg-switch-to-workgroup (car it))))
+    (wg-awhen (and wg-switch-to-first-workgroup-on-find-workgroups-file
+                   (wg-workgroup-list t))
+      (wg-switch-to-workgroup (car it)))
     (wg-fontified-message
       (:cmd "Loaded: ")
       (:file filename))))
@@ -3247,12 +3245,12 @@ is non-nil, use `wg-visited-file-name'. Otherwise read a filename."
   (dired dir switches))
 
 (defun wg-update-all-workgroups-and-save ()
-  "Call `wg-update-all-workgroups', the `wg-save'.
+  "Call `wg-update-all-workgroups', the `wg-save-workgroups'.
 Keep in mind that workgroups will be updated with their
 working-wconfig in the current frame."
   (interactive)
   (wg-update-all-workgroups)
-  (call-interactively 'wg-save))
+  (call-interactively 'wg-save-workgroups))
 
 
 
@@ -3449,9 +3447,9 @@ in which case call `wg-previous-buffer-list-filter'."
 
 (defun wg-help ()
   "Just call `apropos-command' on \"^wg-\".
-There used to be a bunch of help-buffer construction stuff,
-including a `wg-help' variable that basically duplicated
-commands' docstrings.  But why, when there's `apropos-command'?"
+There used to be a bunch of help-buffer construction stuff here,
+including a `wg-help' variable that basically duplicated every
+command's docstring;  But why, when there's `apropos-command'?"
   (interactive)
   (apropos-command "^wg-"))
 
@@ -3459,8 +3457,6 @@ commands' docstrings.  But why, when there's `apropos-command'?"
 
 ;;; keymap
 
-
-;; FIXME: bind all the new commands
 (defvar wg-map
   (wg-fill-keymap (make-sparse-keymap)
 
@@ -3501,6 +3497,7 @@ commands' docstrings.  But why, when there's `apropos-command'?"
     "'"          'wg-switch-to-workgroup
     "C-v"        'wg-switch-to-workgroup
     "v"          'wg-switch-to-workgroup
+    "M-v"        'wg-switch-to-workgroup-other-frame
     "C-j"        'wg-switch-to-workgroup-at-index
     "j"          'wg-switch-to-workgroup-at-index
     "0"          'wg-switch-to-workgroup-at-index-0
@@ -3523,18 +3520,23 @@ commands' docstrings.  But why, when there's `apropos-command'?"
     "a"          'wg-switch-to-previous-workgroup
 
 
-    ;; undo/redo
+    ;; wconfig undo/redo
 
     "<left>"     'wg-undo-wconfig-change
     "<right>"    'wg-redo-wconfig-change
     "["          'wg-undo-wconfig-change
     "]"          'wg-redo-wconfig-change
+    "{"          'wg-undo-once-all-workgroups
+    "}"          'wg-redo-once-all-workgroups
 
 
     ;; buffer-list
 
     "+"          'wg-associate-buffer-with-workgroup
     "-"          'wg-dissociate-buffer-from-workgroup
+    "="          'wg-cycle-buffer-association-type
+    "*"          'wg-restore-workgroup-associated-buffers
+    "_"          'wg-purge-auto-associated-buffers
     "M-b"        'wg-toggle-buffer-list-filtration
     "("          'wg-next-buffer
     ")"          'wg-previous-buffer
@@ -3549,13 +3551,12 @@ commands' docstrings.  But why, when there's `apropos-command'?"
 
     ;; file and buffer
 
-    "C-s"        'wg-save
-    "C-l"        'wg-load
+    "C-s"        'wg-save-workgroups
+    "C-l"        'wg-find-workgroups-file
+    "M-l"        'wg-find-new-workgroups-file
     "S"          'wg-update-all-workgroups-and-save
     "C-f"        'wg-find-file
     "S-C-f"      'wg-find-file-read-only
-    ;; "C-b"        'wg-get-by-buffer
-    ;; "b"          'wg-get-by-buffer
     "C-b"        'wg-switch-to-buffer
     "b"          'wg-switch-to-buffer
     "d"          'wg-dired
@@ -3563,12 +3564,11 @@ commands' docstrings.  But why, when there's `apropos-command'?"
 
     ;; window moving and frame reversal
 
-    ;; FIXME: These keys are too prime for these commands
     "<"          'wg-backward-transpose-window
     ">"          'wg-transpose-window
     "|"          'wg-reverse-frame-horizontally
-    ;; "-"          'wg-reverse-frame-vertically
-    ;; "+"          'wg-reverse-frame-horizontally-and-vertically
+    "\\"         'wg-reverse-frame-vertically
+    "/"          'wg-reverse-frame-horizontally-and-vertically
 
 
     ;; toggling
@@ -3705,22 +3705,22 @@ remappings of standard commands."
   "Query for save when `wg-dirty' is non-nil."
   (or (not (wg-dirty-p))
       (not (y-or-n-p "Save modified workgroups? "))
-      (call-interactively 'wg-save)
+      (call-interactively 'wg-save-workgroups)
       t))
 
-(defun wg-save-on-emacs-exit ()
+(defun wg-save-workgroups-on-emacs-exit ()
   "Conditionally call `wg-query-for-save'.
 Added to `kill-emacs-query-functions'."
   (case wg-emacs-exit-save-behavior
-    (save (call-interactively 'wg-save) t)
+    (save (call-interactively 'wg-save-workgroups) t)
     (query (wg-query-for-save) t)
     (nosave t)))
 
-(defun wg-save-on-workgroups-mode-exit ()
+(defun wg-save-workgroups-on-workgroups-mode-exit ()
   "Conditionally call `wg-query-for-save'.
 Called when `workgroups-mode' is turned off."
   (case wg-workgroups-mode-exit-save-behavior
-    (save (call-interactively 'wg-save) t)
+    (save (call-interactively 'wg-save-workgroups) t)
     (query (wg-query-for-save) t)
     (nosave t)))
 
@@ -3728,7 +3728,7 @@ Called when `workgroups-mode' is turned off."
   "Add or remove all of Workgroups' hooks, depending on REMOVE."
   (wg-add-or-remove-hooks
    remove
-   'kill-emacs-query-functions       'wg-save-on-emacs-exit
+   'kill-emacs-query-functions       'wg-save-workgroups-on-emacs-exit
    'window-configuration-change-hook 'wg-flag-wconfig-change
    'pre-command-hook                 'wg-update-working-wconfig-before-command
    'post-command-hook                'wg-save-undo-after-wconfig-change
@@ -3759,7 +3759,7 @@ If ARG is anything else, turn on `workgroups-mode'."
     (wg-setup-minor-mode-map-entry)
     (run-hooks 'workgroups-mode-hook))
    (t
-    (wg-save-on-workgroups-mode-exit)
+    (wg-save-workgroups-on-workgroups-mode-exit)
     (wg-add-or-remove-workgroups-hooks t)
     (wg-disable-all-advice)
     (wg-unset-prefix-key)
