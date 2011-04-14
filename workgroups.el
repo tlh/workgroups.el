@@ -48,7 +48,7 @@
 ;;   and HIGH-BOUND of a bounds list.  See `wg-with-bounds'.
 ;; WGBUF always refers to a Workgroups buffer object.
 
-
+;; FIXME: Make sure it compiles without warning in an "emacs -Q" session
 
 ;;; Code:
 
@@ -476,6 +476,8 @@ decoration strings."
 
 
 ;;; vars
+
+(defvar workgroups-mode nil "")
 
 (defvar wg-workgroup-set nil
   "Current workgroup-set object.")
@@ -2514,7 +2516,7 @@ current and previous workgroups."
             (iswitchb-make-buflist-hook
              (lambda () (setq iswitchb-temp-buflist choices))))
        (iswitchb-read-buffer prompt default require-match)))
-    (falback
+    (fallback
      (completing-read prompt choices pred require-match
                       initial-input history default))))
 
@@ -3405,18 +3407,18 @@ in which case call `wg-previous-buffer-list-filter'."
      (wg-rotate-list (wg-filtered-buffer-list) pos) mode)))
 
 (defvar wg-minibuffer-mode-map
-  (fill-keymap (make-sparse-keymap)
-               "C-b"       'wg-magic-C-b
-               "C-c n"     'wg-next-buffer-list-filter
-               "C-c C-n"   'wg-next-buffer-list-filter
-               "C-S-b"     'wg-magic-C-S-b
-               "C-c p"     'wg-previous-buffer-list-filter
-               "C-c C-p"   'wg-previous-buffer-list-filter
-               "C-c a"     'wg-associate-first-match
-               "C-c C-a"   'wg-associate-first-match
-               "C-c d"     'wg-dissociate-first-match
-               "C-c C-d"   'wg-dissociate-first-match
-               )
+  (wg-fill-keymap (make-sparse-keymap)
+    "C-b"       'wg-magic-C-b
+    "C-c n"     'wg-next-buffer-list-filter
+    "C-c C-n"   'wg-next-buffer-list-filter
+    "C-S-b"     'wg-magic-C-S-b
+    "C-c p"     'wg-previous-buffer-list-filter
+    "C-c C-p"   'wg-previous-buffer-list-filter
+    "C-c a"     'wg-associate-first-match
+    "C-c C-a"   'wg-associate-first-match
+    "C-c d"     'wg-dissociate-first-match
+    "C-c C-d"   'wg-dissociate-first-match
+    )
   "`wg-minibuffer-mode's keymap.")
 
 (defvar wg-minibuffer-mode-minor-mode-map-entry
