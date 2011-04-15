@@ -1370,6 +1370,27 @@ Otherwise, reverse WTREE vertically."
             (set-window-margins sw (car margins) (cdr margins)))
           (set-window-hscroll sw hscroll))))))
 
+;; (defun wg-reset-window (&optional window)
+;;   "Reset various parameters of WINDOW.
+;; Since `wg-restore-window-tree' starts with
+;; `delete-other-windows', and subwindows inherit many parameters of
+;; the windows they were split from, the initial window can
+;; contaminate the whole window-tree if we don't reset it."
+;;   (let ((window (or window (selected-window))))
+;;     (set-window-scroll-bars window nil nil nil)
+;;     (set-window-fringes window nil nil nil)
+;;     (set-window-margins window nil nil)))
+
+(defun wg-reset-window (&optional window)
+  "Reset various parameters of WINDOW.
+Since `wg-restore-window-tree' starts with
+`delete-other-windows', and subwindows inherit many parameters of
+the windows they were split from, the initial window can
+contaminate the whole window-tree if we don't reset it."
+  (set-window-scroll-bars nil nil nil nil)
+  (set-window-fringes nil nil nil nil)
+  (set-window-margins nil nil nil))
+
 (defun wg-restore-window-tree (wg-window-tree)
   "Restore WG-WINDOW-TREE in `selected-frame'."
   (flet ((inner (w) (if (wg-wtree-p w)
@@ -1384,6 +1405,7 @@ Otherwise, reverse WTREE vertically."
     (let ((window-min-width  wg-window-min-width)
           (window-min-height wg-window-min-height))
       (delete-other-windows)
+      (wg-reset-window)
       (setq wg-selected-window nil)
       (inner wg-window-tree)
       (wg-awhen wg-selected-window (select-window it)))))
@@ -1413,6 +1435,13 @@ Otherwise, reverse WTREE vertically."
 ;;
 ;; TODO: Add upward and left morphing.  And once it's been added, add selection
 ;;       of a random morph direction.
+;;
+
+;; FIXME: Fringes factor into window-min-width calculations.  Workgroups'
+;; current min-width calculations all assume my .emacs' fringe width of 4 (7?),
+;; and are broken with the default fringes.
+;;
+;; So temporarily set the fringes to something reasonable during morph.
 ;;
 
 (defun wg-morph-p ()
@@ -1516,16 +1545,19 @@ Assumes both FROM and TO fit in `selected-frame'."
         (truncate-partial-width-windows
          wg-morph-truncate-partial-width-windows)
         (watchdog 0))
-    (condition-case err
-        (wg-until (wg-equal-wtrees from to)
-          (when (> (incf watchdog) wg-morph-max-steps)
-            (error "`wg-morph-max-steps' exceeded"))
-          (setq from (wg-normalize-wtree (wg-morph-dispatch from to)))
-          (wg-restore-window-tree from)
-          (redisplay)
-          (unless (zerop wg-morph-sit-for-seconds)
-            (sit-for wg-morph-sit-for-seconds t)))
-      (error (if noerror (message "%S" err) (error "%S" err))))))
+    (wg-until (wg-equal-wtrees from to)
+      (condition-case err
+          (progn
+            (when (> (incf watchdog) wg-morph-max-steps)
+              (error "`wg-morph-max-steps' exceeded"))
+            (setq from (wg-normalize-wtree (wg-morph-dispatch from to)))
+            (wg-restore-window-tree from)
+            (redisplay)
+            (unless (zerop wg-morph-sit-for-seconds)
+              (sit-for wg-morph-sit-for-seconds t)))
+        ;; Ignore window-split size errors, re-signal everything else:
+        (error (unless (string-match "window.*too small" (cadr err))
+                 (signal (car err) (cadr err))))))))
 
 
 
