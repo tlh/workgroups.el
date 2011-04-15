@@ -48,7 +48,6 @@
 ;;   and HIGH-BOUND of a bounds list.  See `wg-with-bounds'.
 ;; WGBUF always refers to a Workgroups buffer object.
 
-;; FIXME: Make sure it compiles without warning in an "emacs -Q" session
 
 ;;; Code:
 
@@ -393,14 +392,6 @@ If nil, `wg-morph-hsteps' is used."
   "Used instead of `wg-morph-vsteps' in terminal frames.
 If nil, `wg-morph-vsteps' is used."
   :type 'integer
-  :group 'workgroups)
-
-(defcustom wg-morph-sit-for-seconds 0
-  "Seconds to `sit-for' between `wg-morph' iterations.
-Should probably be zero unless `redisplay' is *really* fast on
-your machine, and `wg-morph-hsteps' and `wg-morph-vsteps' are
-already set as low as possible."
-  :type 'float
   :group 'workgroups)
 
 (defcustom wg-morph-truncate-partial-width-windows t
@@ -1222,7 +1213,6 @@ BUFFER or `wg-default-buffer' is visible in the only window."
               (equal (wg-edges w1) (wg-edges w2))
               (every #'wg-equal-wtrees (wg-wlist w1) (wg-wlist w2))))))
 
-;; FIXME: Require a minimum size to fix wscaling
 (defun wg-normalize-wtree (wtree)
   "Clean up and return a new wtree from WTREE.
 Recalculate the edge lists of all subwins, and remove subwins
@@ -1349,7 +1339,6 @@ Otherwise, reverse WTREE vertically."
                              sbars fringes margins selwin mbswin)
     (let ((sw (selected-window))
           (buffer (wg-restore-buffer wgbuf)))
-      (when selwin (setq wg-selected-window sw))
       (if (not buffer) (set-window-buffer sw wg-default-buffer)
         (with-current-buffer buffer
           (set-window-buffer sw buffer)
@@ -1358,38 +1347,20 @@ Otherwise, reverse WTREE vertically."
            sw (cond ((not wg-restore-point) wstart)
                     ((eq point :max) (point-max))
                     (t point)))
-          (when (>= wstart (point-max)) (recenter))
-          (when (and wg-restore-minibuffer-scroll-window mbswin)
-            (setq minibuffer-scroll-window sw))
-          (when wg-restore-scroll-bars
-            (wg-dbind (width cols vtype htype) sbars
-              (set-window-scroll-bars sw width vtype htype)))
-          (when wg-restore-fringes
-            (apply #'set-window-fringes sw fringes))
-          (when wg-restore-margins
-            (set-window-margins sw (car margins) (cdr margins)))
-          (set-window-hscroll sw hscroll))))))
-
-;; (defun wg-reset-window (&optional window)
-;;   "Reset various parameters of WINDOW.
-;; Since `wg-restore-window-tree' starts with
-;; `delete-other-windows', and subwindows inherit many parameters of
-;; the windows they were split from, the initial window can
-;; contaminate the whole window-tree if we don't reset it."
-;;   (let ((window (or window (selected-window))))
-;;     (set-window-scroll-bars window nil nil nil)
-;;     (set-window-fringes window nil nil nil)
-;;     (set-window-margins window nil nil)))
-
-(defun wg-reset-window (&optional window)
-  "Reset various parameters of WINDOW.
-Since `wg-restore-window-tree' starts with
-`delete-other-windows', and subwindows inherit many parameters of
-the windows they were split from, the initial window can
-contaminate the whole window-tree if we don't reset it."
-  (set-window-scroll-bars nil nil nil nil)
-  (set-window-fringes nil nil nil nil)
-  (set-window-margins nil nil nil))
+          (when (>= wstart (point-max)) (recenter))))
+      (when selwin (setq wg-selected-window sw))
+      (when (and wg-restore-minibuffer-scroll-window mbswin)
+        (setq minibuffer-scroll-window sw))
+      (wg-dbind (width cols vtype htype)
+          (if wg-restore-scroll-bars sbars '(nil nil nil nil))
+        (set-window-scroll-bars sw width vtype htype))
+      (wg-dbind (left-width right-width outside-margins)
+          (if wg-restore-fringes fringes '(nil nil nil))
+        (set-window-fringes sw left-width right-width outside-margins))
+      (wg-dbind (left-width . right-width)
+          (if wg-restore-margins margins '(nil . nil))
+        (set-window-margins sw left-width right-width))
+      (set-window-hscroll sw hscroll))))
 
 (defun wg-restore-window-tree (wg-window-tree)
   "Restore WG-WINDOW-TREE in `selected-frame'."
@@ -1405,7 +1376,6 @@ contaminate the whole window-tree if we don't reset it."
     (let ((window-min-width  wg-window-min-width)
           (window-min-height wg-window-min-height))
       (delete-other-windows)
-      (wg-reset-window)
       (setq wg-selected-window nil)
       (inner wg-window-tree)
       (wg-awhen wg-selected-window (select-window it)))))
@@ -1435,13 +1405,6 @@ contaminate the whole window-tree if we don't reset it."
 ;;
 ;; TODO: Add upward and left morphing.  And once it's been added, add selection
 ;;       of a random morph direction.
-;;
-
-;; FIXME: Fringes factor into window-min-width calculations.  Workgroups'
-;; current min-width calculations all assume my .emacs' fringe width of 4 (7?),
-;; and are broken with the default fringes.
-;;
-;; So temporarily set the fringes to something reasonable during morph.
 ;;
 
 (defun wg-morph-p ()
@@ -1530,6 +1493,32 @@ Dispatches on each possible combination of types."
         ((and (wg-wtree-p w1) (wg-window-p w2))
          (wg-morph-wtree->win w1 w2))))
 
+;; (defun wg-morph (from to &optional noerror)
+;;   "Morph from wtree FROM to wtree TO.
+;; Assumes both FROM and TO fit in `selected-frame'."
+;;   (let ((wg-morph-hsteps (wg-morph-determine-steps
+;;                           wg-morph-hsteps wg-morph-terminal-hsteps))
+;;         (wg-morph-vsteps (wg-morph-determine-steps
+;;                           wg-morph-vsteps wg-morph-terminal-vsteps))
+;;         (wg-flag-wconfig-changes nil)
+;;         (wg-restore-scroll-bars nil)
+;;         (wg-restore-fringes nil)
+;;         (wg-restore-margins nil)
+;;         (wg-restore-point nil)
+;;         (truncate-partial-width-windows
+;;          wg-morph-truncate-partial-width-windows)
+;;         (watchdog 0))
+;;     (wg-until (wg-equal-wtrees from to)
+;;       (condition-case err
+;;           (if (> (incf watchdog) wg-morph-max-steps)
+;;               (error "`wg-morph-max-steps' exceeded")
+;;             (setq from (wg-normalize-wtree (wg-morph-dispatch from to)))
+;;             (wg-restore-window-tree from)
+;;             (redisplay))
+;;         (error (wg-dbind (sym data) err
+;;                  (unless (or (string-match "too small" data) (not noerror))
+;;                    (signal sym data))))))))
+
 (defun wg-morph (from to &optional noerror)
   "Morph from wtree FROM to wtree TO.
 Assumes both FROM and TO fit in `selected-frame'."
@@ -1547,17 +1536,15 @@ Assumes both FROM and TO fit in `selected-frame'."
         (watchdog 0))
     (wg-until (wg-equal-wtrees from to)
       (condition-case err
-          (progn
-            (when (> (incf watchdog) wg-morph-max-steps)
-              (error "`wg-morph-max-steps' exceeded"))
+          (if (> (incf watchdog) wg-morph-max-steps)
+              (error "`wg-morph-max-steps' exceeded")
             (setq from (wg-normalize-wtree (wg-morph-dispatch from to)))
             (wg-restore-window-tree from)
-            (redisplay)
-            (unless (zerop wg-morph-sit-for-seconds)
-              (sit-for wg-morph-sit-for-seconds t)))
-        ;; Ignore window-split size errors, re-signal everything else:
-        (error (unless (string-match "window.*too small" (cadr err))
-                 (signal (car err) (cadr err))))))))
+            (redisplay))
+        (error (wg-dbind (sym data) err
+                 (unless (or (and (stringp data) (string-match "too small" data))
+                             (not noerror))
+                   (signal sym data))))))))
 
 
 
@@ -2039,20 +2026,10 @@ Binds `wg-current-workgroup', `wg-current-buffer-method' and
    frame 'wg-previous-workgroup-uid
    (when workgroup (wg-workgroup-uid (wg-get-workgroup-flexibly workgroup)))))
 
-;; (defun wg-current-workgroup-p (workgroup &optional noerror)
-;;   "Return t when WORKGROUP is the current workgroup, nil otherwise."
-;;   (wg-awhen (wg-current-workgroup noerror)
-;;     (eq it workgroup)))
-
 (defun wg-current-workgroup-p (workgroup &optional noerror frame)
   "Return t when WORKGROUP is the current workgroup, nil otherwise."
   (wg-awhen (wg-current-workgroup noerror frame)
     (wg-workgroups-eq workgroup it)))
-
-;; (defun wg-previous-workgroup-p (workgroup &optional noerror)
-;;   "Return t when WORKGROUP is the previous workgroup, nil otherwise."
-;;   (wg-awhen (wg-previous-workgroup noerror)
-;;     (eq it workgroup)))
 
 (defun wg-previous-workgroup-p (workgroup &optional noerror frame)
   "Return t when WORKGROUP is the previous workgroup, nil otherwise."
