@@ -137,7 +137,14 @@ Possible values:
 
 ;; minibuffer customization
 
-(defcustom wg-no-confirm nil
+(defcustom wg-no-confirm-on-create-workgroup nil
+  "Non-nil means don't request confirmation before creating a new
+workgroup when `wg-get-or-create-workgroup' is called with a
+string that doesn't name an existing workgroup."
+  :type 'boolean
+  :group 'workgroups)
+
+(defcustom wg-no-confirm-on-destructive-operation nil
   "Non-nil means don't request confirmation before various
 destructive operations, like `wg-reset'."
   :type 'boolean
@@ -268,11 +275,13 @@ filter is active.
 
 The function form should be either a function-symbol or a lambda, and
 should take two arguments: a workgroup and an initial
-buffer-list.  The workgroup is the current workgroup, and the
-initial buffer-list is the return value of
-`wg-interesting-buffers'.  You may not need these arguments in
-your custom filters, but they're just necessary for some of the
-built-in filters.
+buffer-list.  The workgroup may be any workgroup identifier
+accepted by `wg-get-workgroup-flexibly', and the initial
+buffer-list is a list of live Emacs buffers and/or the names of
+live Emacs buffers.  The function should return the filtered list
+of buffer objects and/or buffer names.  You may not need these
+arguments in your custom filters, but they're just necessary for
+some of the built-in filters.
 
 Default buffer-list-filters include:
 
@@ -663,6 +672,14 @@ Iterative to prevent stack overflow."
         (push (wg-take list n) acc)
         (setq list (nthcdr (or step n) list)))
       (nreverse acc)))
+
+  (defun wg-range (end &optional start)
+    "Return a list of integers up to but not including END.
+START defaults to 0."
+    (let ((start (or start 0)) accum)
+      (dotimes (i (- end start) (nreverse accum))
+        (push (+ start i) accum))))
+
   )
 
 (defmacro wg-with-gensyms (syms &rest body)
@@ -1615,6 +1632,11 @@ Emacs buffer-name string."
 
 ;;; workgroup utils
 
+(defun wg-make-workgroup (&rest key-value-pairs)
+  "Return a new workgroup with KEY-VALUE-PAIRS."
+  `(workgroup ,@(mapcar (lambda (kvp) (cons (car kvp) (cadr kvp)))
+                        (wg-partition key-value-pairs 2))))
+
 (defun wg-get-workgroup (key val &optional noerror)
   "Return the workgroup whose KEY equals VAL or error."
   (or (wg-get1 (wg (wg-workgroup-list noerror))
@@ -1827,11 +1849,11 @@ See `wg-get-bufobj' for allowable values for BUFOBJ."
   (or (wg-workgroup-update-buffer workgroup bufobj type t)
       (progn (wg-workgroup-associate-buffer workgroup bufobj type t) nil)))
 
-(defun wg-workgroup-live-buffers (workgroup)
+(defun wg-workgroup-live-buffers (workgroup &optional initial names)
   "Return a list of WORKGROUP's live associated buffers."
   (let ((assoc-bufs (wg-workgroup-associated-buffers workgroup)))
-    (wg-filter-map (lambda (bname) (when (wg-get-bufobj bname assoc-bufs) bname))
-                   (wg-interesting-buffers t))))
+    (wg-filter-map (lambda (buf) (when (wg-get-bufobj buf assoc-bufs) buf))
+                   (or initial (wg-interesting-buffers names)))))
 
 (defun wg-workgroup-cycle-buffer-association-type (workgroup bufobj)
   "Cycle the BUFOBJ's association type in WORKGROUP.
@@ -1880,15 +1902,28 @@ Lots of possible errors here because
                 (error "Slot `%S' is undefined in `%S's definition"
                        key id))))))))
 
-(defun wg-filtered-buffer-list (&optional workgroup bfl-id initial)
-  "Return the final list of buffer name completions."
+(defun wg-filtered-buffer-list (&optional names workgroup bfl-id initial)
+  "Return a filtered buffer-list from NAMES, WORKGROUP, BLF-ID and INITIAL.
+NAMES non-nil means return a list of buffer-names instead of buffer objects.
+WORKGROUP non-nil should be any workgroup identifier accepted by
+`wg-get-workgroup-flexibly'.
+BLF-ID non-nil should be the identifier of a defined buffer-list-filter.
+It defaults to `wg-get-buffer-list-filter-val'.
+INITIAL non-nil should be an initial buffer-list to filter.  It defaults to
+`wg-interesting-buffers'."
   (let ((bfl-id (wg-get-buffer-list-filter-id-flexibly bfl-id)))
     (condition-case err
-        (funcall (wg-get-buffer-list-filter-val bfl-id 'constructor)
-                 (wg-get-workgroup-flexibly workgroup)
-                 (or initial (wg-interesting-buffers t)))
-      (error (error "Error in buffer-list-filter `%S's constructor: %S"
-                    bfl-id err)))))
+        (mapcar (lambda (buf)
+                  (let ((buffer (get-buffer buf)))
+                    (if names (buffer-name buffer) buffer)))
+                (funcall (wg-get-buffer-list-filter-val bfl-id 'constructor)
+                         (wg-get-workgroup-flexibly workgroup)
+                         (or initial (wg-interesting-buffers t))))
+      (error
+       (signal (car err)
+               (format "Error in buffer-list-filter `%S's constructor:\n%S"
+                       bfl-id (cadr err)))))))
+
 
 
 ;; buffer-list filters
@@ -1899,12 +1934,12 @@ Lots of possible errors here because
 
 (defun wg-buffer-list-filter-associated (workgroup initial)
   "Return only those buffers associated with WORKGROUP."
-  (wg-workgroup-live-buffers workgroup))
+  (wg-workgroup-live-buffers workgroup initial))
 
 (defun wg-buffer-list-filter-unassociated (workgroup initial)
   "Return only those buffer unassociated with WORKGROUP."
-  (let ((buflist (wg-workgroup-live-buffers workgroup)))
-    (remove-if (lambda (buf) (member buf buflist)) initial)))
+  (let ((buffers (wg-workgroup-live-buffers workgroup initial)))
+    (remove-if (lambda (buf) (wg-get-bufobj buf buffers)) initial)))
 
 
 ;; buffer-list filtration utils
@@ -2242,12 +2277,7 @@ is non-nil.  Added to `post-command-hook'."
 
 
 
-;;; workgroup construction and restoration
-
-(defun wg-make-workgroup (&rest key-value-pairs)
-  "Return a new workgroup with KEY-VALUE-PAIRS."
-  `(workgroup ,@(mapcar (lambda (kvp) (cons (car kvp) (cadr kvp)))
-                        (wg-partition key-value-pairs 2))))
+;;; workgroup restoration
 
 (defun wg-restore-workgroup-associated-buffers-internal (workgroup)
   "Restore all the buffers associated with WORKGROUP that can be restored."
@@ -2280,7 +2310,8 @@ Also delete all references to it by `wg-workgroup-table',
       (when (wg-previous-workgroup-p workgroup t frame)
         (wg-set-previous-workgroup nil frame)))
     (wg-set-workgroup-list (remove workgroup (wg-workgroup-list)))
-    (setq wg-dirty t)))
+    (setq wg-dirty t)
+    workgroup))
 
 (defun wg-add-workgroup (workgroup &optional pos)
   "Add WORKGROUP to `wg-workgroup-list'.
@@ -2290,17 +2321,39 @@ If a workgroup with the same name exists, overwrite it."
     (wg-delete-workgroup it))
   (wg-set-workgroup-uid workgroup (wg-new-workgroup-uid))
   (wg-set-workgroup-list (wg-insert-elt workgroup (wg-workgroup-list t) pos))
-  (setq wg-dirty t))
+  (setq wg-dirty t)
+  workgroup)
 
 (defun wg-check-and-add-workgroup (workgroup)
   "Add WORKGROUP to `wg-workgroup-list'.
 Query to overwrite if a workgroup with the same name exists."
   (let ((name (wg-workgroup-name workgroup)))
     (when (wg-get-workgroup-by-name name t)
-      (unless (or wg-no-confirm
+      (unless (or wg-no-confirm-on-destructive-operation
                   (y-or-n-p (format "%S exists. Overwrite? " name)))
         (error "Cancelled"))))
   (wg-add-workgroup workgroup))
+
+(defun wg-make-and-add-workgroup (name)
+  "Create a workgroup named NAME and add it with `wg-check-and-add-workgroup'."
+  (wg-check-and-add-workgroup
+   (wg-make-workgroup
+    'name name
+    'base-wconfig (if (wg-current-workgroup t)
+                      (wg-make-blank-wconfig)
+                    (wg-serialize-frame)))))
+
+(defun wg-get-or-create-workgroup (workgroup)
+  "Return the workgroup identified by WORKGROUP.
+If WORKGROUP is a string that isn't the name of an
+existing workgroup, offer to create it."
+  (or (wg-get-workgroup-flexibly workgroup t)
+      (if (stringp workgroup)
+          (when (or wg-no-confirm-on-create-workgroup
+                    (y-or-n-p (format "%S doesn't exist.  Create it? "
+                                      workgroup)))
+            (wg-make-and-add-workgroup workgroup))
+        (wg-get-workgroup-flexibly workgroup))))
 
 (defun wg-cyclic-offset-workgroup (workgroup n)
   "Offset WORKGROUP's position in `wg-workgroup-list' by N."
@@ -2346,6 +2399,7 @@ Query to overwrite if a workgroup with the same name exists."
     (auto (wg-mode-line-decor 'auto-associated))
     (otherwise (wg-mode-line-decor 'unassociated))))
 
+;; FIXME: move this into the lighter text
 (defun wg-mode-line-string ()
   "Return the string to be displayed in the mode-line."
   (let ((wg (wg-current-workgroup t))
@@ -2363,7 +2417,7 @@ Query to overwrite if a workgroup with the same name exists."
                 (:div (wg-mode-line-decor 'right-brace))))
           (t  (wg-fontify " "
                 (:div (wg-mode-line-decor 'left-brace))
-                (:mode "workgroups")
+                (:mode "no workgroups")
                 (:div (wg-mode-line-decor 'right-brace)))))))
 
 (defun wg-mode-line-add-display ()
@@ -2601,7 +2655,7 @@ Currently `kill-buffer' is the only command for which BUFLIST isn't rotated."
 (defun wg-set-buflist-symbol (symbol)
   "`set' SYMBOL to the (possibly rotated) filtered buffer-list."
   (when (and wg-current-buffer-list-filter-id (boundp symbol))
-    (set symbol (wg-rotate-buflist-if-necessary (wg-filtered-buffer-list)))))
+    (set symbol (wg-rotate-buflist-if-necessary (wg-filtered-buffer-list t)))))
 
 (defun wg-set-ido-buffer-list ()
   "Set `ido-temp-list' with `wg-set-buflist-symbol'.
@@ -2629,13 +2683,11 @@ Added to `iswitchb-make-buflist-hook'."
                default require-match))))
 
 ;; TODO: Add minibuffer commands for killing, cloning, etc.
-(defun wg-read-workgroup (&optional noerror)
+(defun wg-read-workgroup-name (&optional require-match)
   "Read a workgroup with `wg-completing-read'."
-  (wg-get-workgroup-by-name
-   (wg-completing-read
-    "Workgroup: " (wg-workgroup-names) nil nil nil nil
-    (wg-awhen (wg-current-workgroup t) (wg-workgroup-name it)))
-   noerror))
+  (wg-completing-read
+   "Workgroup: " (wg-workgroup-names) nil require-match nil nil
+   (wg-awhen (wg-current-workgroup t) (wg-workgroup-name it))))
 
 (defun wg-new-default-workgroup-name ()
   "Return a new, unique, default workgroup name."
@@ -2690,36 +2742,23 @@ Added to `iswitchb-make-buflist-hook'."
 
 (defun wg-switch-to-workgroup (workgroup &optional noerror)
   "Switch to WORKGROUP."
-  (interactive (list (wg-read-workgroup)))
-  (let ((workgroup (wg-get-workgroup-flexibly workgroup))
+  (interactive (list (wg-read-workgroup-name)))
+  (let ((workgroup (wg-get-or-create-workgroup workgroup))
         (current (wg-current-workgroup t)))
     (unless (or (not (eq workgroup current)) noerror)
       (error "Already on: %s" (wg-workgroup-name current)))
     (wg-restore-workgroup workgroup)
     (wg-set-previous-workgroup current)
-    (wg-set-current-workgroup workgroup))
-  (run-hooks 'wg-switch-to-workgroup-hook)
-  (wg-fontified-message
-    (:cmd "Switched:  ")
-    (wg-workgroup-list-display)))
-
-;; (defun wg-switch-to-workgroup (workgroup &optional noerror)
-;;   "Switch to WORKGROUP."
-;;   (interactive (list (wg-read-workgroup)))
-;;   (when (and (wg-current-workgroup-p workgroup t) (not noerror))
-;;     (error "Already on: %s" (wg-workgroup-name workgroup)))
-;;   (wg-restore-workgroup workgroup)
-;;   (wg-set-previous-workgroup (wg-current-workgroup t))
-;;   (wg-set-current-workgroup workgroup)
-;;   (run-hooks 'wg-switch-to-workgroup-hook)
-;;   (wg-fontified-message
-;;     (:cmd "Switched:  ")
-;;     (wg-workgroup-list-display)))
+    (wg-set-current-workgroup workgroup)
+    (run-hooks 'wg-switch-to-workgroup-hook)
+    (wg-fontified-message
+      (:cmd "Switched:  ")
+      (wg-workgroup-list-display))))
 
 (defun wg-switch-to-workgroup-other-frame (workgroup &optional n)
   "Switch to WORKGROUP in the frame N places cyclically from `selected-frame'.
 Use `current-prefix-arg' for N if non-nil.  Otherwise N defaults to 1."
-  (interactive (list (wg-read-workgroup) current-prefix-arg))
+  (interactive (list (wg-read-workgroup-name) current-prefix-arg))
   (with-selected-frame (wg-cyclic-nth-from-frame (or n 1))
     (wg-switch-to-workgroup workgroup)))
 
@@ -2730,13 +2769,17 @@ Use `current-prefix-arg' for N if non-nil.  Otherwise N defaults to 1."
     (wg-switch-to-workgroup
      (or (nth index wl) (error "There are only %d workgroups" (length wl))))))
 
-;; Define wg-switch-to-workgroup-at-index-[0-9]:
 (macrolet
-    ((d (n)
-        `(defun ,(intern (format "wg-switch-to-workgroup-at-index-%d" n)) ()
-           ,(format "Switch to the workgroup at index %d." n)
-           (interactive) (wg-switch-to-workgroup-at-index ,n))))
-  (d 0) (d 1) (d 2) (d 3) (d 4) (d 5) (d 6) (d 7) (d 8) (d 9))
+    ((define-wg-switch-to-workgroup-at-index-range (num)
+       `(progn
+          ,@(mapcar
+             (lambda (i)
+               `(defun ,(intern (format "wg-switch-to-workgroup-at-index-%d" i)) ()
+                  ,(format "Switch to the workgroup at index %d." i)
+                  (interactive)
+                  (wg-switch-to-workgroup-at-index ,i)))
+             (wg-range num)))))
+  (define-wg-switch-to-workgroup-at-index-range 10))
 
 (defun wg-switch-to-cyclic-nth-from-workgroup (workgroup n)
   "Switch N workgroups cyclically from WORKGROUP in `wg-workgroup-list.'"
@@ -2788,17 +2831,11 @@ impression that the current workgroup's other parameters (like
 associated buffers) have been copied to the new workgroup
 as well.  For that, use `wg-clone-workgroup'."
   (interactive (list (wg-read-new-workgroup-name)))
-  (let ((workgroup (wg-make-workgroup
-                    'name name
-                    'base-wconfig (if (wg-current-workgroup t)
-                                      (wg-make-blank-wconfig)
-                                    (wg-serialize-frame)))))
-    (wg-check-and-add-workgroup workgroup)
-    (wg-switch-to-workgroup workgroup)
-    (wg-fontified-message
-      (:cmd "Created: ")
-      (:cur name) "  "
-      (wg-workgroup-list-display))))
+  (wg-switch-to-workgroup (wg-make-and-add-workgroup name))
+  (wg-fontified-message
+    (:cmd "Created: ")
+    (:cur name) "  "
+    (wg-workgroup-list-display)))
 
 (defun wg-clone-workgroup (workgroup name)
   "Create and add a clone of WORKGROUP named NAME.
@@ -2898,7 +2935,8 @@ ring, starting at the front."
 (defun wg-delete-other-workgroups (workgroup)
   "Delete all workgroups but WORKGROUP."
   (interactive (list (wg-current-workgroup)))
-  (unless (or wg-no-confirm (y-or-n-p "Really delete all other workgroups? "))
+  (unless (or wg-no-confirm-on-destructive-operation
+              (y-or-n-p "Really delete all other workgroups? "))
     (error "Cancelled"))
   (dolist (w (wg-workgroup-list))
     (unless (wg-workgroups-eq w workgroup)
@@ -3060,10 +3098,10 @@ symetry with `wg-undo-once-all-workgroups'."
 (defun wg-next-buffer-internal (buffer-list &optional prev noerror)
   "Switch to the next buffer in Workgroups' filtered buffer list."
   (when buffer-list
-    (let* ((cur (buffer-name (current-buffer)))
+    (let* ((cur (current-buffer))
            (next (or (wg-cyclic-nth-from-elt cur buffer-list (if prev -1 1))
                      (car buffer-list))))
-      (unless (equal cur next)
+      (unless (eq cur next)
         (switch-to-buffer next)
         (unless prev
           (let (wg-dissociate-buffer-on-bury-buffer)
@@ -3095,10 +3133,9 @@ and switch to the next buffer in the buffer-list-filter."
   (if (not (wg-filter-buffer-list-p))
       (call-interactively (wg-prior-mapping workgroups-mode 'bury-buffer))
     (wg-with-buffer-list-filters 'bury-buffer
-      (let ((buffer (get-buffer buffer-or-name)))
-        (wg-next-buffer-internal (wg-filtered-buffer-list))
-        (bury-buffer buffer)
-        (wg-message (wg-buffer-command-display))))))
+      (wg-next-buffer-internal (wg-filtered-buffer-list))
+      (bury-buffer buffer-or-name)
+      (wg-message (wg-buffer-command-display)))))
 
 (defun wg-associate-buffer-with-workgroup (workgroup buffer)
   "Associate BUFFER with WORKGROUP."
@@ -3177,7 +3214,8 @@ See `wg-workgroup-cycle-buffer-association-type' for details."
 Deletes all state saved in frame parameters, and nulls out
 `wg-workgroup-list', `wg-visited-file-name' and `wg-wconfig-kill-ring'."
   (interactive "P")
-  (unless (or force wg-no-confirm (y-or-n-p "Are you sure? "))
+  (unless (or force wg-no-confirm-on-destructive-operation
+              (y-or-n-p "Are you sure? "))
     (error "Canceled"))
   (mapc 'wg-reset-frame (frame-list))
   (setq wg-workgroup-set nil
@@ -3400,20 +3438,20 @@ in which case call `wg-previous-buffer-list-filter'."
   (interactive)
   (wg-when-let ((mode (wg-read-buffer-mode))
                 (buffer (wg-current-match mode))
-                (pos (position buffer (wg-filtered-buffer-list) :test 'equal)))
+                (pos (position buffer (wg-filtered-buffer-list t) :test 'equal)))
     (wg-workgroup-dissociate-buffer nil buffer t)
     (wg-set-current-matches
-     (wg-rotate-list (wg-filtered-buffer-list) pos) mode)))
+     (wg-rotate-list (wg-filtered-buffer-list t) pos) mode)))
 
 (defun wg-associate-first-match ()
   "Associate the first match with or update it in the current workgroup."
   (interactive)
   (wg-when-let ((mode (wg-read-buffer-mode))
                 (buffer (wg-current-match mode))
-                (pos (position buffer (wg-filtered-buffer-list) :test 'equal)))
+                (pos (position buffer (wg-filtered-buffer-list t) :test 'equal)))
     (wg-workgroup-update-or-associate-buffer nil buffer 'manual)
     (wg-set-current-matches
-     (wg-rotate-list (wg-filtered-buffer-list) pos) mode)))
+     (wg-rotate-list (wg-filtered-buffer-list t) pos) mode)))
 
 (defvar wg-minibuffer-mode-map
   (wg-fill-keymap (make-sparse-keymap)
