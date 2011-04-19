@@ -75,19 +75,22 @@
   :group 'convenience
   :version wg-version)
 
+(defcustom workgroups-mode nil
+  "Non-nil if Workgroups mode is enabled."
+  :set 'custom-set-minor-mode
+  :initialize 'custom-initialize-default
+  :group 'workgroups
+  :type 'boolean)
 
 
 ;; keybinding customization
 
 (defcustom wg-prefix-key (kbd "C-z")
-  "Workgroups' prefix key."
+  "Workgroups' prefix key.
+Setting this variable requires that `workgroups-mode' be turned
+off and then on again to take effect."
   :type 'string
-  :group 'workgroups
-  :set (lambda (sym val)
-         (custom-set-default sym val)
-         (when (and (boundp 'workgroups-mode) workgroups-mode)
-           (wg-set-prefix-key))
-         val))
+  :group 'workgroups)
 
 
 ;; hooks
@@ -347,27 +350,31 @@ easier to see the where `wg-previous-buffer' will take you."
   :type 'boolean
   :group 'workgroups)
 
-(defcustom wg-associate-buffer-on-switch-to-buffer t
-  "Non-nil means automatically associate buffers with the current
-workgroup on `switch-to-buffer'."
-  :type 'boolean
+(defcustom wg-associate-buffer-on-switch-to-buffer 'soft
+  "Associate buffers with the current workgroup on `switch-to-buffer'.
+`soft' means soft-associate the buffer.
+`hard' means hard-associate the buffer.
+nil means don't associate the buffer."
+  :type 'symbol
   :group 'workgroups)
 
-(defcustom wg-associate-buffer-on-set-window-buffer t
-  "Non-nil means automatically associate buffers with the current
-workgroup on `set-window-buffer'."
-  :type 'boolean
+(defcustom wg-associate-buffer-on-set-window-buffer 'soft
+  "Associate buffers with the current workgroup on `set-window-buffer'.
+`soft' means soft-associate the buffer.
+`hard' means hard-associate the buffer.
+nil means don't associate the buffer."
+  :type 'symbol
   :group 'workgroups)
 
 (defcustom wg-dissociate-buffer-on-kill-buffer t
-  "Non-nil means automatically dissociate from the current
-workgroup buffers killed with `kill-buffer'."
+  "Non-nil means dissociate from the current workgroup buffers
+killed with `kill-buffer'."
   :type 'boolean
   :group 'workgroups)
 
 (defcustom wg-dissociate-buffer-on-bury-buffer t
-  "Non-nil means automatically dissociate from the current
-workgroup buffers buried with `bury-buffer'."
+  "Non-nil means dissociate from the current workgroup buffers
+buried with `bury-buffer'."
   :type 'boolean
   :group 'workgroups)
 
@@ -433,8 +440,8 @@ mode-line under certain color settings."
   '((left-brace          . "(")
     (right-brace         . ")")
     (divider             . ":")
-    (manually-associated . "@")
-    (auto-associated     . "~")
+    (hard-associated . "@")
+    (soft-associated     . "~")
     (unassociated        . "-")
     (dirty               . "*")
     (clean               . "-"))
@@ -477,12 +484,13 @@ decoration strings."
 
 ;;; vars
 
-(defvar workgroups-mode nil "")
+(defvar workgroups-mode-map nil
+  "Workgroups Mode's keymap")
 
 (defvar wg-workgroup-set nil
   "Current workgroup-set object.")
 
-(defvar wg-minor-mode-map-entry nil
+(defvar wg-workgroups-mode-minor-mode-map-entry nil
   "Workgroups' minor-mode-map entry.")
 
 (defvar wg-wconfig-kill-ring nil
@@ -527,8 +535,8 @@ exiting the minibuffer .")
 (defvar wg-current-workgroup nil
   "Bound to the current workgroup in `wg-with-buffer-list-filters'.")
 
-(defvar wg-current-buffer-method nil
-  "Bound to the current buffer method in `wg-with-buffer-list-filters'.")
+(defvar wg-current-buffer-command nil
+  "Bound to the current buffer command in `wg-with-buffer-list-filters'.")
 
 (defvar wg-current-buffer-list-filter-id nil
   "Bound to the current buffer-list-filter symbol in `wg-with-buffer-list-filters'.")
@@ -544,7 +552,7 @@ the buffer-list-filter is cycled.")
     (kill-buffer                   . kill)
     (insert-buffer                 . insert)
     (display-buffer                . display))
-  "Alist mapping buffer methods to ido buffer methods.")
+  "Alist mapping buffer commands to ido buffer methods.")
 
 (defvar wg-iswitchb-translations
   `((switch-to-buffer              . samewindow)
@@ -553,7 +561,7 @@ the buffer-list-filter is cycled.")
     (kill-buffer                   . kill)
     (insert-buffer                 . insert)
     (display-buffer                . display))
-  "Alist mapping buffer methods to iswitchb buffer methods.")
+  "Alist mapping buffer commands to iswitchb buffer methods.")
 
 
 ;; wconfig restoration and morph vars
@@ -819,8 +827,7 @@ length is even, the first elt is left nearer the front."
 
 (defun wg-move-elt (elt list pos)
   "Move ELT to position POS in LIST."
-  (when (member elt list)
-    (wg-insert-elt elt (remove elt list) pos)))
+  (wg-insert-elt elt (remove elt list) pos))
 
 (defun wg-cyclic-offset-elt (elt list n)
   "Cyclically offset ELT's position in LIST by N."
@@ -880,13 +887,22 @@ variable, and the cadr as the key."
            `(puthash ,@pair ,tabsym))
        ,tabsym)))
 
+;; (defmacro wg-fill-keymap (keymap &rest binds)
+;;   "Return KEYMAP after defining in it all keybindings in BINDS."
+;;   (declare (indent 1))
+;;   (wg-with-gensyms (km)
+;;     `(let ((,km ,keymap))
+;;        ,@(wg-docar (b (wg-partition binds 2))
+;;            `(define-key ,km (kbd ,(car b)) ,(cadr b)))
+;;        ,km)))
+
 (defmacro wg-fill-keymap (keymap &rest binds)
   "Return KEYMAP after defining in it all keybindings in BINDS."
   (declare (indent 1))
   (wg-with-gensyms (km)
     `(let ((,km ,keymap))
        ,@(wg-docar (b (wg-partition binds 2))
-           `(define-key ,km (kbd ,(car b)) ,(cadr b)))
+           `(define-key ,km ,@b))
        ,km)))
 
 (defun wg-write-sexp-to-file (sexp file)
@@ -1794,28 +1810,34 @@ associated-buffers list, or error unless NOERROR."
   (wg-awhen (wg-workgroup-get-wgbuf workgroup bufobj t)
     (wg-get it 'association-type)))
 
-(defun wg-wgbuf-auto-associated-p (wgbuf)
-  "Return t if WGBUF's `association-type' is `auto'."
-  (eq (wg-get wgbuf 'association-type) 'auto))
+(defun wg-wgbuf-soft-associated-p (wgbuf)
+  "Return t if WGBUF's `association-type' is `soft'."
+  (eq (wg-get wgbuf 'association-type) 'soft))
 
-(defun wg-wgbuf-manually-associated-p (wgbuf)
-  "Return t if WGBUF's `association-type' is `manual'."
-  (eq (wg-get wgbuf 'association-type) 'manual))
+(defun wg-wgbuf-hard-associated-p (wgbuf)
+  "Return t if WGBUF's `association-type' is `hard'."
+  (eq (wg-get wgbuf 'association-type) 'hard))
 
-(defun wg-buffer-auto-associated-p (workgroup bufobj)
-  "Return t if BUFOBJ was automatically associated with WORKGROUP."
+(defun wg-buffer-soft-associated-p (workgroup bufobj)
+  "Return t if BUFOBJ is soft-associated with WORKGROUP."
   (wg-awhen (wg-workgroup-get-wgbuf workgroup bufobj t)
-    (wg-wgbuf-auto-associated-p it)))
+    (wg-wgbuf-soft-associated-p it)))
 
-(defun wg-buffer-manually-associated-p (workgroup bufobj)
-  "Return t if BUFOBJ was manually associated with WORKGROUP."
+(defun wg-buffer-hard-associated-p (workgroup bufobj)
+  "Return t if BUFOBJ is hard-associated with WORKGROUP."
   (wg-awhen (wg-workgroup-get-wgbuf workgroup bufobj t)
-    (wg-wgbuf-manually-associated-p it)))
+    (wg-wgbuf-hard-associated-p it)))
+
+(defun wg-check-association-type (type)
+  "Error unless TYPE is a valid association type."
+  (if (memq type '(soft hard nil)) type
+    (error "%S is not a valid association type" type)))
 
 (defun wg-workgroup-associate-buffer (workgroup bufobj type &optional noerror)
   "Add BUFOBJ to WORKGROUP.
 If TYPE is non-nil, set BUFOBJ's `association-type' parameter to it.
 See `wg-get-bufobj' for allowable values for BUFOBJ."
+  (wg-check-association-type type)
   (if (wg-workgroup-get-wgbuf workgroup bufobj t)
       (unless noerror
         (error "%S is already associated with %S"
@@ -1839,6 +1861,7 @@ See `wg-get-bufobj' for allowable values for BUFOBJ."
   "Update BUFOBJ in WORKGROUP.
 If TYPE is non-nil, set BUFOBJ's `association-type' parameter to it.
 See `wg-get-bufobj' for allowable values for BUFOBJ."
+  (wg-check-association-type type)
   (when (wg-workgroup-dissociate-buffer workgroup bufobj noerror)
     (wg-workgroup-associate-buffer workgroup bufobj type)))
 
@@ -1846,6 +1869,7 @@ See `wg-get-bufobj' for allowable values for BUFOBJ."
   "Update BUFOBJ in or add it to WORKGROUP.
 If TYPE is non-nil, set BUFOBJ's `association-type' parameter to it.
 See `wg-get-bufobj' for allowable values for BUFOBJ."
+  (wg-check-association-type type)
   (or (wg-workgroup-update-buffer workgroup bufobj type t)
       (progn (wg-workgroup-associate-buffer workgroup bufobj type t) nil)))
 
@@ -1857,22 +1881,22 @@ See `wg-get-bufobj' for allowable values for BUFOBJ."
 
 (defun wg-workgroup-cycle-buffer-association-type (workgroup bufobj)
   "Cycle the BUFOBJ's association type in WORKGROUP.
-If it's not associated with the workgroup, mark it as manually associated.
-If it's auto-associated with the workgroup, remove it from the workgroup.
-If it's manually associated with the workgroup, mark it as auto-associated."
+If it's hard-associated with the workgroup, mark it as soft-associated.
+If it's soft-associated with the workgroup, dissociate it from the workgroup.
+If it's not associated with the workgroup, mark it as hard-associated."
   (case (wg-workgroup-buffer-association-type workgroup bufobj)
-    (manual (wg-workgroup-update-buffer workgroup bufobj 'auto))
-    (auto (wg-workgroup-dissociate-buffer workgroup bufobj))
-    (otherwise (wg-workgroup-associate-buffer workgroup bufobj 'manual))))
+    (hard (wg-workgroup-update-buffer workgroup bufobj 'soft))
+    (soft (wg-workgroup-dissociate-buffer workgroup bufobj))
+    (otherwise (wg-workgroup-associate-buffer workgroup bufobj 'hard))))
 
-(defun wg-workgroup-purge-auto-associated-buffers (workgroup)
-  "Remove from WORKGROUP all wgbufs with `association-type' `auto'."
+(defun wg-workgroup-purge-soft-associated-buffers (workgroup)
+  "Remove from WORKGROUP all wgbufs with `association-type' `soft'."
   (wg-set-workgroup-associated-buffers
-   workgroup (remove-if 'wg-wgbuf-auto-associated-p
+   workgroup (remove-if 'wg-wgbuf-soft-associated-p
                         (wg-workgroup-associated-buffers workgroup))))
 
 (defun wg-auto-dissociate-buffer-hook ()
-  "`kill-buffer-hook' that automatically removes buffers from workgroups."
+  "`kill-buffer-hook' that automatically dissociates buffers from workgroups."
   (when wg-dissociate-buffer-on-kill-buffer
     (wg-awhen (wg-current-workgroup t)
       (wg-workgroup-dissociate-buffer it (current-buffer) t))))
@@ -1993,12 +2017,12 @@ This returns all buffers under \"~/\" that are also in `emacs-lisp-mode'."
 
 ;; buffer-list-filter context
 
-(defun wg-buffer-list-filter-order (workgroup method)
-  "Return WORKGROUP's buffer-list-filter order for METHOD, or a default."
+(defun wg-buffer-list-filter-order (workgroup command)
+  "Return WORKGROUP's buffer-list-filter order for COMMAND, or a default."
   (let ((bso (wg-workgroup-parameter workgroup 'buffer-list-filter-order-alist)))
-    (or (wg-aget bso  method)
+    (or (wg-aget bso  command)
         (wg-aget bso 'default)
-        (wg-aget wg-buffer-list-filter-order-alist  method)
+        (wg-aget wg-buffer-list-filter-order-alist  command)
         (wg-aget wg-buffer-list-filter-order-alist 'default))))
 
 (defmacro wg-prior-mapping (mode command)
@@ -2009,15 +2033,15 @@ This returns all buffers under \"~/\" that are also in `emacs-lisp-mode'."
   "Return the current workgroup when buffer-list-filters are on."
   (and workgroups-mode wg-buffer-list-filtration-on (wg-current-workgroup t)))
 
-(defmacro wg-with-buffer-list-filters (method &rest body)
-  "Establish buffer-list-filter context for buffer-method METHOD, and eval BODY.
-Binds `wg-current-workgroup', `wg-current-buffer-method' and
+(defmacro wg-with-buffer-list-filters (command &rest body)
+  "Establish buffer-list-filter context for buffer command COMMAND, and eval BODY.
+Binds `wg-current-workgroup', `wg-current-buffer-command' and
 `wg-current-buffer-list-filter-id' in BODY."
   (declare (indent 1))
   (wg-with-gensyms (order status)
     `(let* ((wg-current-workgroup (wg-current-workgroup t))
-            (wg-current-buffer-method ,method)
-            (,order (wg-buffer-list-filter-order wg-current-workgroup ,method))
+            (wg-current-buffer-command ,command)
+            (,order (wg-buffer-list-filter-order wg-current-workgroup ,command))
             (wg-minibuffer-contents nil))
        (catch 'result
          (while 'your-mom
@@ -2394,12 +2418,12 @@ existing workgroup, offer to create it."
 
 (defun wg-mode-line-buffer-association-indicator (workgroup)
   "Return a string indicating `current-buffer's association-type in WORKGROUP."
-  (case (wg-workgroup-buffer-association-type workgroup (current-buffer))
-    (manual (wg-mode-line-decor 'manually-associated))
-    (auto (wg-mode-line-decor 'auto-associated))
-    (otherwise (wg-mode-line-decor 'unassociated))))
+  (wg-mode-line-decor
+   (case (wg-workgroup-buffer-association-type workgroup (current-buffer))
+     (hard    'hard-associated)
+     (soft      'soft-associated)
+     (otherwise 'unassociated))))
 
-;; FIXME: move this into the lighter text
 (defun wg-mode-line-string ()
   "Return the string to be displayed in the mode-line."
   (let ((wg (wg-current-workgroup t))
@@ -2420,15 +2444,16 @@ existing workgroup, offer to create it."
                 (:mode "no workgroups")
                 (:div (wg-mode-line-decor 'right-brace)))))))
 
-(defun wg-mode-line-add-display ()
+(defun wg-add-mode-line-display ()
   "Add Workgroups' mode-line format to `mode-line-format'."
   (unless (assq 'wg-mode-line-display-on mode-line-format)
-    (let ((format `(wg-mode-line-display-on (:eval (wg-mode-line-string))))
+    (let ((format '(wg-mode-line-display-on (:eval (wg-mode-line-string))))
           (pos (1+ (position 'mode-line-position mode-line-format))))
       (set-default 'mode-line-format
-                   (wg-insert-elt format mode-line-format pos)))))
+                   (wg-insert-elt format mode-line-format pos))
+      (force-mode-line-update))))
 
-(defun wg-mode-line-remove-display ()
+(defun wg-remove-mode-line-display ()
   "Remove Workgroups' mode-line format from `mode-line-format'."
   (wg-awhen (assq 'wg-mode-line-display-on mode-line-format)
     (set-default 'mode-line-format (remove it mode-line-format))
@@ -2519,6 +2544,7 @@ current and previous workgroups."
     (:msg (wg-get-buffer-list-filter-val blf-id 'indicator))
     (:div ")")))
 
+;; FIXME: get rid of METHOD arg
 (defun wg-buffer-list-filter-prompt (prompt &optional workgroup method blf-id)
   "Return a prompt string indicating WORKGROUP and buffer-list-filter BLF-ID."
   (wg-fontify
@@ -2626,40 +2652,109 @@ duplicated from `iswitchb', so is similarly shitty."
            (kill-buffer buffer))
           (t (iswitchb-visit-buffer buffer)))))
 
-(defun wg-buffer-internal (method &optional prompt default)
+;; ;; FIXME: maybe `wg-default-match' to fix `wg-kill-buffer' ?
+;; (defun wg-buffer-internal (command &optional prompt default)
+;;   "Return a switch-to-buffer fn from `wg-read-buffer-mode'."
+;;   (if (not (wg-filter-buffer-list-p))
+;;       (call-interactively (wg-prior-mapping workgroups-mode command))
+;;     (wg-with-buffer-list-filters command
+;;       (ecase (wg-read-buffer-mode)
+;;         (ido
+;;          (ido-buffer-internal
+;;           (wg-aget wg-ido-translations command) nil
+;;           (wg-buffer-list-filter-prompt prompt)
+;;           default wg-minibuffer-contents))
+;;         (iswitchb
+;;          (wg-iswitchb-internal
+;;           (wg-aget wg-iswitchb-translations command)
+;;           (wg-buffer-list-filter-prompt prompt)
+;;           default wg-minibuffer-contents))
+;;         (fallback
+;;          (let (read-buffer-function) (call-interactively command))))
+;;       (wg-message (wg-buffer-command-display)))))
+
+(defvar wg-buffer-internal-default-buffer nil "")
+
+;; FIXME: maybe `wg-default-match' to fix `wg-kill-buffer' ?
+(defun wg-buffer-internal (command &optional prompt default)
   "Return a switch-to-buffer fn from `wg-read-buffer-mode'."
   (if (not (wg-filter-buffer-list-p))
-      (call-interactively (wg-prior-mapping workgroups-mode method))
-    (wg-with-buffer-list-filters method
-      (ecase (wg-read-buffer-mode)
-        (ido
-         (ido-buffer-internal
-          (wg-aget wg-ido-translations method) nil
-          (wg-buffer-list-filter-prompt prompt)
-          default wg-minibuffer-contents))
-        (iswitchb
-         (wg-iswitchb-internal
-          (wg-aget wg-iswitchb-translations method)
-          (wg-buffer-list-filter-prompt prompt)
-          default wg-minibuffer-contents))
-        (fallback
-         (let (read-buffer-function) (call-interactively method))))
-      (wg-message (wg-buffer-command-display)))))
+      (call-interactively (wg-prior-mapping workgroups-mode command))
+    (wg-with-buffer-list-filters command
+      (let ((wg-buffer-internal-default-buffer default))
+        (ecase (wg-read-buffer-mode)
+          (ido
+           (ido-buffer-internal
+            (wg-aget wg-ido-translations command) nil
+            (wg-buffer-list-filter-prompt prompt)
+            default wg-minibuffer-contents))
+          (iswitchb
+           (wg-iswitchb-internal
+            (wg-aget wg-iswitchb-translations command)
+            (wg-buffer-list-filter-prompt prompt)
+            default wg-minibuffer-contents))
+          (fallback
+           (let (read-buffer-function) (call-interactively command))))
+        (wg-message (wg-buffer-command-display))))))
 
-(defun wg-rotate-buflist-if-necessary (buflist &optional buffer-command)
+;; (defun wg-rotate-buflist-if-necessary (buflist &optional buffer-command)
+;;   "Conditionally move the first buffer in BUFLIST to the end.
+;; Currently `kill-buffer' is the only command for which BUFLIST isn't rotated."
+;;   (if (eq (or buffer-command wg-current-buffer-command) 'kill-buffer)
+;;       buflist (wg-rotate-list buflist)))
+
+;; ido-rotate-temp
+
+;; ;; FIXME: update this docstring
+;; (defun wg-final-buffer-list (buflist &optional buffer-command)
+;;   "Conditionally move the first buffer in BUFLIST to the end.
+;; Currently `kill-buffer' is the only command for which BUFLIST isn't rotated."
+;;   (let* ((command (or buffer-command wg-current-buffer-command))
+;;          (temp (if (eq command 'kill-buffer) buflist (wg-rotate-list buflist))))
+;;     (if (not wg-buffer-internal-default-buffer) temp
+;;       (cons wg-buffer-internal-default-buffer
+;;             (remove wg-buffer-internal-default-buffer temp)))))
+
+;; ;; FIXME: update this docstring
+;; (defun wg-final-filtered-buffer-list (buflist &optional buffer-command)
+;;   "Conditionally move the first buffer in BUFLIST to the end.
+;; Currently `kill-buffer' is the only command for which BUFLIST isn't rotated."
+;;   (let ((command (or buffer-command wg-current-buffer-command))
+;;         (temp (if (eq command 'kill-buffer) buflist (wg-rotate-list buflist))))
+;;     (if (not wg-buffer-internal-default-buffer) temp
+;;       (cons wg-buffer-internal-default-buffer
+;;             (remove wg-buffer-internal-default-buffer temp)))))
+
+;; FIXME: update this docstring
+(defun wg-final-filtered-buffer-list (buflist &optional buffer-command)
   "Conditionally move the first buffer in BUFLIST to the end.
 Currently `kill-buffer' is the only command for which BUFLIST isn't rotated."
-  (if (eq (or buffer-command wg-current-buffer-method) 'kill-buffer)
-      buflist (wg-rotate-list buflist)))
+  (wg-aif wg-buffer-internal-default-buffer (wg-move-elt it buflist 0)
+    (if (eq (or buffer-command wg-current-buffer-command) 'kill-buffer)
+        buflist
+      (wg-rotate-list buflist))))
+
+;; (defun wg-final-filtered-buffer-list (buflist &optional buffer-command)
+;;   buflist)
+
+;; (defun wg-set-buflist-symbol (symbol)
+;;   "`set' SYMBOL to the (possibly rotated) filtered buffer-list."
+;;   (when (and wg-current-buffer-list-filter-id (boundp symbol))
+;;     (set symbol (wg-rotate-buflist-if-necessary (wg-filtered-buffer-list t)))))
 
 (defun wg-set-buflist-symbol (symbol)
   "`set' SYMBOL to the (possibly rotated) filtered buffer-list."
   (when (and wg-current-buffer-list-filter-id (boundp symbol))
-    (set symbol (wg-rotate-buflist-if-necessary (wg-filtered-buffer-list t)))))
+    (set symbol (wg-final-filtered-buffer-list (wg-filtered-buffer-list t)))))
 
 (defun wg-set-ido-buffer-list ()
   "Set `ido-temp-list' with `wg-set-buflist-symbol'.
 Added to `ido-make-buffer-list-hook'."
+  ;; (when (and (boundp 'ido-rotate) ido-rotate) (error "foo"))
+  ;; (when (boundp 'ido-set-default-item) (setq ido-set-default-item nil))
+  ;; (setq ido-rotate-temp nil)
+  ;; (setq ido-rotate nil)
+  ;; (wg-set-buflist-symbol 'ido-matches)
   (wg-set-buflist-symbol 'ido-temp-list))
 
 (defun wg-set-iswitchb-buffer-list ()
@@ -2709,8 +2804,8 @@ Added to `iswitchb-make-buflist-hook'."
     (wg-read-object
      (or prompt (format "Name (default: %S): " default))
      (lambda (new) (and (stringp new)
-                   (not (equal new ""))
-                   (wg-unique-workgroup-name-p new)))
+                        (not (equal new ""))
+                        (wg-unique-workgroup-name-p new)))
      "Please enter a unique, non-empty name"
      nil nil nil nil default)))
 
@@ -3077,6 +3172,8 @@ symetry with `wg-undo-once-all-workgroups'."
   (wg-buffer-internal
    'switch-to-buffer-other-frame "Switch to buffer in other frame"))
 
+;; FIXME: If the current-buffer isn't associated with the workgroup, it's not
+;; given as the default buffer to kill.  This seems wrong.
 (defun wg-kill-buffer ()
   "Workgroups' version of `kill-buffer'."
   (interactive)
@@ -3114,10 +3211,10 @@ In the post-command message the current buffer is rotated to the
 middle of the list to more easily see where `wg-previous-buffer'
 will take you."
   (interactive)
-  (let ((method (if prev 'previous-buffer 'next-buffer)))
+  (let ((command (if prev 'previous-buffer 'next-buffer)))
     (if (not (wg-filter-buffer-list-p))
-        (call-interactively (wg-prior-mapping workgroups-mode method))
-      (wg-with-buffer-list-filters method
+        (call-interactively (wg-prior-mapping workgroups-mode command))
+      (wg-with-buffer-list-filters command
         (wg-awhen (wg-filtered-buffer-list) (wg-next-buffer-internal it prev))
         (wg-message (wg-buffer-command-display))))))
 
@@ -3126,6 +3223,7 @@ will take you."
   (interactive "P")
   (wg-next-buffer t))
 
+;; FIXME: don't advise `bury-buffer'.  Do it here, or with `wg-banish-buffer'.
 (defun wg-bury-buffer (&optional buffer-or-name)
   "Remove BUFFER-OR-NAME from the current workgroup, bury it,
 and switch to the next buffer in the buffer-list-filter."
@@ -3141,7 +3239,7 @@ and switch to the next buffer in the buffer-list-filter."
   "Associate BUFFER with WORKGROUP."
   (interactive (list nil (current-buffer)))
   (wg-message
-   (if (wg-workgroup-update-or-associate-buffer workgroup buffer 'manual)
+   (if (wg-workgroup-update-or-associate-buffer workgroup buffer 'hard)
        "Updated %S in %s" "Associated %S with %s")
    (buffer-name (get-buffer buffer))
    (wg-workgroup-name workgroup)))
@@ -3175,15 +3273,15 @@ See `wg-workgroup-cycle-buffer-association-type' for details."
     (wg-fontified-message
       (:cur (buffer-name buffer))
       (:cmd (case (wg-workgroup-buffer-association-type workgroup buffer)
-              (manual " manually associated with ")
-              (auto " automatically associated with ")
+              (hard " hard-associated with ")
+              (soft " soft-associated with ")
               (otherwise " dissociated from ")))
       (:cur (wg-workgroup-name workgroup)))))
 
-(defun wg-purge-auto-associated-buffers (workgroup)
-  "Remove buffers from the current workgroup that were added automatically."
+(defun wg-purge-soft-associated-buffers (workgroup)
+  "Dissociate from the current workgroup soft-associated buffers."
   (interactive (list nil))
-  (wg-workgroup-purge-auto-associated-buffers workgroup)
+  (wg-workgroup-purge-soft-associated-buffers workgroup)
   (wg-fontified-message
     (:cmd "Remaining buffers: ")
     (wg-buffer-list-display (wg-workgroup-live-buffers workgroup))))
@@ -3229,6 +3327,8 @@ Deletes all state saved in frame parameters, and nulls out
 
 ;;; file commands
 
+;; FIXME: factor out the meat of this, and move it upwards along with
+;; `wg-query-for-save'
 (defun wg-save-workgroups (file &optional force)
   "Save workgroups to FILE.
 Called interactively with a prefix arg, or if `wg-visited-file-name'
@@ -3245,6 +3345,13 @@ is nil, read a filename.  Otherwise use `wg-visited-file-name'."
       (wg-write-sexp-to-file workgroup-set file)
       (wg-mark-everything-clean)
       (wg-fontified-message (:cmd "Wrote: ") (:file file)))))
+
+(defun wg-query-for-save ()
+  "Query for save when `wg-dirty' is non-nil."
+  (or (not (wg-dirty-p))
+      (not (y-or-n-p "Save modified workgroups? "))
+      (call-interactively 'wg-save-workgroups)
+      t))
 
 (defun wg-find-new-workgroups-file (filename)
   "Reset Workgroups and set `wg-visited-file-name' to FILENAME."
@@ -3407,6 +3514,18 @@ The string is passed through a format arg to escape %'s."
 
 
 
+;;; help commands
+
+(defun wg-help ()
+  "Just call `apropos-command' on \"^wg-\".
+There used to be a bunch of help-buffer construction stuff here,
+including a `wg-help' variable that basically duplicated every
+command's docstring;  But why, when there's `apropos-command'?"
+  (interactive)
+  (apropos-command "^wg-"))
+
+
+
 ;;; wg-minibuffer-mode commands
 
 (defun wg-next-buffer-list-filter ()
@@ -3449,276 +3568,28 @@ in which case call `wg-previous-buffer-list-filter'."
   (wg-when-let ((mode (wg-read-buffer-mode))
                 (buffer (wg-current-match mode))
                 (pos (position buffer (wg-filtered-buffer-list t) :test 'equal)))
-    (wg-workgroup-update-or-associate-buffer nil buffer 'manual)
+    (wg-workgroup-update-or-associate-buffer nil buffer 'hard)
     (wg-set-current-matches
      (wg-rotate-list (wg-filtered-buffer-list t) pos) mode)))
 
-(defvar wg-minibuffer-mode-map
-  (wg-fill-keymap (make-sparse-keymap)
-    "C-b"       'wg-magic-C-b
-    "C-c n"     'wg-next-buffer-list-filter
-    "C-c C-n"   'wg-next-buffer-list-filter
-    "C-S-b"     'wg-magic-C-S-b
-    "C-c p"     'wg-previous-buffer-list-filter
-    "C-c C-p"   'wg-previous-buffer-list-filter
-    "C-c a"     'wg-associate-first-match
-    "C-c C-a"   'wg-associate-first-match
-    "C-c d"     'wg-dissociate-first-match
-    "C-c C-d"   'wg-dissociate-first-match
-    )
-  "`wg-minibuffer-mode's keymap.")
-
-(defvar wg-minibuffer-mode-minor-mode-map-entry
-  (cons 'wg-minibuffer-mode wg-minibuffer-mode-map)
-  "`wg-minibuffer-mode's entry in `minor-mode-map-alist'.")
-
-(define-minor-mode wg-minibuffer-mode
-  "Minor mode for Workgroups' minibuffer commands."
-  :global t
-  :group 'workgroups
-  (when wg-minibuffer-mode
-    (add-to-list 'minor-mode-map-alist
-                 wg-minibuffer-mode-minor-mode-map-entry)))
-
-(defun wg-turn-on-minibuffer-mode ()
-  "`minibuffer-setup-hook' to turn on `wg-minibuffer-mode'."
-  (when wg-current-buffer-list-filter-id
-    (wg-minibuffer-mode 1)))
-
-(defun wg-turn-off-minibuffer-mode ()
-  "`minibuffer-exit-hook' to turn off `wg-minibuffer-mode'."
-  (when wg-current-buffer-list-filter-id
-    (wg-minibuffer-mode -1)))
 
 
-
-;;; help commands
-
-(defun wg-help ()
-  "Just call `apropos-command' on \"^wg-\".
-There used to be a bunch of help-buffer construction stuff here,
-including a `wg-help' variable that basically duplicated every
-command's docstring;  But why, when there's `apropos-command'?"
-  (interactive)
-  (apropos-command "^wg-"))
-
-
-
-;;; keymap
-
-(defvar wg-map
-  (wg-fill-keymap (make-sparse-keymap)
-
-    ;; workgroup creation
-
-    "C-c"        'wg-create-workgroup
-    "c"          'wg-create-workgroup
-    "C"          'wg-clone-workgroup
-
-
-    ;; killing and yanking
-
-    "C-k"        'wg-kill-workgroup
-    "k"          'wg-kill-workgroup
-    "M-W"        'wg-kill-ring-save-base-wconfig
-    "M-w"        'wg-kill-ring-save-working-wconfig
-    "C-y"        'wg-yank-wconfig
-    "y"          'wg-yank-wconfig
-    "M-k"        'wg-kill-workgroup-and-buffers
-    "K"          'wg-delete-other-workgroups
-
-
-    ;; updating and reverting
-
-    "C-u"        'wg-update-workgroup
-    "u"          'wg-update-workgroup
-    "C-S-u"      'wg-update-all-workgroups
-    "U"          'wg-update-all-workgroups
-    "C-r"        'wg-revert-workgroup
-    "r"          'wg-revert-workgroup
-    "C-S-r"      'wg-revert-all-workgroups
-    "R"          'wg-revert-all-workgroups
-
-
-    ;; workgroup switching
-
-    "C-'"        'wg-switch-to-workgroup
-    "'"          'wg-switch-to-workgroup
-    "C-v"        'wg-switch-to-workgroup
-    "v"          'wg-switch-to-workgroup
-    "M-v"        'wg-switch-to-workgroup-other-frame
-    "C-j"        'wg-switch-to-workgroup-at-index
-    "j"          'wg-switch-to-workgroup-at-index
-    "0"          'wg-switch-to-workgroup-at-index-0
-    "1"          'wg-switch-to-workgroup-at-index-1
-    "2"          'wg-switch-to-workgroup-at-index-2
-    "3"          'wg-switch-to-workgroup-at-index-3
-    "4"          'wg-switch-to-workgroup-at-index-4
-    "5"          'wg-switch-to-workgroup-at-index-5
-    "6"          'wg-switch-to-workgroup-at-index-6
-    "7"          'wg-switch-to-workgroup-at-index-7
-    "8"          'wg-switch-to-workgroup-at-index-8
-    "9"          'wg-switch-to-workgroup-at-index-9
-    "C-p"        'wg-switch-to-workgroup-left
-    "p"          'wg-switch-to-workgroup-left
-    "C-n"        'wg-switch-to-workgroup-right
-    "n"          'wg-switch-to-workgroup-right
-    "M-p"        'wg-switch-to-workgroup-left-other-frame
-    "M-n"        'wg-switch-to-workgroup-right-other-frame
-    "C-a"        'wg-switch-to-previous-workgroup
-    "a"          'wg-switch-to-previous-workgroup
-
-
-    ;; wconfig undo/redo
-
-    "<left>"     'wg-undo-wconfig-change
-    "<right>"    'wg-redo-wconfig-change
-    "["          'wg-undo-wconfig-change
-    "]"          'wg-redo-wconfig-change
-    "{"          'wg-undo-once-all-workgroups
-    "}"          'wg-redo-once-all-workgroups
-
-
-    ;; buffer-list
-
-    "+"          'wg-associate-buffer-with-workgroup
-    "-"          'wg-dissociate-buffer-from-workgroup
-    "="          'wg-cycle-buffer-association-type
-    "*"          'wg-restore-workgroup-associated-buffers
-    "_"          'wg-purge-auto-associated-buffers
-    "M-b"        'wg-toggle-buffer-list-filtration
-    "("          'wg-next-buffer
-    ")"          'wg-previous-buffer
-
-
-    ;; workgroup movement
-
-    "C-x"        'wg-swap-workgroups
-    "C-,"        'wg-offset-workgroup-left
-    "C-."        'wg-offset-workgroup-right
-
-
-    ;; file and buffer
-
-    "C-s"        'wg-save-workgroups
-    "C-l"        'wg-find-workgroups-file
-    "M-l"        'wg-find-new-workgroups-file
-    "S"          'wg-update-all-workgroups-and-save
-    "C-f"        'wg-find-file
-    "S-C-f"      'wg-find-file-read-only
-    "C-b"        'wg-switch-to-buffer
-    "b"          'wg-switch-to-buffer
-    "d"          'wg-dired
-
-
-    ;; window moving and frame reversal
-
-    "<"          'wg-backward-transpose-window
-    ">"          'wg-transpose-window
-    "|"          'wg-reverse-frame-horizontally
-    "\\"         'wg-reverse-frame-vertically
-    "/"          'wg-reverse-frame-horizontally-and-vertically
-
-
-    ;; toggling
-
-    "C-i"        'wg-toggle-mode-line-display
-    "C-w"        'wg-toggle-morph
-
-
-    ;; echoing
-
-    "S-C-e"      'wg-echo-current-workgroup
-    "E"          'wg-echo-current-workgroup
-    "C-e"        'wg-echo-all-workgroups
-    "e"          'wg-echo-all-workgroups
-    "C-t"        'wg-echo-time
-    "t"          'wg-echo-time
-    "V"          'wg-echo-version
-    "C-m"        'wg-echo-last-message
-    "m"          'wg-echo-last-message
-
-
-    ;; misc
-
-    "A"          'wg-rename-workgroup
-    "!"          'wg-reset
-    "?"          'wg-help
-
-    )
-  "Workgroups' keymap.")
-
-
-(defun wg-make-minor-mode-map ()
-  "Return Workgroups' minor-mode-map, which contains all its
-remappings of standard commands."
-  (let ((map (make-sparse-keymap)))
-    (define-key map
-      [remap switch-to-buffer] 'wg-switch-to-buffer)
-    (define-key map
-      [remap switch-to-buffer-other-window] 'wg-switch-to-buffer-other-window)
-    (define-key map
-      [remap switch-to-buffer-other-frame] 'wg-switch-to-buffer-other-frame)
-    (define-key map
-      [remap next-buffer] 'wg-next-buffer)
-    (define-key map
-      [remap previous-buffer] 'wg-previous-buffer)
-    (define-key map
-      [remap kill-buffer] 'wg-kill-buffer)
-    (define-key map
-      [remap display-buffer] 'wg-display-buffer)
-    (define-key map
-      [remap insert-buffer] 'wg-insert-buffer)
-    (define-key map
-      [remap bury-buffer] 'wg-bury-buffer)
-    map))
-
-(defun wg-setup-minor-mode-map-entry ()
-  "Setup `wg-minor-mode-map-entry', and add it to
-`minor-mode-map-alist' if necessary."
-  (let ((map (wg-make-minor-mode-map)))
-    (if wg-minor-mode-map-entry
-        (setcdr wg-minor-mode-map-entry map)
-      (setq wg-minor-mode-map-entry (cons 'workgroups-mode map))
-      (add-to-list 'minor-mode-map-alist wg-minor-mode-map-entry))))
-
-
-
-;;; prefix key
-
-(defun wg-unset-prefix-key ()
-  "Restore the original definition of `wg-prefix-key'."
-  (wg-awhen (get 'wg-prefix-key :original)
-    (wg-dbind (key . def) it
-      (when (eq wg-map (lookup-key global-map key))
-        (global-set-key key def))
-      (put 'wg-prefix-key :original nil))))
-
-(defun wg-set-prefix-key ()
-  "Define `wg-prefix-key' as `wg-map' in `global-map'."
-  (wg-unset-prefix-key)
-  (let ((key wg-prefix-key))
-    (put 'wg-prefix-key :original (cons key (lookup-key global-map key)))
-    (global-set-key key wg-map)))
-
-
-
-;; advice
+;;; advice
 
 (defadvice switch-to-buffer (after wg-auto-associate-buffer)
   "Automatically associate the buffer with the current workgroup."
-  (when (and wg-buffer-list-filtration-on
-             wg-associate-buffer-on-switch-to-buffer)
-    (wg-awhen (wg-current-workgroup t)
-      (wg-workgroup-associate-buffer it ad-return-value 'auto t))))
+  (when wg-buffer-list-filtration-on
+    (wg-when-let ((wg (wg-current-workgroup t))
+                  (type wg-associate-buffer-on-switch-to-buffer))
+      (wg-workgroup-associate-buffer wg ad-return-value type t))))
 
 (defadvice set-window-buffer (after wg-auto-associate-buffer)
   "Automatically associate the buffer with the current workgroup."
-  (when (and wg-buffer-list-filtration-on
-             wg-associate-buffer-on-set-window-buffer)
-    (let ((frame (window-frame (ad-get-arg 0))))
-      (wg-awhen (wg-current-workgroup t frame)
-        (wg-workgroup-associate-buffer it (ad-get-arg 1) 'auto t)))))
+  (when wg-buffer-list-filtration-on
+    (wg-when-let ((frame (window-frame (ad-get-arg 0)))
+                  (wg (wg-current-workgroup t frame))
+                  (type wg-associate-buffer-on-set-window-buffer))
+      (wg-workgroup-associate-buffer wg (ad-get-arg 1) type t))))
 
 (defadvice bury-buffer (before wg-auto-dissociate-buffer)
   "Automatically dissociate the buffer from the current workgroup."
@@ -3748,14 +3619,227 @@ remappings of standard commands."
 
 
 
-;;; mode definition
+;;; keymaps
 
-(defun wg-query-for-save ()
-  "Query for save when `wg-dirty' is non-nil."
-  (or (not (wg-dirty-p))
-      (not (y-or-n-p "Save modified workgroups? "))
-      (call-interactively 'wg-save-workgroups)
-      t))
+(defvar wg-prefixed-map
+  (wg-fill-keymap (make-sparse-keymap)
+
+    ;; workgroup creation
+
+    (kbd "C-c")        'wg-create-workgroup
+    (kbd "c")          'wg-create-workgroup
+    (kbd "C")          'wg-clone-workgroup
+
+
+    ;; killing and yanking
+
+    (kbd "C-k")        'wg-kill-workgroup
+    (kbd "k")          'wg-kill-workgroup
+    (kbd "M-W")        'wg-kill-ring-save-base-wconfig
+    (kbd "M-w")        'wg-kill-ring-save-working-wconfig
+    (kbd "C-y")        'wg-yank-wconfig
+    (kbd "y")          'wg-yank-wconfig
+    (kbd "M-k")        'wg-kill-workgroup-and-buffers
+    (kbd "K")          'wg-delete-other-workgroups
+
+
+    ;; updating and reverting
+
+    (kbd "C-u")        'wg-update-workgroup
+    (kbd "u")          'wg-update-workgroup
+    (kbd "C-S-u")      'wg-update-all-workgroups
+    (kbd "U")          'wg-update-all-workgroups
+    (kbd "C-r")        'wg-revert-workgroup
+    (kbd "r")          'wg-revert-workgroup
+    (kbd "C-S-r")      'wg-revert-all-workgroups
+    (kbd "R")          'wg-revert-all-workgroups
+
+
+    ;; workgroup switching
+
+    (kbd "C-'")        'wg-switch-to-workgroup
+    (kbd "'")          'wg-switch-to-workgroup
+    (kbd "C-v")        'wg-switch-to-workgroup
+    (kbd "v")          'wg-switch-to-workgroup
+    (kbd "M-v")        'wg-switch-to-workgroup-other-frame
+    (kbd "C-j")        'wg-switch-to-workgroup-at-index
+    (kbd "j")          'wg-switch-to-workgroup-at-index
+    (kbd "0")          'wg-switch-to-workgroup-at-index-0
+    (kbd "1")          'wg-switch-to-workgroup-at-index-1
+    (kbd "2")          'wg-switch-to-workgroup-at-index-2
+    (kbd "3")          'wg-switch-to-workgroup-at-index-3
+    (kbd "4")          'wg-switch-to-workgroup-at-index-4
+    (kbd "5")          'wg-switch-to-workgroup-at-index-5
+    (kbd "6")          'wg-switch-to-workgroup-at-index-6
+    (kbd "7")          'wg-switch-to-workgroup-at-index-7
+    (kbd "8")          'wg-switch-to-workgroup-at-index-8
+    (kbd "9")          'wg-switch-to-workgroup-at-index-9
+    (kbd "C-p")        'wg-switch-to-workgroup-left
+    (kbd "p")          'wg-switch-to-workgroup-left
+    (kbd "C-n")        'wg-switch-to-workgroup-right
+    (kbd "n")          'wg-switch-to-workgroup-right
+    (kbd "M-p")        'wg-switch-to-workgroup-left-other-frame
+    (kbd "M-n")        'wg-switch-to-workgroup-right-other-frame
+    (kbd "C-a")        'wg-switch-to-previous-workgroup
+    (kbd "a")          'wg-switch-to-previous-workgroup
+
+
+    ;; wconfig undo/redo
+
+    (kbd "<left>")     'wg-undo-wconfig-change
+    (kbd "<right>")    'wg-redo-wconfig-change
+    (kbd "[")          'wg-undo-wconfig-change
+    (kbd "]")          'wg-redo-wconfig-change
+    (kbd "{")          'wg-undo-once-all-workgroups
+    (kbd "}")          'wg-redo-once-all-workgroups
+
+
+    ;; buffer-list
+
+    (kbd "+")          'wg-associate-buffer-with-workgroup
+    (kbd "-")          'wg-dissociate-buffer-from-workgroup
+    (kbd "=")          'wg-cycle-buffer-association-type
+    (kbd "*")          'wg-restore-workgroup-associated-buffers
+    (kbd "_")          'wg-purge-soft-associated-buffers
+    (kbd "M-b")        'wg-toggle-buffer-list-filtration
+    (kbd "(")          'wg-next-buffer
+    (kbd ")")          'wg-previous-buffer
+
+
+    ;; workgroup movement
+
+    (kbd "C-x")        'wg-swap-workgroups
+    (kbd "C-,")        'wg-offset-workgroup-left
+    (kbd "C-.")        'wg-offset-workgroup-right
+
+
+    ;; file and buffer
+
+    (kbd "C-s")        'wg-save-workgroups
+    (kbd "C-l")        'wg-find-workgroups-file
+    (kbd "M-l")        'wg-find-new-workgroups-file
+    (kbd "S")          'wg-update-all-workgroups-and-save
+    (kbd "C-f")        'wg-find-file
+    (kbd "S-C-f")      'wg-find-file-read-only
+    (kbd "C-b")        'wg-switch-to-buffer
+    (kbd "b")          'wg-switch-to-buffer
+    (kbd "d")          'wg-dired
+
+
+    ;; window moving and frame reversal
+
+    (kbd "<")          'wg-backward-transpose-window
+    (kbd ">")          'wg-transpose-window
+    (kbd "|")          'wg-reverse-frame-horizontally
+    (kbd "\\")         'wg-reverse-frame-vertically
+    (kbd "/")          'wg-reverse-frame-horizontally-and-vertically
+
+
+    ;; toggling
+
+    (kbd "C-i")        'wg-toggle-mode-line-display
+    (kbd "C-w")        'wg-toggle-morph
+
+
+    ;; echoing
+
+    (kbd "S-C-e")      'wg-echo-current-workgroup
+    (kbd "E")          'wg-echo-current-workgroup
+    (kbd "C-e")        'wg-echo-all-workgroups
+    (kbd "e")          'wg-echo-all-workgroups
+    (kbd "C-t")        'wg-echo-time
+    (kbd "t")          'wg-echo-time
+    (kbd "V")          'wg-echo-version
+    (kbd "C-m")        'wg-echo-last-message
+    (kbd "m")          'wg-echo-last-message
+
+
+    ;; misc
+
+    (kbd "A")          'wg-rename-workgroup
+    (kbd "!")          'wg-reset
+    (kbd "?")          'wg-help
+
+    )
+  "Make and return the keymap that sits on `wg-prefix-key'.")
+
+(defun wg-make-workgroups-mode-map ()
+  "Return Workgroups' minor-mode-map.
+This map includes `wg-prefixed-map' on `wg-prefix-key', as well
+as Workgroups' command remappings."
+  (setq
+   workgroups-mode-map
+   (wg-fill-keymap (make-sparse-keymap)
+     wg-prefix-key                          wg-prefixed-map
+     [remap switch-to-buffer]              'wg-switch-to-buffer
+     [remap switch-to-buffer-other-window] 'wg-switch-to-buffer-other-window
+     [remap switch-to-buffer-other-frame]  'wg-switch-to-buffer-other-frame
+     [remap next-buffer]                   'wg-next-buffer
+     [remap previous-buffer]               'wg-previous-buffer
+     [remap kill-buffer]                   'wg-kill-buffer
+     [remap display-buffer]                'wg-display-buffer
+     [remap insert-buffer]                 'wg-insert-buffer
+     [remap bury-buffer]                   'wg-bury-buffer)))
+
+(defvar wg-minibuffer-mode-map
+  (wg-fill-keymap (make-sparse-keymap)
+    (kbd "C-b")       'wg-magic-C-b
+    (kbd "C-c n")     'wg-next-buffer-list-filter
+    (kbd "C-c C-n")   'wg-next-buffer-list-filter
+    (kbd "C-S-b")     'wg-magic-C-S-b
+    (kbd "C-c p")     'wg-previous-buffer-list-filter
+    (kbd "C-c C-p")   'wg-previous-buffer-list-filter
+    (kbd "C-c a")     'wg-associate-first-match
+    (kbd "C-c C-a")   'wg-associate-first-match
+    (kbd "C-c d")     'wg-dissociate-first-match
+    (kbd "C-c C-d")   'wg-dissociate-first-match)
+  "`wg-minibuffer-mode's keymap.")
+
+
+
+;;; workgroups-everywhere
+
+(define-minor-mode workgroups-everywhere
+  "Use Workgroups' buffer-list-filters for all buffer selection with `read-buffer'."
+  :global t
+  :group 'workgroups
+  (wg-awhen (get 'workgroups-everywhere 'read-buffer-fn)
+    (when (eq read-buffer-function 'wg-read-buffer)
+      (setq read-buffer-function it))
+    (put 'workgroups-everywhere 'read-buffer-fn nil))
+  (when workgroups-everywhere
+    (put 'workgroups-everywhere 'read-buffer-fn read-buffer-function)
+    (setq read-buffer-function 'wg-read-buffer)))
+
+
+
+;;; wg-minibuffer-mode
+
+(defvar wg-minibuffer-mode-minor-mode-map-entry
+  (cons 'wg-minibuffer-mode wg-minibuffer-mode-map)
+  "`wg-minibuffer-mode's entry in `minor-mode-map-alist'.")
+
+(define-minor-mode wg-minibuffer-mode
+  "Minor mode for Workgroups' minibuffer commands."
+  :global t
+  :group 'workgroups
+  (when wg-minibuffer-mode
+    (add-to-list 'minor-mode-map-alist
+                 wg-minibuffer-mode-minor-mode-map-entry)))
+
+(defun wg-turn-on-minibuffer-mode ()
+  "`minibuffer-setup-hook' to turn on `wg-minibuffer-mode'."
+  (when wg-current-buffer-list-filter-id
+    (wg-minibuffer-mode 1)))
+
+(defun wg-turn-off-minibuffer-mode ()
+  "`minibuffer-exit-hook' to turn off `wg-minibuffer-mode'."
+  (when wg-current-buffer-list-filter-id
+    (wg-minibuffer-mode -1)))
+
+
+
+;;; workgroups-mode
 
 (defun wg-save-workgroups-on-emacs-exit ()
   "Conditionally call `wg-query-for-save'.
@@ -3789,43 +3873,45 @@ Called when `workgroups-mode' is turned off."
    'iswitchb-make-buflist-hook       'wg-set-iswitchb-buffer-list
    'kill-buffer-hook                 'wg-auto-dissociate-buffer-hook))
 
-(define-minor-mode workgroups-mode
-  "This turns `workgroups-mode' on and off.
+(defun wg-add-workgroups-mode-minor-mode-entries ()
+  "Add Workgroups' minor-mode entries.
+Adds entries to `minor-mode-list', `minor-mode-alist' and
+`minor-mode-map-alist'."
+  (pushnew 'workgroups-mode minor-mode-list)
+  (pushnew '(workgroups-mode " wg") minor-mode-alist :test 'equal)
+  (setq minor-mode-map-alist
+        (cons (cons 'workgroups-mode (wg-make-workgroups-mode-map))
+              (delete (assoc 'workgroups-mode minor-mode-map-alist)
+                      minor-mode-map-alist))))
+
+(defun workgroups-mode (&optional arg)
+  "Turns `workgroups-mode' on and off.
 If ARG is null, toggle `workgroups-mode'.
 If ARG is an integer greater than zero, turn on `workgroups-mode'.
 If ARG is an integer less one, turn off `workgroups-mode'.
 If ARG is anything else, turn on `workgroups-mode'."
-  :lighter     " wg"
-  :init-value  nil
-  :global      t
-  :group       'workgroups
+  (interactive (list current-prefix-arg))
+  (setq workgroups-mode
+        (cond ((not arg) (not workgroups-mode))
+              ((integerp arg) (if (> arg 0) t nil))
+              (t)))
   (cond
    (workgroups-mode
-    (wg-add-or-remove-workgroups-hooks nil)
+    (wg-add-workgroups-mode-minor-mode-entries)
     (wg-enable-all-advice)
-    (wg-set-prefix-key)
-    (wg-mode-line-add-display)
-    (wg-setup-minor-mode-map-entry)
+    (wg-add-or-remove-workgroups-hooks nil)
+    (wg-add-mode-line-display)
     (run-hooks 'workgroups-mode-hook))
    (t
     (wg-save-workgroups-on-workgroups-mode-exit)
-    (wg-add-or-remove-workgroups-hooks t)
     (wg-disable-all-advice)
-    (wg-unset-prefix-key)
-    (wg-mode-line-remove-display)
-    (run-hooks 'workgroups-mode-exit-hook))))
-
-(define-minor-mode workgroups-everywhere
-  "Use Workgroups' buffer-list-filters for all buffer selection with `read-buffer'."
-  :global t
-  :group 'workgroups
-  (wg-awhen (get 'workgroups-everywhere 'read-buffer-fn)
-    (when (eq read-buffer-function 'wg-read-buffer)
-      (setq read-buffer-function it))
-    (put 'workgroups-everywhere 'read-buffer-fn nil))
-  (when workgroups-everywhere
-    (put 'workgroups-everywhere 'read-buffer-fn read-buffer-function)
-    (setq read-buffer-function 'wg-read-buffer)))
+    (wg-add-or-remove-workgroups-hooks t)
+    (wg-remove-mode-line-display)
+    (run-hooks 'workgroups-mode-exit-hook)))
+  (wg-fontified-message
+    (:cmd "Workgroups Mode: ")
+    (:msg (if workgroups-mode "on" "off")))
+  workgroups-mode)
 
 
 
