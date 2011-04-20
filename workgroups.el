@@ -1,7 +1,6 @@
 ;;; workgroups.el --- Workgroups For Windows (for Emacs)
 ;;
 ;; Workgroups is an Emacs session manager providing window-configuration
-;; switching, persistence, undo/redo, killing/yanking, animated morphing,
 ;; per-workgroup buffer-lists, and more.
 
 ;; Copyright (C) 2010 tlh <thunkout@gmail.com>
@@ -29,7 +28,7 @@
 
 ;;; Commentary:
 ;;
-;; See the file README.md in `workgroups.el's directory
+;; See the file README.md in this directory
 ;;
 ;;; Installation:
 ;;
@@ -47,6 +46,7 @@
 ;; LS, HS, LB and HB always refer to the LOW-SIDE, HIGH-SIDE, LOW-BOUND
 ;;   and HIGH-BOUND of a bounds list.  See `wg-with-bounds'.
 ;; WGBUF always refers to a Workgroups buffer object.
+
 
 
 ;;; Code:
@@ -429,7 +429,8 @@ Otherwise, don't remap."
   :group 'workgroups)
 
 (defcustom wg-remap-bury-buffer 'bury
-  "`banish' means remap `bury-buffer' to `wg-banish-buffer'.
+  "Non-nil means remap `bury-buffer'.
+`banish' means remap `bury-buffer' to `wg-banish-buffer'.
 `bury' or other non-nil means remap `bury-buffer' to
 `wg-bury-buffer'.  Otherwise, don't remap."
   :type 'boolean
@@ -495,10 +496,8 @@ wrapped status when `wg-morph' is complete."
          (custom-set-default sym val)
          (force-mode-line-update)))
 
-(defcustom wg-mode-line-use-faces nil
-  "Non-nil means use faces in the mode-line display.
-Provided because it can be difficult to read the fontified
-mode-line under certain color settings."
+(defcustom wg-mode-line-use-faces t
+  "Non-nil means use faces in the mode-line display."
   :type 'boolean
   :group 'workgroups)
 
@@ -611,7 +610,7 @@ exiting the minibuffer .")
   "Holds the previous minibuffer contents for re-insertion when
 the buffer-list-filter is cycled.")
 
-(defvar wg-ido-translations
+(defvar wg-ido-method-translations
   `((switch-to-buffer              . selected-window)
     (switch-to-buffer-other-window . other-window)
     (switch-to-buffer-other-frame  . other-frame)
@@ -620,7 +619,7 @@ the buffer-list-filter is cycled.")
     (display-buffer                . display))
   "Alist mapping buffer commands to ido buffer methods.")
 
-(defvar wg-iswitchb-translations
+(defvar wg-iswitchb-method-translations
   `((switch-to-buffer              . samewindow)
     (switch-to-buffer-other-window . otherwindow)
     (switch-to-buffer-other-frame  . otherframe)
@@ -679,6 +678,16 @@ stable, but is left here for the time being.")
 
 ;;; faces
 
+;; (defun font-lock-function-name-face () "font-lock-doc-face")
+;; default
+;; font-lock-keyword-face (defun ())
+;; :font-lock-builtin-face
+;; "font-lock-string-face"
+;; ;; font-lock-comment-delimiter-face
+;; `font-lock-constant-face'
+;; (defvar font-lock-variable-name-face 1 )
+
+
 (defmacro wg-defface (face key spec doc &rest args)
   "`defface' wrapper adding a lookup key used by `wg-fontify'."
   (declare (indent 2))
@@ -686,54 +695,94 @@ stable, but is left here for the time being.")
      (pushnew (cons ,key ',face) wg-face-abbrevs :test #'equal)
      (defface ,face ,spec ,doc ,@args)))
 
+;; (wg-defface wg-current-workgroup-face :cur
+;;   '((((class color)) (:foreground "white")))
+;;   "Face used for the name of the current workgroup in the list display."
+;;   :group 'workgroups)
+
 (wg-defface wg-current-workgroup-face :cur
-  '((((class color)) (:foreground "white")))
-  "Face used for the name of the current workgroup in the list display."
+  '((t :inherit font-lock-keyword-face :bold nil))
+  "Face used for current elements in list displays."
   :group 'workgroups)
 
+;; (wg-defface wg-previous-workgroup-face :prev
+;;   '((((class color)) (:foreground "light sky blue")))
+;;   "Face used for the name of the previous workgroup in the list display."
+;;   :group 'workgroups)
+
 (wg-defface wg-previous-workgroup-face :prev
-  '((((class color)) (:foreground "light sky blue")))
+  '((t :inherit font-lock-doc-face :bold nil))
   "Face used for the name of the previous workgroup in the list display."
   :group 'workgroups)
 
+;; (wg-defface wg-other-workgroup-face :other
+;;   '((((class color)) (:foreground "light slate grey")))
+;;   "Face used for the names of other workgroups in the list display."
+;;   :group 'workgroups)
+
 (wg-defface wg-other-workgroup-face :other
-  '((((class color)) (:foreground "light slate grey")))
+  '((t :inherit default :bold nil))
   "Face used for the names of other workgroups in the list display."
   :group 'workgroups)
 
+;; (wg-defface wg-command-face :cmd
+;;   '((((class color)) (:foreground "aquamarine")))
+;;   "Face used for command/operation strings."
+;;   :group 'workgroups)
+
 (wg-defface wg-command-face :cmd
-  '((((class color)) (:foreground "aquamarine")))
+  '((t :inherit font-lock-function-name-face :bold nil))
   "Face used for command/operation strings."
   :group 'workgroups)
 
+;; (wg-defface wg-divider-face :div
+;;   '((((class color)) (:foreground "light slate blue")))
+;;   "Face used for dividers."
+;;   :group 'workgroups)
+
 (wg-defface wg-divider-face :div
-  '((((class color)) (:foreground "light slate blue")))
+  '((t :inherit font-lock-comment-delimiter-face :bold nil))
   "Face used for dividers."
   :group 'workgroups)
 
+;; (wg-defface wg-brace-face :brace
+;;   '((((class color)) (:foreground "light slate blue")))
+;;   "Face used for left and right braces."
+;;   :group 'workgroups)
+
 (wg-defface wg-brace-face :brace
-  '((((class color)) (:foreground "light slate blue")))
+  '((t :inherit font-lock-comment-delimiter-face :bold nil))
   "Face used for left and right braces."
   :group 'workgroups)
 
+;; (wg-defface wg-message-face :msg
+;;   '((((class color)) (:foreground "light sky blue")))
+;;   "Face used for messages."
+;;   :group 'workgroups)
+
 (wg-defface wg-message-face :msg
-  '((((class color)) (:foreground "light sky blue")))
+  '((t :inherit font-lock-string-face :bold nil))
   "Face used for messages."
   :group 'workgroups)
 
+;; (wg-defface wg-mode-line-face :mode
+;;   '((((class color)) (:foreground "light sky blue")))
+;;   "Face used for workgroup position and name in the mode-line display."
+;;   :group 'workgroups)
+
 (wg-defface wg-mode-line-face :mode
-  '((((class color)) (:foreground "light sky blue")))
+  '((t :inherit font-lock-doc-face :bold nil))
   "Face used for workgroup position and name in the mode-line display."
   :group 'workgroups)
 
-(wg-defface wg-filename-face :file
-  '((((class color)) (:foreground "light sky blue")))
-  "Face used for filenames."
-  :group 'workgroups)
+;; (wg-defface wg-filename-face :file
+;;   '((((class color)) (:foreground "light sky blue")))
+;;   "Face used for filenames."
+;;   :group 'workgroups)
 
-(wg-defface wg-frame-face :frame
-  '((((class color)) (:foreground "white")))
-  "Face used for frame names."
+(wg-defface wg-filename-face :file
+  '((t :inherit font-lock-keyword-face :bold nil))
+  "Face used for filenames."
   :group 'workgroups)
 
 
@@ -1029,6 +1078,12 @@ NAME non-nil means return their names instead."
   (dolist (pair (wg-partition pairs 2))
     (funcall (if remove 'remove-hook 'add-hook)
              (car pair) (cadr pair))))
+
+(defun wg-get-first-buffer-matching-regexp (regexp &optional buffer-list)
+  "Return the first buffer in BUFFER-LIST with a name matching REGEXP.
+BUFFER-LIST should contain buffer objects and/or buffer names."
+  (wg-get1 (buffer (or buffer-list (buffer-list)))
+    (string-match regexp (if (stringp buffer) buffer (buffer-name buffer)))))
 
 
 
@@ -1615,7 +1670,8 @@ Assumes both FROM and TO fit in `selected-frame'."
             (wg-restore-window-tree from)
             (redisplay))
         (error (wg-dbind (sym data) err
-                 (unless (or (and (stringp data) (string-match "too small" data))
+                 (unless (or (and (stringp data)
+                                  (string-match "too small" data))
                              (not noerror))
                    (signal sym data))))))))
 
@@ -2708,17 +2764,32 @@ DEFAULT non-nil specifies the first completion candidate."
         (ecase (wg-read-buffer-mode)
           (ido
            (ido-buffer-internal
-            (wg-aget wg-ido-translations command) nil
+            (wg-aget wg-ido-method-translations command) nil
             (wg-buffer-list-filter-prompt prompt)
             nil wg-minibuffer-contents))
           (iswitchb
            (wg-iswitchb-internal
-            (wg-aget wg-iswitchb-translations command)
+            (wg-aget wg-iswitchb-method-translations command)
             (wg-buffer-list-filter-prompt prompt)
             nil wg-minibuffer-contents))
           (fallback
-           (let (read-buffer-function) (call-interactively command))))
+           (let (read-buffer-function)
+             (call-interactively command))))
         (wg-message (wg-buffer-command-display))))))
+
+(defun wg-get-sneaky-ido-entry-buffer-replacement (&optional regexp)
+  "Return a sneaky live buffer to replace `ido-entry-buffer'.
+This is a workaround for an ido misfeature.  IMHO, ido should
+respect the value of `ido-temp-list' after
+`ido-make-buffer-list-hook' has been run, since the user's
+preference, if any, has been expressed in that hook.  But ido
+conditionally rotates the first match to the end after the hook
+has been run, based on the value of `ido-entry-buffer'.  So as a
+workaround, we set `ido-entry-buffer' to a buffer that will never
+be a completion candidate under normal circumstances.  See
+`wg-ido-entry-buffer-replacement-regexp'."
+  (wg-get-first-buffer-matching-regexp
+   (or regexp wg-ido-entry-buffer-replacement-regexp)))
 
 (defun wg-promote-default-in-buffer-list (buflist &optional default)
   "Adjust BUFLIST based on DEFAULT.
@@ -2743,21 +2814,6 @@ at the beginning of BUFLIST.  Otherwise rotate BUFLIST."
          (wg-finalize-buffer-list
           (wg-promote-default-in-buffer-list
            (wg-filtered-buffer-list t))))))
-
-(defun wg-get-sneaky-ido-entry-buffer-replacement (&optional regexp)
-  "Return a sneaky live buffer to replace `ido-entry-buffer'.
-This is a workaround for an ido misfeature.  IMHO, ido should
-respect the value of `ido-temp-list' after
-`ido-make-buffer-list-hook' has been run, since the user's
-preference, if any, has been expressed in that hook.  But ido
-conditionally rotates the first match to the end after the hook
-has been run, based on the value of `ido-entry-buffer'.  So as a
-workaround, we set `ido-entry-buffer' to a buffer that will never
-be a completion candidate under normal circumstances.  See
-`wg-ido-entry-buffer-replacement-regexp'."
-  (wg-get1 (buffer (buffer-list))
-    (string-match (or regexp wg-ido-entry-buffer-replacement-regexp)
-                  (buffer-name buffer))))
 
 (defun wg-set-ido-buffer-list ()
   "Set `ido-temp-list' with `wg-set-buffer-list-symbol'.
