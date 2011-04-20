@@ -2041,14 +2041,14 @@ Binds `wg-current-workgroup', `wg-current-buffer-command' and
   (wg-with-gensyms (order status)
     `(let* ((wg-current-workgroup (wg-current-workgroup t))
             (wg-current-buffer-command ,command)
-            (,order (wg-buffer-list-filter-order wg-current-workgroup ,command))
-            (wg-minibuffer-contents nil))
-       (catch 'result
+            (wg-minibuffer-contents nil)
+            (,order (wg-buffer-list-filter-order wg-current-workgroup ,command)))
+       (catch 'wg-result
          (while 'your-mom
            (let* ((wg-current-buffer-list-filter-id (car ,order))
-                  (,status (catch 'action (list 'done (progn ,@body)))))
+                  (,status (catch 'wg-action (list 'done (progn ,@body)))))
              (case (car ,status)
-               (done (throw 'result (cadr ,status)))
+               (done (throw 'wg-result (cadr ,status)))
                (next (setq ,order (wg-rotate-list ,order 1))
                      (setq wg-minibuffer-contents (cadr ,status)))
                (prev (setq ,order (wg-rotate-list ,order -1))
@@ -2544,9 +2544,8 @@ current and previous workgroups."
     (:msg (wg-get-buffer-list-filter-val blf-id 'indicator))
     (:div ")")))
 
-;; FIXME: get rid of METHOD arg
-(defun wg-buffer-list-filter-prompt (prompt &optional workgroup method blf-id)
-  "Return a prompt string indicating WORKGROUP and buffer-list-filter BLF-ID."
+(defun wg-buffer-list-filter-prompt (prompt &optional workgroup blf-id)
+  "Return a prompt string from PROMPT indicating WORKGROUP and BLF-ID."
   (wg-fontify
     (:cmd prompt) " "
     (wg-buffer-list-filter-display workgroup blf-id)
@@ -2652,27 +2651,7 @@ duplicated from `iswitchb', so is similarly shitty."
            (kill-buffer buffer))
           (t (iswitchb-visit-buffer buffer)))))
 
-;; ;; FIXME: maybe `wg-default-match' to fix `wg-kill-buffer' ?
-;; (defun wg-buffer-internal (command &optional prompt default)
-;;   "Return a switch-to-buffer fn from `wg-read-buffer-mode'."
-;;   (if (not (wg-filter-buffer-list-p))
-;;       (call-interactively (wg-prior-mapping workgroups-mode command))
-;;     (wg-with-buffer-list-filters command
-;;       (ecase (wg-read-buffer-mode)
-;;         (ido
-;;          (ido-buffer-internal
-;;           (wg-aget wg-ido-translations command) nil
-;;           (wg-buffer-list-filter-prompt prompt)
-;;           default wg-minibuffer-contents))
-;;         (iswitchb
-;;          (wg-iswitchb-internal
-;;           (wg-aget wg-iswitchb-translations command)
-;;           (wg-buffer-list-filter-prompt prompt)
-;;           default wg-minibuffer-contents))
-;;         (fallback
-;;          (let (read-buffer-function) (call-interactively command))))
-;;       (wg-message (wg-buffer-command-display)))))
-
+;; FIXME: docstring this, and move to vars section
 (defvar wg-buffer-internal-default-buffer nil "")
 
 ;; FIXME: maybe `wg-default-match' to fix `wg-kill-buffer' ?
@@ -2687,43 +2666,15 @@ duplicated from `iswitchb', so is similarly shitty."
            (ido-buffer-internal
             (wg-aget wg-ido-translations command) nil
             (wg-buffer-list-filter-prompt prompt)
-            default wg-minibuffer-contents))
+            nil wg-minibuffer-contents))
           (iswitchb
            (wg-iswitchb-internal
             (wg-aget wg-iswitchb-translations command)
             (wg-buffer-list-filter-prompt prompt)
-            default wg-minibuffer-contents))
+            nil wg-minibuffer-contents))
           (fallback
            (let (read-buffer-function) (call-interactively command))))
         (wg-message (wg-buffer-command-display))))))
-
-;; (defun wg-rotate-buflist-if-necessary (buflist &optional buffer-command)
-;;   "Conditionally move the first buffer in BUFLIST to the end.
-;; Currently `kill-buffer' is the only command for which BUFLIST isn't rotated."
-;;   (if (eq (or buffer-command wg-current-buffer-command) 'kill-buffer)
-;;       buflist (wg-rotate-list buflist)))
-
-;; ido-rotate-temp
-
-;; ;; FIXME: update this docstring
-;; (defun wg-final-buffer-list (buflist &optional buffer-command)
-;;   "Conditionally move the first buffer in BUFLIST to the end.
-;; Currently `kill-buffer' is the only command for which BUFLIST isn't rotated."
-;;   (let* ((command (or buffer-command wg-current-buffer-command))
-;;          (temp (if (eq command 'kill-buffer) buflist (wg-rotate-list buflist))))
-;;     (if (not wg-buffer-internal-default-buffer) temp
-;;       (cons wg-buffer-internal-default-buffer
-;;             (remove wg-buffer-internal-default-buffer temp)))))
-
-;; ;; FIXME: update this docstring
-;; (defun wg-final-filtered-buffer-list (buflist &optional buffer-command)
-;;   "Conditionally move the first buffer in BUFLIST to the end.
-;; Currently `kill-buffer' is the only command for which BUFLIST isn't rotated."
-;;   (let ((command (or buffer-command wg-current-buffer-command))
-;;         (temp (if (eq command 'kill-buffer) buflist (wg-rotate-list buflist))))
-;;     (if (not wg-buffer-internal-default-buffer) temp
-;;       (cons wg-buffer-internal-default-buffer
-;;             (remove wg-buffer-internal-default-buffer temp)))))
 
 ;; FIXME: update this docstring
 (defun wg-final-filtered-buffer-list (buflist &optional buffer-command)
@@ -2734,28 +2685,34 @@ Currently `kill-buffer' is the only command for which BUFLIST isn't rotated."
         buflist
       (wg-rotate-list buflist))))
 
-;; (defun wg-final-filtered-buffer-list (buflist &optional buffer-command)
-;;   buflist)
-
-;; (defun wg-set-buflist-symbol (symbol)
-;;   "`set' SYMBOL to the (possibly rotated) filtered buffer-list."
-;;   (when (and wg-current-buffer-list-filter-id (boundp symbol))
-;;     (set symbol (wg-rotate-buflist-if-necessary (wg-filtered-buffer-list t)))))
-
 (defun wg-set-buflist-symbol (symbol)
   "`set' SYMBOL to the (possibly rotated) filtered buffer-list."
   (when (and wg-current-buffer-list-filter-id (boundp symbol))
     (set symbol (wg-final-filtered-buffer-list (wg-filtered-buffer-list t)))))
 
+(defvar wg-ido-entry-buffer-replacement-regexp "^ .*Minibuf.*$"
+  "Regexp matching the name of a buffer to replace `ido-entry-buffer'.
+See `wg-get-sneaky-ido-entry-buffer-replacement'.")
+
+(defun wg-get-sneaky-ido-entry-buffer-replacement (&optional regexp)
+  "Return a sneaky live buffer to replace `ido-entry-buffer'.
+This is a workaround for an ido misfeature.  IMHO, ido should
+respect the value of `ido-temp-list' after
+`ido-make-buffer-list-hook' has been run, since the user's
+preference, if any, has been expressed in that hook.  But ido
+conditionally rotates the first match to the end after the hook
+has been run, based on the value of `ido-entry-buffer'.  This
+fixes that."
+  (wg-get1 (buffer (buffer-list))
+    (string-match (or regexp wg-ido-entry-buffer-replacement-regexp)
+                  (buffer-name buffer))))
+
 (defun wg-set-ido-buffer-list ()
   "Set `ido-temp-list' with `wg-set-buflist-symbol'.
 Added to `ido-make-buffer-list-hook'."
-  ;; (when (and (boundp 'ido-rotate) ido-rotate) (error "foo"))
-  ;; (when (boundp 'ido-set-default-item) (setq ido-set-default-item nil))
-  ;; (setq ido-rotate-temp nil)
-  ;; (setq ido-rotate nil)
-  ;; (wg-set-buflist-symbol 'ido-matches)
-  (wg-set-buflist-symbol 'ido-temp-list))
+  (wg-set-buflist-symbol 'ido-temp-list)
+  (when (boundp 'ido-entry-buffer)
+    (setq ido-entry-buffer (wg-get-sneaky-ido-entry-buffer-replacement))))
 
 (defun wg-set-iswitchb-buffer-list ()
   "Set `iswitchb-temp-buflist' with `wg-set-buflist-symbol'.
@@ -2804,8 +2761,8 @@ Added to `iswitchb-make-buflist-hook'."
     (wg-read-object
      (or prompt (format "Name (default: %S): " default))
      (lambda (new) (and (stringp new)
-                        (not (equal new ""))
-                        (wg-unique-workgroup-name-p new)))
+                   (not (equal new ""))
+                   (wg-unique-workgroup-name-p new)))
      "Please enter a unique, non-empty name"
      nil nil nil nil default)))
 
@@ -3531,12 +3488,12 @@ command's docstring;  But why, when there's `apropos-command'?"
 (defun wg-next-buffer-list-filter ()
   "Trigger a switch to the next buffer-list-filter."
   (interactive)
-  (throw 'action (list 'next (minibuffer-contents))))
+  (throw 'wg-action (list 'next (minibuffer-contents))))
 
 (defun wg-previous-buffer-list-filter ()
   "Trigger a switch to the previous buffer-list-filter."
   (interactive)
-  (throw 'action (list 'prev (minibuffer-contents))))
+  (throw 'wg-action (list 'prev (minibuffer-contents))))
 
 (defun wg-magic-C-b ()
   "Call `backward-char' unless `point' is right after the prompt,
