@@ -126,20 +126,21 @@ it's found with `wg-find-workgroups-file'."
   :type 'boolean
   :group 'workgroups)
 
+;; FIXME: add update-all-and-save and query-update-all-and-save, possibly
 (defcustom wg-emacs-exit-save-behavior 'query
-  "The way save is handled when Emacs exits.
+  "Determines save behavior on Emacs exit.
 Possible values:
-`save'     Call `wg-save-workgroups' when there are unsaved changes
 `nosave'   Exit Emacs without saving changes
+`save'     Call `wg-save-workgroups' when there are unsaved changes
 `query'    Query the user if there are unsaved changes"
   :type 'symbol
   :group 'workgroups)
 
 (defcustom wg-workgroups-mode-exit-save-behavior 'query
-  "The way save is handled when Workgroups exits.
+  "Determines save behavior on `workgroups-mode' exit.
 Possible values:
-`save'     Call `wg-save-workgroups' when there are unsaved changes
 `nosave'   Exit `workgroups-mode' without saving changes
+`save'     Call `wg-save-workgroups' when there are unsaved changes
 `query'    Query the user if there are unsaved changes"
   :type 'symbol
   :group 'workgroups)
@@ -359,20 +360,23 @@ to wrap in the miniwindow."
   :type 'boolean
   :group 'workgroups)
 
-(defcustom wg-associate-buffer-on-switch-to-buffer 'soft
-  "Associate buffers with the current workgroup on `switch-to-buffer'.
-`soft' means soft-associate the buffer.
-`hard' means hard-associate the buffer.
-nil means don't associate the buffer."
-  :type 'symbol
-  :group 'workgroups)
+(defcustom wg-buffer-auto-association 'soft
+  "Specifies the behavior for auto-association of buffers with workgroups.
 
-(defcustom wg-associate-buffer-on-set-window-buffer 'soft
-  "Associate buffers with the current workgroup on `set-window-buffer'.
-`soft' means soft-associate the buffer.
-`hard' means hard-associate the buffer.
-nil means don't associate the buffer."
-  :type 'symbol
+FIXME: talk about auto-association in general
+
+nil means don't auto-associate buffers with workgroups.
+`soft' means soft-associate buffers with workgroups.
+`hard' means hard-associate buffers with workgroups.
+Any other (non-function) object means soft-associate buffers with
+workgroups.
+
+The value can also be a function (a function-symbol or a lambda).  The
+function should accept two arguments -- a workgroup and a buffer
+-- and should return one of the above values.
+
+FIXME: describe the workgroup-parameter override"
+  :type 'sexp
   :group 'workgroups)
 
 (defcustom wg-dissociate-buffer-on-kill-buffer t
@@ -701,7 +705,7 @@ stable, but is left here for the time being.")
 ;;   :group 'workgroups)
 
 (wg-defface wg-current-workgroup-face :cur
-  '((t :inherit font-lock-keyword-face :bold nil))
+  '((t :inherit font-lock-constant-face :bold nil))
   "Face used for current elements in list displays."
   :group 'workgroups)
 
@@ -711,7 +715,7 @@ stable, but is left here for the time being.")
 ;;   :group 'workgroups)
 
 (wg-defface wg-previous-workgroup-face :prev
-  '((t :inherit font-lock-doc-face :bold nil))
+  '((t :inherit font-lock-keyword-face :bold nil))
   "Face used for the name of the previous workgroup in the list display."
   :group 'workgroups)
 
@@ -721,7 +725,7 @@ stable, but is left here for the time being.")
 ;;   :group 'workgroups)
 
 (wg-defface wg-other-workgroup-face :other
-  '((t :inherit default :bold nil))
+  '((t :inherit font-lock-string-face :bold nil))
   "Face used for the names of other workgroups in the list display."
   :group 'workgroups)
 
@@ -741,7 +745,7 @@ stable, but is left here for the time being.")
 ;;   :group 'workgroups)
 
 (wg-defface wg-divider-face :div
-  '((t :inherit font-lock-comment-delimiter-face :bold nil))
+  '((t :inherit font-lock-builtin-face :bold nil))
   "Face used for dividers."
   :group 'workgroups)
 
@@ -751,7 +755,12 @@ stable, but is left here for the time being.")
 ;;   :group 'workgroups)
 
 (wg-defface wg-brace-face :brace
-  '((t :inherit font-lock-comment-delimiter-face :bold nil))
+  '((t :inherit font-lock-builtin-face :bold nil))
+  "Face used for left and right braces."
+  :group 'workgroups)
+
+(defface wg-brace-face
+  '((t :inherit font-lock-builtin-face :bold nil))
   "Face used for left and right braces."
   :group 'workgroups)
 
@@ -805,9 +814,8 @@ Iterative to prevent stack overflow."
         (setq list (nthcdr (or step n) list)))
       (nreverse acc)))
 
-  (defun wg-range (end &optional start)
-    "Return a list of integers up to but not including END.
-START defaults to 0."
+  (defun wg-range (start end)
+    "Return a list of integers from START up to but not including END."
     (let ((start (or start 0)) accum)
       (dotimes (i (- end start) (nreverse accum))
         (push (+ start i) accum))))
@@ -1534,12 +1542,30 @@ Otherwise, reverse WTREE vertically."
       (inner wg-window-tree)
       (wg-awhen wg-selected-window (select-window it)))))
 
+;; (defun wg-restore-wconfig (wconfig)
+;;   "Restore WCONFIG in `selected-frame'."
+;;   (wg-barf-on-active-minibuffer)
+;;   (let ((frame (selected-frame))
+;;         wg-associate-buffer-on-set-window-buffer
+;;         wg-associate-buffer-on-switch-to-buffer
+;;         wtree)
+;;     (wg-bind-params wconfig (left top sbars sbwid)
+;;       (setq wtree (wg-set-frame-size-and-scale-wtree wconfig frame))
+;;       (when (and wg-restore-frame-position left top)
+;;         (set-frame-position frame left top))
+;;       (when (wg-morph-p)
+;;         (wg-morph (wg-serialize-window-tree (window-tree))
+;;                   wtree wg-morph-no-error))
+;;       (wg-restore-window-tree wtree)
+;;       (when wg-restore-scroll-bars
+;;         (set-frame-parameter frame 'vertical-scroll-bars sbars)
+;;         (set-frame-parameter frame 'scroll-bar-width sbwid)))))
+
 (defun wg-restore-wconfig (wconfig)
   "Restore WCONFIG in `selected-frame'."
   (wg-barf-on-active-minibuffer)
   (let ((frame (selected-frame))
-        wg-associate-buffer-on-set-window-buffer
-        wg-associate-buffer-on-switch-to-buffer
+        wg-buffer-auto-association
         wtree)
     (wg-bind-params wconfig (left top sbars sbwid)
       (setq wtree (wg-set-frame-size-and-scale-wtree wconfig frame))
@@ -1752,8 +1778,8 @@ Emacs buffer-name string."
 
 (defun wg-make-workgroup (&rest key-value-pairs)
   "Return a new workgroup with KEY-VALUE-PAIRS."
-  `(workgroup ,@(mapcar (lambda (kvp) (cons (car kvp) (cadr kvp)))
-                        (wg-partition key-value-pairs 2))))
+  `(workgroup ,@(wg-docar (kvp (wg-partition key-value-pairs 2))
+                  (cons (car kvp) (cadr kvp)))))
 
 (defun wg-get-workgroup (key val &optional noerror)
   "Return the workgroup whose KEY equals VAL or error."
@@ -2778,20 +2804,21 @@ DEFAULT non-nil specifies the first completion candidate."
         (wg-message (wg-buffer-command-display))))))
 
 (defun wg-get-sneaky-ido-entry-buffer-replacement (&optional regexp)
-  "Return a sneaky live buffer to replace `ido-entry-buffer'.
+  "Return a live buffer to replace `ido-entry-buffer'.
 This is a workaround for an ido misfeature.  IMHO, ido should
 respect the value of `ido-temp-list' after
 `ido-make-buffer-list-hook' has been run, since the user's
-preference, if any, has been expressed in that hook.  But ido
-conditionally rotates the first match to the end after the hook
-has been run, based on the value of `ido-entry-buffer'.  So as a
-workaround, we set `ido-entry-buffer' to a buffer that will never
-be a completion candidate under normal circumstances.  See
+preference for the final value of `ido-temp-list', if any, has
+been expressed in that hook.  But ido conditionally rotates the
+first match to the end after the hook has been run, based on the
+value of `ido-entry-buffer'.  So as a workaround, set
+`ido-entry-buffer' to a buffer that will never be a completion
+candidate under normal circumstances.  See
 `wg-ido-entry-buffer-replacement-regexp'."
   (wg-get-first-buffer-matching-regexp
    (or regexp wg-ido-entry-buffer-replacement-regexp)))
 
-(defun wg-promote-default-in-buffer-list (buflist &optional default)
+(defun wg-adjust-buffer-list-default (buflist &optional default)
   "Adjust BUFLIST based on DEFAULT.
 DEFAULT is the default completion candidate, and defaults to
 `wg-buffer-internal-default-buffer'.  Non-nil, this gets placed
@@ -2812,7 +2839,7 @@ at the beginning of BUFLIST.  Otherwise rotate BUFLIST."
   (when (and wg-current-buffer-list-filter-id (boundp symbol))
     (set symbol
          (wg-finalize-buffer-list
-          (wg-promote-default-in-buffer-list
+          (wg-adjust-buffer-list-default
            (wg-filtered-buffer-list t))))))
 
 (defun wg-set-ido-buffer-list ()
@@ -2932,13 +2959,11 @@ Use `current-prefix-arg' for N if non-nil.  Otherwise N defaults to 1."
 (macrolet
     ((define-wg-switch-to-workgroup-at-index-range (num)
        `(progn
-          ,@(mapcar
-             (lambda (i)
-               `(defun ,(intern (format "wg-switch-to-workgroup-at-index-%d" i)) ()
-                  ,(format "Switch to the workgroup at index %d." i)
-                  (interactive)
-                  (wg-switch-to-workgroup-at-index ,i)))
-             (wg-range num)))))
+          ,@(wg-docar (i (wg-range 0 num))
+              `(defun ,(intern (format "wg-switch-to-workgroup-at-index-%d" i)) ()
+                 ,(format "Switch to the workgroup at index %d." i)
+                 (interactive)
+                 (wg-switch-to-workgroup-at-index ,i))))))
   (define-wg-switch-to-workgroup-at-index-range 10))
 
 (defun wg-switch-to-cyclic-nth-from-workgroup (workgroup n)
@@ -3394,6 +3419,7 @@ Deletes all state saved in frame parameters, and nulls out
 
 ;;; file commands
 
+;; FIXME: decide whether to use pickel for serialization
 (defun wg-save-workgroups (file &optional force)
   "Save workgroups to FILE.
 Called interactively with a prefix arg, or if `wg-visited-file-name'
@@ -3465,8 +3491,8 @@ is nil, read a filename.  Otherwise use `wg-visited-file-name'."
 
 (defun wg-update-all-workgroups-and-save ()
   "Call `wg-update-all-workgroups', the `wg-save-workgroups'.
-Keep in mind that workgroups will be updated with their
-working-wconfig in the current frame."
+Keep in mind that workgroups will be updated with their working
+wconfigs in the current frame."
   (interactive)
   (wg-update-all-workgroups)
   (call-interactively 'wg-save-workgroups))
@@ -3498,7 +3524,14 @@ working-wconfig in the current frame."
 
 
 
-;;; window movement commands
+;;; window-tree commands
+;;
+;; FIXME: Add complex window creation commands
+;;
+;; FIXME: Add window splitting, deletion and locking commands
+;;
+;; FIXME: These are half-hearted.  Clean them up, and allow specification of the
+;; window-tree depth at which to operate.
 
 (defun wg-backward-transpose-window (offset)
   "Move `selected-window' backward by OFFSET in its wlist."
@@ -3601,14 +3634,14 @@ command's docstring;  But why, when there's `apropos-command'?"
   (interactive)
   (throw 'wg-action (list 'prev (minibuffer-contents))))
 
-(defun wg-magic-C-b ()
+(defun wg-backward-char-or-next-buffer-list-filter ()
   "Call `backward-char' unless `point' is right after the prompt,
 in which case call `wg-next-buffer-list-filter'."
   (interactive)
   (if (> (point) (minibuffer-prompt-end)) (backward-char)
     (wg-next-buffer-list-filter)))
 
-(defun wg-magic-C-S-b (&optional num)
+(defun wg-backward-char-or-previous-buffer-list-filter (&optional num)
   "Call `backward-char' unless `point' is right after the prompt,
 in which case call `wg-previous-buffer-list-filter'."
   (interactive)
@@ -3639,25 +3672,42 @@ in which case call `wg-previous-buffer-list-filter'."
 
 ;;; advice
 
+(defun wg-auto-associate-buffer-helper (workgroup buffer assoc)
+  "Associate BUFFER with WORKGROUP based on ASSOC."
+  (cond ((not assoc) nil)
+        ((memq assoc '(soft hard))
+         (wg-workgroup-associate-buffer workgroup buffer assoc t))
+        ((functionp assoc)
+         (wg-auto-associate-buffer-helper
+          workgroup buffer (funcall assoc workgroup buffer)))
+        (t (wg-auto-associate-buffer-helper workgroup buffer 'soft))))
+
+(defun wg-auto-associate-buffer (buffer &optional workgroup)
+  "Conditionally associate BUFFER with WORKGROUP.
+See `wg-buffer-auto-association'."
+  (when wg-buffer-list-filtration-on
+    (wg-when-let ((wg (or workgroup (wg-current-workgroup t))))
+      (wg-auto-associate-buffer-helper
+       wg buffer (or (wg-workgroup-parameter wg 'buffer-auto-association)
+                     wg-buffer-auto-association)))))
+
 (defadvice switch-to-buffer (after wg-auto-associate-buffer)
   "Automatically associate the buffer with the current workgroup."
-  (when wg-buffer-list-filtration-on
-    (wg-when-let ((wg (wg-current-workgroup t))
-                  (type wg-associate-buffer-on-switch-to-buffer))
-      (wg-workgroup-associate-buffer wg ad-return-value type t))))
+  (wg-auto-associate-buffer ad-return-value))
 
 (defadvice set-window-buffer (after wg-auto-associate-buffer)
   "Automatically associate the buffer with the current workgroup."
-  (when wg-buffer-list-filtration-on
-    (wg-when-let ((frame (window-frame (ad-get-arg 0)))
-                  (wg (wg-current-workgroup t frame))
-                  (type wg-associate-buffer-on-set-window-buffer))
-      (wg-workgroup-associate-buffer wg (ad-get-arg 1) type t))))
+  (wg-awhen (wg-current-workgroup t (window-frame (ad-get-arg 0)))
+    (wg-auto-associate-buffer (ad-get-arg 1) it)))
 
 (defun wg-enable-all-advice ()
   "Enable and activate all of Workgroups' advice."
+  (ad-define-subr-args
+   'switch-to-buffer '(buffer-or-name &optional norecord))
   (ad-enable-advice 'switch-to-buffer 'after 'wg-auto-associate-buffer)
   (ad-activate 'switch-to-buffer)
+  (ad-define-subr-args
+   'set-window-buffer '(window buffer-or-name &optional keep-margins))
   (ad-enable-advice 'set-window-buffer 'after 'wg-auto-associate-buffer)
   (ad-activate 'set-window-buffer))
 
@@ -3855,10 +3905,10 @@ as Workgroups' command remappings."
 
 (defvar wg-minibuffer-mode-map
   (wg-fill-keymap (make-sparse-keymap)
-    (kbd "C-b")       'wg-magic-C-b
+    (kbd "C-b")       'wg-backward-char-or-next-buffer-list-filter
     (kbd "C-c n")     'wg-next-buffer-list-filter
     (kbd "C-c C-n")   'wg-next-buffer-list-filter
-    (kbd "C-S-b")     'wg-magic-C-S-b
+    (kbd "C-S-b")     'wg-backward-char-or-previous-buffer-list-filter
     (kbd "C-c p")     'wg-previous-buffer-list-filter
     (kbd "C-c C-p")   'wg-previous-buffer-list-filter
     (kbd "C-c a")     'wg-associate-first-match
