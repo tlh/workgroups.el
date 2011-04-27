@@ -171,8 +171,9 @@ minibuffer is active."
 
 ;; workgroup restoration customization
 
-(defcustom wg-mode-serdes-functions
-  '((Info-mode wg-serialize-Info-mode-buffer wg-deserialize-Info-mode-buffer))
+(defcustom wg-mode-serdes-definitions
+  '((Info-mode wg-serialize-Info-mode-buffer wg-deserialize-Info-mode-buffer)
+    (help-mode wg-serialize-help-mode-buffer wg-deserialize-help-mode-buffer))
   "Alist mapping major-mode symbols to a list containint a
 serialization and a deserialization function.
 FIXME: docstring this"
@@ -603,6 +604,10 @@ decoration strings."
 (defvar wg-face-abbrevs nil
   "Assoc list mapping face abbreviations to face names.")
 
+(defvar wg-readable-types
+  '(integer float cons symbol vector string char-table bool-vector)
+  "List of types with readable printed representations.")
+
 
 ;; file and dirty flag vars
 
@@ -862,6 +867,12 @@ Iterative to prevent stack overflow."
   (declare (indent 1))
   `(let (,@(mapcar (lambda (sym) `(,sym (gensym))) syms)) ,@body))
 
+(defmacro wg-when-boundp (symbols &rest body)
+  "When all SYMBOLS are bound, `eval' body."
+  (declare (indent 1))
+  `(when (and ,@(mapcar (lambda (sym) `(boundp ',sym)) symbols))
+     ,@body))
+
 (defmacro wg-dbind (args expr &rest body)
   "Abbreviation of `destructuring-bind'."
   (declare (indent 2))
@@ -978,6 +989,14 @@ HI-INCLUSIVE non-nil means the HI bound is inclusive."
   "Return the Nth element of LIST, counting from the end."
   (nth (- (length list) n 1) list))
 
+(defun wg-take-until-fail (pred list)
+  "Take elements from LISP up to the first element on which PRED fails."
+  (let (taken)
+    (catch 'result
+      (dolist (elt list (nreverse taken))
+        (if (funcall pred elt) (push elt taken)
+          (throw 'result (nreverse taken)))))))
+
 (defun wg-rotate-list (list &optional offset)
   "Rotate LIST by OFFSET.  Positive OFFSET rotates left, negative right."
   (when list
@@ -1020,6 +1039,11 @@ Return nil when ELT1 and ELT2 aren't both present."
   (wg-when-let ((p1 (position elt1 list))
                 (p2 (position elt2 list)))
     (wg-move-elt elt1 (wg-move-elt elt2 list p1) p2)))
+
+(defmacro wg-make-alist (&rest kvps)
+  "Return a new alist from KVPS."
+  `(list ,@(wg-docar (pair (wg-partition kvps 2))
+             `(cons ,@pair))))
 
 (defun wg-aget (alist key &optional default)
   "Return the value of KEY in ALIST. Uses `assq'.
@@ -1139,9 +1163,24 @@ BUFFER-LIST should contain buffer objects and/or buffer names."
   "Return BUFFER's major-mode."
   (with-current-buffer buffer major-mode))
 
+(defun wg-get-buffer (buffer-name &optional file-name)
+  "Get a buffer with `get-file-buffer' if FILE-NAME is non-nil.
+Otherwise, get a buffer named BUFFER-NAME with `get-buffer'."
+  (if file-name (get-file-buffer file-name)
+    (get-buffer buffer-name)))
+
 
 
 ;;; workgroups utils
+
+(defun wg-is-readable-p (obj)
+  "Return non-nil if OBJ's printed representation is readable."
+  (memq (type-of obj) wg-readable-types))
+
+(defmacro wg-make-object (type &rest kvps)
+  "Return a new Workgroups object of TYPE, and key-value-pairs KVPS."
+  (declare (indent 1))
+  `(cons ,type (wg-make-alist ,@kvps)))
 
 (defun wg-type-of (obj)
   "Return the type of Workgroups object OBJ."
@@ -1242,8 +1281,8 @@ minibuffer is active.")))
 ;;; wconfig construction
 
 (defun wg-mode-serdes-entry (major-mode)
-  "Return BUFFER's major-mode's entry in `wg-mode-serdes-functions'."
-  (wg-aget wg-mode-serdes-functions major-mode))
+  "Return BUFFER's major-mode's entry in `wg-mode-serdes-definitions'."
+  (wg-aget wg-mode-serdes-definitions major-mode))
 
 (defun wg-mode-serializer (major-mode)
   "Return BUFFER's serialization function, or nil."
@@ -1266,42 +1305,47 @@ EWIN should be an Emacs window object."
     (if (and wg-restore-point-max (= p (point-max))) :max p)))
 
 (defun wg-serialize-buffer (buffer)
-  "Return a serialized buffer from BUFFER ."
+  "Return a serialized buffer from Emacs buffer BUFFER."
   (with-current-buffer buffer
-    `(buffer
-      (bname       .   ,(buffer-name))
-      (fname       .   ,(buffer-file-name))
-      (major-mode  .   ,major-mode)
-      (point       .   ,(point))
-      (mark        .   ,(mark))
-      (markx       .   ,mark-active)
-      (extended    .   ,(wg-extended-buffer-serialization buffer major-mode)))))
+    (wg-make-object 'buffer
+      'bname        (buffer-name)
+      'fname        (buffer-file-name)
+      'major-mode   major-mode
+      'point        (point)
+      'mark         (mark)
+      'markx        mark-active
+      'extended     (wg-extended-buffer-serialization buffer major-mode))))
+
+;; FIXME: a window's buffer slot shouldn't contain a separate wgbuf -- it should
+;; point to the canonical wgbuf for that buffer, which is stored with the
+;; workgroup-set, i.e. there's only one wgbuf for each serialized live buffer,
+;; which is referenced, perhaps by uid, wherever it's needed.
 
 (defun wg-serialize-window (window)
-  "Return a serialized window from WINDOW."
+  "Return a serialized window from Emacs window WINDOW."
   (let ((selwin (eq window (selected-window))))
     (with-selected-window window
-      `(window
-        (buffer   .  ,(wg-serialize-buffer (window-buffer window)))
-        (edges    .  ,(window-edges window))
-        (point    .  ,(wg-window-point window))
-        (wstart   .  ,(window-start window))
-        (hscroll  .  ,(window-hscroll window))
-        (sbars    .  ,(window-scroll-bars window))
-        (margins  .  ,(window-margins window))
-        (fringes  .  ,(window-fringes window))
-        (selwin   .  ,selwin)
-        (mbswin   .  ,(eq window minibuffer-scroll-window))))))
+      (wg-make-object 'window
+        'buffer     (wg-serialize-buffer (window-buffer window))
+        'edges      (window-edges window)
+        'point      (wg-window-point window)
+        'wstart     (window-start window)
+        'hscroll    (window-hscroll window)
+        'sbars      (window-scroll-bars window)
+        'margins    (window-margins window)
+        'fringes    (window-fringes window)
+        'selwin     selwin
+        'mbswin     (eq window minibuffer-scroll-window)))))
 
 (defun wg-make-wtree-node (dir edges wlist)
   "Return a new wtree node from DIR EDGES and WLIST."
-  `(wtree
-    (dir    .  ,dir)
-    (edges  .  ,edges)
-    (wlist  .  ,wlist)))
+  (wg-make-object 'wtree
+    'dir      dir
+    'edges    edges
+    'wlist    wlist))
 
 (defun wg-serialize-window-tree (window-tree)
-  "Return a serialized window-tree from WINDOW-TREE."
+  "Return a serialized window-tree from Emacs window tree WINDOW-TREE."
   (wg-barf-on-active-minibuffer)
   (flet ((inner (w) (if (windowp w) (wg-serialize-window w)
                       (wg-dbind (dir edges . wins) w
@@ -1315,14 +1359,14 @@ EWIN should be an Emacs window object."
 (defun wg-serialize-frame (&optional frame)
   "Return a serialized window-configuration from FRAME or `selected-frame'."
   (let ((frame (or frame (selected-frame))))
-    `(wconfig
-      (left    .  ,(frame-parameter frame 'left))
-      (top     .  ,(frame-parameter frame 'top))
-      (width   .  ,(frame-parameter frame 'width))
-      (height  .  ,(frame-parameter frame 'height))
-      (sbars   .  ,(frame-parameter frame 'vertical-scroll-bars))
-      (sbwid   .  ,(frame-parameter frame 'scroll-bar-width))
-      (wtree   .  ,(wg-serialize-window-tree (window-tree frame))))))
+    (wg-make-object 'wconfig
+      'left      (frame-parameter frame 'left)
+      'top       (frame-parameter frame 'top)
+      'width     (frame-parameter frame 'width)
+      'height    (frame-parameter frame 'height)
+      'sbars     (frame-parameter frame 'vertical-scroll-bars)
+      'sbwid     (frame-parameter frame 'scroll-bar-width)
+      'wtree     (wg-serialize-window-tree (window-tree frame)))))
 
 (defun wg-make-blank-wconfig (&optional buffer)
   "Return a new blank wconfig.
@@ -1538,139 +1582,127 @@ Otherwise, reverse WTREE vertically."
 
 ;;; non-file buffer serdes functions
 
-(defun wg-serialize-Info-mode-buffer (buffer-or-name)
-  ""
-  (with-current-buffer buffer-or-name
-    (list Info-current-file Info-current-node)))
 
-(defun wg-deserialize-Info-mode-buffer (wgbuf wg-window)
-  ""
+;; Info-mode serdes
+
+(defun wg-serialize-Info-mode-buffer (buffer)
+  "Return `Info-mode's extended serialization of BUFFER."
+  (with-current-buffer buffer
+    (wg-when-boundp (Info-current-file Info-current-node)
+      (list Info-current-file Info-current-node))))
+
+(defun wg-deserialize-Info-mode-buffer ()
+  "Deserialize an `Info-mode' buffer."
   (require 'info)
-  (wg-aif (wg-get wgbuf 'extended)
+  (wg-aif wg-buffer-extended-serialization
       (apply #'Info-find-node it) (info)))
 
 
+;; help-mode serdes
+
+(defun wg-serialize-help-mode-buffer (buffer)
+  "Return `help-mode's extended serialization of BUFFER."
+  (with-current-buffer buffer
+    (wg-when-boundp (help-xref-stack-item)
+      (wg-take-until-fail 'wg-is-readable-p help-xref-stack-item))))
+
+(defun wg-deserialize-help-mode-buffer ()
+  "Deserialize a `help-mode' buffer."
+  (require 'help-mode)
+  (wg-dbind (method . args) wg-buffer-extended-serialization
+    (apply method args)))
 
 
 
 ;;; wconfig restoration
 
-;; (defun wg-restore-buffer (wgbuf)
-;;   "Restore WGBUF and return it."
-;;   (wg-bind-params wgbuf (fname bname (mm major-mode) point mark markx)
-;;     (let ((buffer (cond ((not fname) (get-buffer bname))
-;;                         ((file-exists-p fname)
-;;                          (with-current-buffer (find-file-noselect fname)
-;;                            (when (and (fboundp mm) (not (eq mm major-mode)))
-;;                              (funcall mm))
-;;                            (rename-buffer bname t)
-;;                            (current-buffer)))
-;;                         (wg-barf-on-nonexistent-file
-;;                          (error "%S doesn't exist" fname)))))
-;;       (when buffer
-;;         (with-current-buffer buffer
-;;           ;; (goto-char point) ;; this causes problems
-;;           (set-mark mark)
-;;           (unless markx (deactivate-mark))
-;;           buffer)))))
+;; FIXME: docstring these, or eliminate them
+(defvar wg-current-wgbuf nil "")
+(defvar wg-buffer-name nil "")
+(defvar wg-buffer-file-name nil "")
+(defvar wg-buffer-major-mode nil "")
+(defvar wg-buffer-mark nil "")
+(defvar wg-buffer-mark-active nil "")
+(defvar wg-buffer-extended-serialization nil "")
+(defvar wg-window-point nil "")
+(defvar wg-window-start nil "")
+(defvar wg-window-hscroll nil "")
 
-;; (defun wg-restore-window (wg-window)
-;;   "Restore WG-WINDOW in `selected-window'."
-;;   (wg-bind-params wg-window ((wgbuf buffer) point wstart hscroll
-;;                              sbars fringes margins selwin mbswin)
-;;     (let ((sw (selected-window))
-;;           (buffer (wg-restore-buffer wgbuf)))
-;;       (if (not buffer) (set-window-buffer sw wg-default-buffer)
-;;         (with-current-buffer buffer
-;;           (set-window-buffer sw buffer)
-;;           (set-window-start sw wstart t)
-;;           (set-window-point
-;;            sw (cond ((not wg-restore-point) wstart)
-;;                     ((eq point :max) (point-max))
-;;                     (t point)))
-;;           (when (>= wstart (point-max)) (recenter))))
-;;       (when selwin (setq wg-window-tree-selected-window sw))
-;;       (when (and wg-restore-minibuffer-scroll-window mbswin)
-;;         (setq minibuffer-scroll-window sw))
-;;       (wg-dbind (width cols vtype htype)
-;;           (if wg-restore-scroll-bars sbars '(nil nil nil nil))
-;;         (set-window-scroll-bars sw width vtype htype))
-;;       (wg-dbind (left-width right-width outside-margins)
-;;           (if wg-restore-fringes fringes '(nil nil nil))
-;;         (set-window-fringes sw left-width right-width outside-margins))
-;;       (wg-dbind (left-width . right-width)
-;;           (if wg-restore-margins margins '(nil . nil))
-;;         (set-window-margins sw left-width right-width))
-;;       (set-window-hscroll sw hscroll))))
+(defun wg-set-selected-window-buffer (buffer)
+  "Set `wg-selected-window's buffer to BUFFER."
+  (set-window-buffer wg-selected-window buffer))
 
-;; (defun wg-selected-window ()
-;;   "If non-nil, return `wg-selected-window'.
-;; Otherwise return `selected-window'."
-;;   (or wg-selected-window (selected-window)))
-
-(defun wg-restore-window-buffer-positions (wgbuf wg-window)
+(defun wg-restore-window-buffer-positions ()
   "FIXME: docstring this"
-  (wg-bind-params wgbuf (bname mark markx)
-    (with-current-buffer bname
-      (set-window-start wg-selected-window wg-window-start t)
-      (set-window-hscroll wg-selected-window wg-window-hscroll)
+  (with-current-buffer wg-buffer-name
+    (when wg-window-start
+      (set-window-start wg-selected-window wg-window-start t))
+    (when wg-window-hscroll
+      (set-window-hscroll wg-selected-window wg-window-hscroll))
+    (when wg-window-point
       (set-window-point
        wg-selected-window
        (cond ((not wg-restore-point) wg-window-start)
              ((eq wg-window-point :max) (point-max))
-             (t wg-window-point)))
-      (when (>= wg-window-start (point-max))
-        (recenter))
-      (if (not wg-restore-mark) (deactivate-mark)
-        (set-mark mark)
-        (unless markx (deactivate-mark))))))
+             (t wg-window-point))))
+    (when (and wg-window-start (>= wg-window-start (point-max)))
+      (recenter))
+    (if (not wg-restore-mark) (deactivate-mark)
+      (set-mark wg-buffer-mark)
+      (unless wg-buffer-mark-active (deactivate-mark)))))
 
 (defun wg-restore-default-buffer ()
-  "Set WINDOW's buffer to `wg-default-buffer'."
-  (set-window-buffer wg-selected-window wg-default-buffer))
+  "Set `wg-selected-window's buffer to `wg-default-buffer'."
+  (wg-set-selected-window-buffer wg-default-buffer))
 
-(defun wg-restore-existing-buffer (buffer wgbuf wg-window)
-  ""
-  (set-window-buffer wg-selected-window buffer)
-  (wg-restore-window-buffer-positions wgbuf wg-window))
+(defun wg-restore-existing-buffer (buffer)
+  "Set `wg-selected-window's buffer to BUFFER, and restore various positions."
+  (wg-set-selected-window-buffer buffer)
+  (wg-restore-window-buffer-positions))
 
-(defun wg-restore-file-buffer (wgbuf wg-window)
+(defun wg-restore-file-buffer ()
   "Restore a file buffer."
-  (wg-bind-params wgbuf (bname fname)
-    (if (not (file-exists-p fname))
-        (if wg-barf-on-nonexistent-file
-            (error "%S doesn't exist" fname)
-          (wg-restore-default-buffer))
-      (find-file fname)
-      (rename-buffer bname t)
-      (wg-restore-window-buffer-positions wgbuf wg-window))))
+  (if (not (file-exists-p wg-buffer-file-name))
+      (if wg-barf-on-nonexistent-file
+          (error "%S doesn't exist" wg-buffer-file-name)
+        (wg-restore-default-buffer))
+    (find-file wg-buffer-file-name)
+    (rename-buffer wg-buffer-name t)
+    (wg-restore-window-buffer-positions)))
 
-(defun wg-get-file-buffer-or-buffer (buffer-name &optional file-name)
-  "Get a buffer with `get-file-buffer' if FILE-NAME is non-nil.
-Otherwise, get a buffer named BUFFER-NAME with `get-buffer'."
-  (if file-name (get-file-buffer file-name)
-    (get-buffer buffer-name)))
+(defun wg-restore-extended-buffer (deserializer-fn)
+  "Restore a buffer with DESERIALIZER-FN."
+  (condition-case err
+      (funcall deserializer-fn)
+    (error (message "Error deserializing %S: %S" wg-buffer-name err))))
 
-(defun wg-restore-buffer (wgbuf &optional wg-window)
+(defun wg-restore-buffer (wgbuf)
   "Restore WGBUF and return it."
-  (wg-bind-params wgbuf (bname fname (mm major-mode))
-    (wg-acond ((wg-get-file-buffer-or-buffer bname fname)
-               (wg-restore-existing-buffer it wgbuf wg-window))
-              ((wg-mode-deserializer mm)
-               (funcall it wgbuf wg-window))
-              (fname (wg-restore-file-buffer wgbuf wg-window))
+  (wg-bind-params wgbuf
+      ((wg-buffer-name bname)
+       (wg-buffer-file-name fname)
+       (wg-buffer-major-mode major-mode)
+       (wg-buffer-mark mark)
+       (wg-buffer-mark-active markx)
+       (wg-buffer-extended-serialization extended))
+    (wg-acond ((wg-get-buffer wg-buffer-name wg-buffer-file-name)
+               (wg-restore-existing-buffer it))
+              ((wg-mode-deserializer wg-buffer-major-mode)
+               (wg-restore-extended-buffer it))
+              (wg-buffer-file-name
+               (wg-restore-file-buffer))
               (t (wg-restore-default-buffer)))))
 
 (defun wg-restore-window (wg-window)
   "Restore WG-WINDOW in `selected-window'."
   (wg-bind-params wg-window
-      ((wgbuf buffer)
+      ((wg-current-wgbuf buffer)
        (wg-window-point point)
        (wg-window-start wstart)
        (wg-window-hscroll hscroll)
        sbars fringes margins selwin mbswin)
     (let ((wg-selected-window (selected-window)))
-      (wg-restore-buffer wgbuf)
+      (wg-restore-buffer wg-current-wgbuf)
       (when selwin
         (setq wg-window-tree-selected-window wg-selected-window))
       (when (and wg-restore-minibuffer-scroll-window mbswin)
@@ -1908,11 +1940,11 @@ See `wg-get-bufobj' for allowable values for BUFOBJ1 and BUFOBJ2."
           ((wg-bufobj-file-name bufobj2) nil)
           ((equal (wg-bufobj-name bufobj1) (wg-bufobj-name bufobj2))))))
 
-(defun wg-get-bufobj (bufobj &optional bufobj-list)
+(defun wg-get-bufobj (bufobj bufobj-list)
   "Return the bufobj in BUFOBJ-LIST corresponding to BUFOBJ, or nil.
 BUFOBJ should be a Workgroups buffer, an Emacs buffer, or an
 Emacs buffer-name string."
-  (wg-get1 (bufobj2 (or bufobj-list (buffer-list)))
+  (wg-get1 (bufobj2 bufobj-list)
     (wg-bufobjs-equal bufobj bufobj2)))
 
 
@@ -2580,19 +2612,17 @@ is non-nil.  Added to `post-command-hook'."
   "Restore all the buffers associated with WORKGROUP that can be restored."
   (wg-filter-map 'wg-restore-buffer (wg-workgroup-associated-buffers workgroup)))
 
-
-;; FIXME: this
-;; (defun wg-restore-workgroup (workgroup)
-;;   "Restore WORKGROUP in `selected-frame'."
-;;   (when wg-restore-associated-buffers
-;;     (wg-restore-workgroup-associated-buffers-internal workgroup))
-;;   (let ((wg-nodirty 'seems-insane-to-flag-dirty-every-time))
-;;     (wg-restore-wconfig-undoably (wg-workgroup-working-wconfig workgroup) t)))
-
 (defun wg-restore-workgroup (workgroup)
   "Restore WORKGROUP in `selected-frame'."
+  (when wg-restore-associated-buffers
+    (wg-restore-workgroup-associated-buffers-internal workgroup))
   (let ((wg-nodirty 'seems-insane-to-flag-dirty-every-time))
     (wg-restore-wconfig-undoably (wg-workgroup-working-wconfig workgroup) t)))
+
+;; (defun wg-restore-workgroup (workgroup)
+;;   "Restore WORKGROUP in `selected-frame'."
+;;   (let ((wg-nodirty 'seems-insane-to-flag-dirty-every-time))
+;;     (wg-restore-wconfig-undoably (wg-workgroup-working-wconfig workgroup) t)))
 
 
 
@@ -2891,8 +2921,8 @@ current and previous workgroups."
 (defun wg-current-matches (&optional read-buffer-mode)
   "Return READ-BUFFER-MODE's current matches."
   (ecase (or read-buffer-mode (wg-read-buffer-mode))
-    (ido (when (boundp 'ido-cur-list) ido-cur-list))
-    (iswitchb (when (boundp 'iswitchb-buflist) iswitchb-buflist))
+    (ido (wg-when-boundp (ido-cur-list) ido-cur-list))
+    (iswitchb (wg-when-boundp (iswitchb-buflist) iswitchb-buflist))
     (fallback (list minibuffer-default))))
 
 (defun wg-current-match (&optional read-buffer-mode)
@@ -2903,10 +2933,10 @@ current and previous workgroups."
   "Set READ-BUFFER-MODE's current matches, and flag a rescan."
   (case (or read-buffer-mode (wg-read-buffer-mode))
     (ido
-     (when (boundp 'ido-cur-list)
+     (wg-when-boundp (ido-cur-list)
        (setq ido-cur-list match-list ido-rescan t)))
     (iswitchb
-     (when (boundp 'iswitchb-buflist)
+     (wg-when-boundp (iswitchb-buflist)
        (setq iswitchb-buflist match-list iswitchb-rescan t)))
     (fallback nil)))
 
@@ -2998,7 +3028,7 @@ at the beginning of BUFLIST.  Otherwise rotate BUFLIST."
   "Set `ido-temp-list' with `wg-set-buffer-list-symbol'.
 Added to `ido-make-buffer-list-hook'."
   (wg-set-buffer-list-symbol 'ido-temp-list)
-  (when (boundp 'ido-entry-buffer)
+  (wg-when-boundp (ido-entry-buffer)
     (setq ido-entry-buffer (wg-get-sneaky-ido-entry-buffer-replacement))))
 
 (defun wg-set-iswitchb-buffer-list ()
@@ -3821,6 +3851,16 @@ in which case call `wg-previous-buffer-list-filter'."
     (wg-set-current-matches
      (wg-rotate-list (wg-filtered-buffer-list t) pos) mode)))
 
+(defun wg-minibuffer-mode-purge-soft-associated-buffers ()
+  "Purge soft-associated buffers and update the current matches."
+  (interactive)
+  (wg-workgroup-purge-soft-associated-buffers nil)
+  (wg-set-current-matches
+   (let ((unpurged (wg-filtered-buffer-list t)) new-matches)
+     (dolist (match (wg-current-matches) (nreverse new-matches))
+       (when (member match unpurged)
+         (push match new-matches))))))
+
 
 
 ;;; advice
@@ -4068,7 +4108,9 @@ as Workgroups' command remappings."
     (kbd "C-c a")     'wg-associate-first-match
     (kbd "C-c C-a")   'wg-associate-first-match
     (kbd "C-c d")     'wg-dissociate-first-match
-    (kbd "C-c C-d")   'wg-dissociate-first-match)
+    (kbd "C-c C-d")   'wg-dissociate-first-match
+    (kbd "C-c _")     'wg-minibuffer-mode-purge-soft-associated-buffers
+    )
   "`wg-minibuffer-mode's keymap.")
 
 
