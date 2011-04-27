@@ -1316,7 +1316,26 @@ EWIN should be an Emacs window object."
       'markx        mark-active
       'extended     (wg-extended-buffer-serialization buffer major-mode))))
 
-;; FIXME: a window's buffer slot shouldn't contain a separate wgbuf -- it should
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Notes on buffer and window properties:
+;;
+;; fringes, margins and scroll-bars are properly properties of *buffers*, but
+;; their settings can be forced ephemerally in a window with the set-window-foo
+;; functions.
+;;
+;; window-point is a property of a buffer/window pair, but won't set properly
+;; unless the buffer is current -- i.e. (set-window-buffer some-window
+;; some-buffer) (set-window-point some-window 0)) won't set some-buffer's point
+;; in some-window unless some-buffer is also current.
+;;
+;; window-start and window-hscroll are properties of buffer/window pairs.
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+;; FIXME: A window's buffer slot shouldn't contain a separate wgbuf -- it should
 ;; point to the canonical wgbuf for that buffer, which is stored with the
 ;; workgroup-set, i.e. there's only one wgbuf for each serialized live buffer,
 ;; which is referenced, perhaps by uid, wherever it's needed.
