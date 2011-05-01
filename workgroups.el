@@ -952,7 +952,7 @@ EWIN should be an Emacs window object."
       (fringes   .  ,(window-fringes ewin))
       (selwin    .  ,(eq ewin (selected-window)))
       (mbswin    .  ,(eq ewin minibuffer-scroll-window))
-      (dedicated . ,(window-dedicated-p)))))
+      (dedicated .  ,(window-dedicated-p ewin)))))
 
 (defun wg-make-wtree (dir edges wlist)
   "Return a new Workgroups wtree from DIR EDGES and WLIST."
@@ -1024,8 +1024,8 @@ Return the buffer if it was found, nil otherwise."
           (apply #'set-window-fringes sw fringes))
         (when wg-restore-margins
           (set-window-margins sw (car margins) (cdr margins)))
-	(when wg-restore-dedicated
-	  (set-window-dedicated-p sw dedicated))
+        (when wg-restore-dedicated
+          (set-window-dedicated-p sw dedicated))
         (set-window-hscroll sw hscroll)
         (set-mark mark)
         (unless markx (deactivate-mark))
@@ -1593,8 +1593,8 @@ configuration."
     (wg-set-working-config new (wg-working-config workgroup))
     (wg-switch-to-workgroup new)
     (wg-fontified-msg
-      (:cmd "Cloned: ") (:cur (wg-name workgroup))
-      (:msg " to ") (:cur name) "  " (wg-disp))))
+     (:cmd "Cloned: ") (:cur (wg-name workgroup))
+     (:msg " to ") (:cur name) "  " (wg-disp))))
 
 (defun wg-kill-workgroup (workgroup)
   "Kill WORKGROUP, saving its working config to the kill ring."
@@ -1606,23 +1606,23 @@ configuration."
     (if (eq to workgroup) (wg-restore-blank-wconfig)
       (wg-switch-to-workgroup to))
     (wg-fontified-msg
-      (:cmd "Killed: ") (:cur (wg-name workgroup)) "  " (wg-disp))))
+     (:cmd "Killed: ") (:cur (wg-name workgroup)) "  " (wg-disp))))
 
 (defun wg-kill-ring-save-base-config (workgroup)
   "Save WORKGROUP's base config to `wg-kill-ring'."
   (interactive (list (wg-arg)))
   (wg-add-to-kill-ring (wg-base-config workgroup))
   (wg-fontified-msg
-    (:cmd "Saved: ") (:cur (wg-name workgroup))
-    (:cur "'s ") (:msg "base config to the kill ring")))
+   (:cmd "Saved: ") (:cur (wg-name workgroup))
+   (:cur "'s ") (:msg "base config to the kill ring")))
 
 (defun wg-kill-ring-save-working-config (workgroup)
   "Save WORKGROUP's working config to `wg-kill-ring'."
   (interactive (list (wg-arg)))
   (wg-add-to-kill-ring (wg-working-config workgroup))
   (wg-fontified-msg
-    (:cmd "Saved: ") (:cur (wg-name workgroup))
-    (:cur "'s ") (:msg "working config to the kill ring")))
+   (:cmd "Saved: ") (:cur (wg-name workgroup))
+   (:cur "'s ") (:msg "working config to the kill ring")))
 
 (defun wg-yank-config ()
   "Restore a wconfig from `wg-kill-ring'.
@@ -1646,8 +1646,8 @@ ring, starting at the front."
     (wg-kill-workgroup workgroup)
     (mapc #'kill-buffer bufs)
     (wg-fontified-msg
-      (:cmd "Killed: ") (:cur (wg-name workgroup))
-      (:msg " and its buffers ") "\n" (wg-disp))))
+     (:cmd "Killed: ") (:cur (wg-name workgroup))
+     (:msg " and its buffers ") "\n" (wg-disp))))
 
 (defun wg-delete-other-workgroups (workgroup)
   "Delete all workgroups but WORKGROUP."
@@ -1658,15 +1658,15 @@ ring, starting at the front."
     (mapc #'wg-delete (remove workgroup (wg-list)))
     (unless (eq workgroup cur) (wg-switch-to-workgroup workgroup))
     (wg-fontified-msg
-      (:cmd "Deleted: ") (:msg "All workgroups but ")
-      (:cur (wg-name workgroup)))))
+     (:cmd "Deleted: ") (:msg "All workgroups but ")
+     (:cur (wg-name workgroup)))))
 
 (defun wg-update-workgroup (workgroup)
   "Set the base config of WORKGROUP to its working config in `selected-frame'."
   (interactive (list (wg-arg)))
   (wg-set-base-config workgroup (wg-working-config workgroup))
   (wg-fontified-msg
-    (:cmd "Updated: ") (:cur (wg-name workgroup))))
+   (:cmd "Updated: ") (:cur (wg-name workgroup))))
 
 (defun wg-update-all-workgroups ()
   "Update all workgroups' base configs.
@@ -1762,8 +1762,8 @@ Worgroups are updated with their working configs in the
   (let ((oldname (wg-name workgroup)))
     (wg-set-name workgroup newname)
     (wg-fontified-msg
-      (:cmd "Renamed: ") (:cur oldname) (:msg " to ")
-      (:cur (wg-name workgroup)))))
+     (:cmd "Renamed: ") (:cur oldname) (:msg " to ")
+     (:cur (wg-name workgroup)))))
 
 (defun wg-reset (&optional force)
   "Reset workgroups.
@@ -1856,7 +1856,7 @@ working-config in the current frame."
   (setq wg-mode-line-on (not wg-mode-line-on))
   (force-mode-line-update)
   (wg-fontified-msg
-    (:cmd "mode-line: ") (:msg (if wg-mode-line-on "on" "off"))))
+   (:cmd "mode-line: ") (:msg (if wg-mode-line-on "on" "off"))))
 
 
 ;;; morph commands
@@ -1866,7 +1866,7 @@ working-config in the current frame."
   (interactive)
   (setq wg-morph-on (not wg-morph-on))
   (wg-fontified-msg
-    (:cmd "Morph: ") (:msg (if wg-morph-on "on" "off"))))
+   (:cmd "Morph: ") (:msg (if wg-morph-on "on" "off"))))
 
 
 ;;; Window movement commands
@@ -1903,7 +1903,7 @@ working-config in the current frame."
   "Display the name of the current workgroup in the echo area."
   (interactive)
   (wg-fontified-msg
-    (:cmd "Current: ") (:cur (wg-name (wg-current-workgroup)))))
+   (:cmd "Current: ") (:cur (wg-name (wg-current-workgroup)))))
 
 (defun wg-echo-all-workgroups ()
   "Display the names of all workgroups in the echo area."
@@ -1924,7 +1924,7 @@ working-config in the current frame."
   "Echo Workgroups' current version number."
   (interactive)
   (wg-fontified-msg
-    (:cmd "Workgroups version: ") (:msg wg-version)))
+   (:cmd "Workgroups version: ") (:msg wg-version)))
 
 (defun wg-echo-last-message ()
   "Echo the last message Workgroups sent to the echo area.
