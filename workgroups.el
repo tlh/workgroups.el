@@ -192,6 +192,11 @@ in (say) irc buffers where `point-max' is constantly increasing."
   :type 'boolean
   :group 'workgroups)
 
+(defcustom wg-restore-dedicated t
+  "Non-nil means restore `window-dedicated-p' on workgroup restore."
+  :type 'boolean
+  :group 'workgroups)
+
 
 ;; morph customization
 
@@ -933,20 +938,21 @@ EWIN should be an Emacs window object."
   "Return a new workgroups window from EWIN.
 EWIN should be an Emacs window object."
   (with-current-buffer (window-buffer ewin)
-    `((type     .   window)
-      (edges    .  ,(window-edges ewin))
-      (bname    .  ,(buffer-name))
-      (fname    .  ,(buffer-file-name))
-      (point    .  ,(wg-window-point ewin))
-      (mark     .  ,(mark))
-      (markx    .  ,mark-active)
-      (wstart   .  ,(window-start ewin))
-      (hscroll  .  ,(window-hscroll ewin))
-      (sbars    .  ,(window-scroll-bars ewin))
-      (margins  .  ,(window-margins ewin))
-      (fringes  .  ,(window-fringes ewin))
-      (selwin   .  ,(eq ewin (selected-window)))
-      (mbswin   .  ,(eq ewin minibuffer-scroll-window)))))
+    `((type      .   window)
+      (edges     .  ,(window-edges ewin))
+      (bname     .  ,(buffer-name))
+      (fname     .  ,(buffer-file-name))
+      (point     .  ,(wg-window-point ewin))
+      (mark      .  ,(mark))
+      (markx     .  ,mark-active)
+      (wstart    .  ,(window-start ewin))
+      (hscroll   .  ,(window-hscroll ewin))
+      (sbars     .  ,(window-scroll-bars ewin))
+      (margins   .  ,(window-margins ewin))
+      (fringes   .  ,(window-fringes ewin))
+      (selwin    .  ,(eq ewin (selected-window)))
+      (mbswin    .  ,(eq ewin minibuffer-scroll-window))
+      (dedicated . ,(window-dedicated-p)))))
 
 (defun wg-make-wtree (dir edges wlist)
   "Return a new Workgroups wtree from DIR EDGES and WLIST."
@@ -1005,7 +1011,7 @@ Return the buffer if it was found, nil otherwise."
 (defun wg-restore-window (win)
   "Restore WIN in `selected-window'."
   (wg-abind win (point mark markx wstart hscroll sbars
-                       fringes margins selwin mbswin)
+                       fringes margins selwin mbswin dedicated)
     (let ((sw (selected-window)))
       (when selwin (setq wg-selected-window sw))
       (when (wg-switch-to-window-buffer win)
@@ -1018,6 +1024,8 @@ Return the buffer if it was found, nil otherwise."
           (apply #'set-window-fringes sw fringes))
         (when wg-restore-margins
           (set-window-margins sw (car margins) (cdr margins)))
+	(when wg-restore-dedicated
+	  (set-window-dedicated-p sw dedicated))
         (set-window-hscroll sw hscroll)
         (set-mark mark)
         (unless markx (deactivate-mark))
