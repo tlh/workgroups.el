@@ -193,7 +193,7 @@ in (say) irc buffers where `point-max' is constantly increasing."
   :group 'workgroups)
 
 (defcustom wg-restore-dedicated t
-  "Non-nil means restore `window-dedicated-p`."
+  "Non-nil means restore `window-dedicated-p' on workgroup restore."
   :type 'boolean
   :group 'workgroups)
 
