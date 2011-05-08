@@ -121,6 +121,11 @@ it should be made here."
 
 ;; save and load customization
 
+;; TODO: add default directory and file customizations, and a save customization
+;; like: <jlf> or maybe have wg-save-file-name be one of 'auto (as above),
+;; 'confirm-auto (as above, but overridable), or 'ask (always ask) [10:30]
+
+
 (defcustom wg-switch-to-first-workgroup-on-find-workgroups-file t
   "Non-nil means switch to the first workgroup in a file when
 it's found with `wg-find-workgroups-file'."
@@ -931,10 +936,9 @@ SPEC is a list with the var as the car and the list as the cadr."
 
 (defmacro wg-aand (&rest args)
   "Anaphoric `and'."
-  (declare (indent defun))
   (cond ((null args) t)
         ((null (cdr args)) (car args))
-        (t `(aif ,(car args) (aand ,@(cdr args))))))
+        (t `(wg-aif ,(car args) (aand ,@(cdr args))))))
 
 (defun wg-toggle (symbol)
   "Toggle SYMBOL's truthiness."
@@ -1161,6 +1165,15 @@ BUFFER-LIST should contain buffer objects and/or buffer names."
   (wg-get1 (buffer (or buffer-list (buffer-list)))
     (string-match regexp (if (stringp buffer) buffer (buffer-name buffer)))))
 
+;; (defun wg-get-first-buffer-matching-regexp (regexp &optional buffer-list)
+;;   "Return the first buffer in BUFFER-LIST with a name matching REGEXP.
+;; BUFFER-LIST should contain buffer objects and/or buffer names."
+;;   (find t (or buffer-list (buffer-list))
+;;         :key (lambda (b) (when (string-match regexp (if (stringp b) b (buffer-name b)))
+;;                       t))))
+;; (wg-get-first-buffer-matching-regexp wg-ido-entry-buffer-replacement-regexp)
+
+
 (defun wg-buffer-major-mode (buffer)
   "Return BUFFER's major-mode."
   (with-current-buffer buffer major-mode))
@@ -1170,6 +1183,11 @@ BUFFER-LIST should contain buffer objects and/or buffer names."
 Otherwise, get a buffer named BUFFER-NAME with `get-buffer'."
   (if file-name (get-file-buffer file-name)
     (get-buffer buffer-name)))
+
+(defmacro wg-buffer-local-setq (buffer var value)
+  "`setq' VAR to VALUE while BUFFER is current.
+Note that this won't make VAR buffer-local if it isn't already."
+  `(with-current-buffer ,buffer (setq ,var ,value)))
 
 
 
@@ -1223,15 +1241,15 @@ of OBJ are copied."
   (declare (indent 2))
   `(wg-abind (cdr ,obj) ,binds ,@body))
 
-(defun wg-add-face (facekey str)
-  "Return a copy of STR fontified according to FACEKEY.
+(defun wg-add-face (facekey string)
+  "Return a copy of STRING fontified according to FACEKEY.
 FACEKEY must be a key in `wg-face-abbrevs'."
   (let ((face (wg-aget wg-face-abbrevs facekey))
-        (str  (copy-seq str)))
+        (string  (copy-seq string)))
     (unless face (error "No face with key %s" facekey))
-    (if (not wg-use-faces) str
-      (put-text-property 0 (length str) 'face face str)
-      str)))
+    (if (not wg-use-faces) string
+      (put-text-property 0 (length string) 'face face string)
+      string)))
 
 (defmacro wg-fontify (&rest specs)
   "A small fontification DSL. *WRITEME*"
@@ -1277,6 +1295,43 @@ minibuffer is active.")))
 (defun wg-workgroup-set-p (obj)
   "Return t if OBJ is a workgroup-set, nil otherwise."
   (wg-type-p obj 'workgroup-set))
+
+
+
+;;; uid construction
+
+(defun wg-int-to-b36-one-digit (i)
+  "Return a character in 0..9 or A..Z from I, and integer 0<=I<32.
+Similar to `org-id-int-to-b36-one-digit'."
+  (cond ((not (wg-within i 0 36))
+         (error "%s out of range" i))
+        ((< i 10) (+ ?0 i))
+        ((< i 36) (+ ?A i -10))))
+
+(defun wg-int-to-b36 (i &optional length)
+  "Return a base 36 string from I.
+Similar to `org-id-int-to-b36'."
+  (let ((base 36) b36)
+    (flet ((add-digit () (push (wg-int-to-b36-one-digit (mod i base)) b36)
+                      (setq i (/ i base))))
+      (add-digit)
+      (while (> i 0) (add-digit))
+      (setq b36 (map 'string 'identity b36))
+      (if (not length) b36
+        (concat (make-string (max 0 (- length (length b36))) ?0) b36)))))
+
+(defun wg-time-to-b36 (&optional time)
+  "FIXME: docstring this"
+  (apply 'concat
+         (mapcar (lambda (time) (wg-int-to-b36 time 4))
+                 (or time (current-time)))))
+
+;; (wg-time-to-b36)
+;; (prin1-to-string (current-buffer))
+;; (wg-int-to-b36 123123 1)
+;; (format "%06d is padded on the left with zeros" 123)
+;; (let ((org-id-method 'org)) (org-id-new))
+;; (current-time)
 
 
 
@@ -1333,7 +1388,7 @@ WORKGROUP-SET nil defaults to `wg-workgroup-set'."
 
 (defun wg-new-buffer-uid ()
   "Return a buffer uid greater than any in `wg-workgroup-set-tracked-buffers'."
-  (wg-greater-than-all (wg-workgroup-set-tracked-buffers) 'wg-buffer-uid))
+  (concat (wg-time-to-b36) "-" (wg-int-to-b36 string-chars-consed)))
 
 (defun wg-buffer-uid (bufobj)
   "Return BUFOBJ's uid."
@@ -1346,21 +1401,29 @@ WORKGROUP-SET nil defaults to `wg-workgroup-set'."
 
 (defun wg-get-tracked-buffer-by-uid (uid)
   "FIXME: docstring this"
-  (wg-get1 (buf (wg-workgroup-set-tracked-buffers))
-    (= uid (wg-buffer-uid buf))))
+  (wg-get1 (wgbuf (wg-workgroup-set-tracked-buffers))
+    (equal uid (wg-buffer-uid wgbuf))))
 
+;; FIXME: `wg-get-bufobj' should be moved above this point
+
+;; FIXME: remove the error after things stabilize, since the call to
+;; `wg-get-tracked-buffer-by-uid' is inefficient
 (defun wg-track-buffer (buffer)
   "FIXME: docstring this"
-  (wg-aif (wg-buffer-uid buffer)
-      (if (wg-get-tracked-buffer-by-uid it) it
-        (error "This shouldn't happen"))
-    (let ((new-uid (wg-new-buffer-uid))
-          (wgbuf (wg-serialize-buffer buffer)))
-      (with-current-buffer buffer (setq wg-buffer-uid new-uid))
-      (wg-set wgbuf 'uid new-uid)
+  (wg-acond
+   ((wg-buffer-uid buffer)
+    (if (wg-get-tracked-buffer-by-uid it) it
+      (error "This shouldn't happen.")))
+   ((wg-get-bufobj buffer (wg-workgroup-set-tracked-buffers))
+    (wg-buffer-local-setq buffer wg-buffer-uid (wg-get it 'uid)))
+   (t
+    (let* ((wgbuf (wg-serialize-buffer buffer))
+           (uid (wg-get wgbuf 'uid)))
+      (wg-buffer-local-setq buffer wg-buffer-uid uid)
       (wg-set-workgroup-set-tracked-buffers
        nil (cons wgbuf (wg-workgroup-set-tracked-buffers)))
-      new-uid)))
+      uid))))
+
 
 
 ;;; wconfig construction
@@ -1394,6 +1457,7 @@ EWIN should be an Emacs window object."
   "Return a serialized buffer from Emacs buffer BUFFER."
   (with-current-buffer buffer
     (wg-make-object 'buffer
+      'uid          (wg-new-buffer-uid)
       'bname        (buffer-name)
       'fname        (buffer-file-name)
       'major-mode   major-mode
@@ -1813,6 +1877,55 @@ Otherwise, reverse WTREE vertically."
       (funcall deserializer-fn)
     (error (message "Error deserializing %S: %S" wg-buffer-name err))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; FIXME:
+;;
+;; <jlf> ok, not sure i'll remember the exact sequence of events but it was
+;;       something like this:                                              [10:47]
+;; <jlf> first, i had ~/.emacs.d/google.el and ~/.emacs.d/erbot/contrib/google.el
+;;       open in side by side windows with the "irc" workgroup current, the only
+;;       wg existent.  i finished an ediff-buffers session and went looking for
+;;       wg-create-wg-from-current-window-layout in C-h m but didn't see it, so i
+;;       went ahead and did wg-create-workgroup thinking that might do it, but it
+;;       created a new wg with a single *scratch* window.  at the same time it
+;;       gave an                                                           [10:50]
+;; <jlf> error about buffer google.el:
+;; <jlf> Mark saved where search started
+;; <jlf> Switched:  ( < 0: irc > | -<{ 1: google }>- )
+;; <jlf> Created: google  ( < 0: irc > | -<{ 1: google }>- )
+;; <jlf> save-current-buffer: No buffer named google.el
+;; <jlf>
+;; <jlf> (from *Messages*)
+;; <jlf> so the apparent bug is that it seems to have been confused by the
+;;       existence of two identically named google.el buffers visiting different
+;;       files                                                             [10:51]
+;; <jlf> i also use uniquify.el if that matters
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+;; ;; FIXME: Tag the restored buffer with the wgbuf's UID.
+;; (defun wg-restore-buffer (wgbuf)
+;;   "Restore WGBUF and return it."
+;;   (wg-bind-params wgbuf
+;;       ((wg-buffer-name bname)
+;;        (wg-buffer-file-name fname)
+;;        (wg-buffer-major-mode major-mode)
+;;        (wg-buffer-mark mark)
+;;        (wg-buffer-mark-active markx)
+;;        (wg-buffer-extended-serialization extended))
+;;     (wg-acond ((wg-get-buffer wg-buffer-name wg-buffer-file-name)
+;;                (wg-restore-existing-buffer it))
+;;               ((wg-mode-deserializer wg-buffer-major-mode)
+;;                (wg-restore-extended-buffer it))
+;;               (wg-buffer-file-name
+;;                (wg-restore-file-buffer))
+;;               (t (wg-restore-default-buffer)))
+;;     (wg-buffer-local-setq
+;;      (window-buffer (selected-window))
+;;      'wg-buffer-uid wg-current-wgbuf-uid)))
+
 (defun wg-restore-buffer (wgbuf)
   "Restore WGBUF and return it."
   (wg-bind-params wgbuf
@@ -1821,14 +1934,24 @@ Otherwise, reverse WTREE vertically."
        (wg-buffer-major-mode major-mode)
        (wg-buffer-mark mark)
        (wg-buffer-mark-active markx)
-       (wg-buffer-extended-serialization extended))
+       (wg-buffer-extended-serialization extended)
+       (wg-current-wgbuf-uid uid))
     (wg-acond ((wg-get-buffer wg-buffer-name wg-buffer-file-name)
                (wg-restore-existing-buffer it))
               ((wg-mode-deserializer wg-buffer-major-mode)
                (wg-restore-extended-buffer it))
               (wg-buffer-file-name
                (wg-restore-file-buffer))
-              (t (wg-restore-default-buffer)))))
+              (t (wg-restore-default-buffer)))
+    (let ((cb (window-buffer wg-selected-window)))
+      (wg-aif (buffer-local-value 'wg-buffer-uid cb)
+          (unless (equal it wg-current-wgbuf-uid)
+            (error "This shouldn't happen"))
+        (wg-buffer-local-setq
+         cb wg-buffer-uid wg-current-wgbuf-uid)))))
+
+;; (buffer-local-value 'wg-buffer-uid (current-buffer))
+;; (wg-workgroup-set-tracked-buffers)
 
 ;; (defun wg-restore-window (wg-window)
 ;;   "Restore WG-WINDOW in `selected-window'."
@@ -1859,13 +1982,13 @@ Otherwise, reverse WTREE vertically."
 (defun wg-restore-window (wg-window)
   "Restore WG-WINDOW in `selected-window'."
   (wg-bind-params wg-window
-      ((wg-current-wgbuf-uid buffer)
-       (wg-window-point point)
+      ((wg-window-point point)
        (wg-window-start wstart)
        (wg-window-hscroll hscroll)
        sbars fringes margins selwin mbswin)
     (let ((wg-selected-window (selected-window))
-          (wg-current-wgbuf (wg-get-tracked-buffer-by-uid wg-current-wgbuf-uid)))
+          (wg-current-wgbuf (wg-get-tracked-buffer-by-uid
+                             (wg-get wg-window 'buffer))))
       (wg-restore-buffer wg-current-wgbuf)
       (when selwin
         (setq wg-window-tree-selected-window wg-selected-window))
@@ -2090,6 +2213,8 @@ See `wg-get-bufobj' for allowable values for BUFOBJ1 and BUFOBJ2."
           ((wg-bufobj-file-name bufobj2) nil)
           ((equal (wg-bufobj-name bufobj1) (wg-bufobj-name bufobj2))))))
 
+;; FIXME: dispatch to type-specific functions to speed this up
+;; FIXME: needs a smarter heuristic to determine wgbuf->buffer reference
 (defun wg-get-bufobj (bufobj bufobj-list)
   "Return the bufobj in BUFOBJ-LIST corresponding to BUFOBJ, or nil.
 BUFOBJ should be a Workgroups buffer, an Emacs buffer, or an
@@ -2241,6 +2366,10 @@ WORKGROUP should be a value accepted by
 
 ;; workgroup associated buffers
 
+;; FIXME: convert all this to reference by UID, including the association type
+;; FIXME: change soft/hard to weakly/strongly
+;; FIXME: refactor and clean up all this stuff -- a lot of it's no longer necessary
+
 (defun wg-workgroup-associated-buffers (workgroup)
   "Return the associated-buffers of WORKGROUP."
   (wg-workgroup-parameter workgroup 'associated-buffers))
@@ -2249,6 +2378,7 @@ WORKGROUP should be a value accepted by
   "Set WORKGROUP's `associated-buffers' to WGBUFS."
   (wg-set-workgroup-parameter workgroup 'associated-buffers wgbufs))
 
+;; FIXME: Maybe this should move near `wg-get-bufobj'
 (defun wg-workgroup-get-wgbuf (workgroup bufobj &optional noerror)
   "Return the wgbuf corresponding to BUFOBJ in WORKGROUP's
 associated-buffers list, or error unless NOERROR."
@@ -2867,6 +2997,8 @@ existing workgroup, offer to create it."
 
 ;;; mode-line
 
+;; FIXME: add mouse-over text explaining mode-line elements
+
 (defun wg-mode-line-decor (decor-symbol)
   "Return DECOR-SYMBOL's decoration string in `wg-mode-line-decor-alist'."
   (wg-aget wg-mode-line-decor-alist decor-symbol))
@@ -3296,6 +3428,7 @@ Use `current-prefix-arg' for N if non-nil.  Otherwise N defaults to 1."
                  (wg-switch-to-workgroup-at-index ,i))))))
   (define-wg-switch-to-workgroup-at-index-range 10))
 
+;; FIXME: If there's only one workgroup, give a more informative error msg.
 (defun wg-switch-to-cyclic-nth-from-workgroup (workgroup n)
   "Switch N workgroups cyclically from WORKGROUP in `wg-workgroup-list.'"
   (wg-switch-to-workgroup
@@ -3309,7 +3442,6 @@ Use `current-prefix-arg' for N if non-nil.  Otherwise N defaults to 1."
   (interactive (list nil current-prefix-arg))
   (wg-switch-to-cyclic-nth-from-workgroup workgroup (- (or n 1))))
 
-;; FIXME: If there's only one workgroup, give a more informative error msg.
 (defun wg-switch-to-workgroup-right (&optional workgroup n)
   "Switch to the workgroup N places from WORKGROUP in `wg-workgroup-list'.
 Use `current-prefix-arg' for N if non-nil.  Otherwise N defaults to 1."
@@ -3759,7 +3891,7 @@ Called interactively with a prefix arg, or if `wg-visited-file-name'
 is nil, read a filename.  Otherwise use `wg-visited-file-name'."
   (interactive
    (list (if (or current-prefix-arg (not (wg-visited-file-name t)))
-             (read-file-name "File: ") (wg-visited-file-name))))
+             (read-file-name "File to save in: ") (wg-visited-file-name))))
   (if (and (not force) (not (wg-dirty-p)))
       (wg-message "(No workgroups need to be saved)")
     (setq wg-visited-file-name file)
