@@ -62,8 +62,7 @@
 
 ;;; consts
 
-(defconst wg-version "1.0.0"
-  "Current version of workgroups.")
+(defconst wg-version "1.0.0" "This version of Workgroups.")
 
 
 
@@ -176,6 +175,8 @@ minibuffer is active."
 
 ;; workgroup restoration customization
 
+;; FIXME: major-mode isn't sufficient to determine whether a serdes is defined
+;; for a fileless buffer.  It needs to be a predicate on the buffer.
 (defcustom wg-mode-serdes-definitions
   '((Info-mode wg-serialize-Info-mode-buffer wg-deserialize-Info-mode-buffer)
     (help-mode wg-serialize-help-mode-buffer wg-deserialize-help-mode-buffer))
@@ -856,7 +857,7 @@ Iterative to prevent stack overflow."
 
   (defun wg-range (start end)
     "Return a list of integers from START up to but not including END."
-    (let ((start (or start 0)) accum)
+    (let (accum)
       (dotimes (i (- end start) (nreverse accum))
         (push (+ start i) accum))))
 
@@ -1082,23 +1083,28 @@ variable, and the cadr as the key."
                     (wg-aget ,asym ',(if c (cadr bind) bind))))))
        ,@body)))
 
-(defmacro wg-fill-hash-table (table &rest key-value-pairs)
+(defun wg-fill-hash-table (table &rest key-value-pairs)
   "Fill TABLE with KEY-VALUE-PAIRS and return TABLE."
-  (declare (indent 1))
-  (wg-with-gensyms (tabsym)
-    `(let ((,tabsym ,table))
-       ,@(wg-docar (pair (wg-partition key-value-pairs 2))
-           `(puthash ,@pair ,tabsym))
-       ,tabsym)))
+  (while key-value-pairs
+    (puthash (car key-value-pairs) (cadr key-value-pairs) table)
+    (setq key-value-pairs (cddr key-value-pairs)))
+  table)
 
-(defmacro wg-fill-keymap (keymap &rest binds)
+;; (defmacro wg-fill-keymap (keymap &rest binds)
+;;   "Return KEYMAP after defining in it all keybindings in BINDS."
+;;   (declare (indent 1))
+;;   (wg-with-gensyms (km)
+;;     `(let ((,km ,keymap))
+;;        ,@(wg-docar (b (wg-partition binds 2))
+;;            `(define-key ,km ,@b))
+;;        ,km)))
+
+(defun wg-fill-keymap (keymap &rest binds)
   "Return KEYMAP after defining in it all keybindings in BINDS."
-  (declare (indent 1))
-  (wg-with-gensyms (km)
-    `(let ((,km ,keymap))
-       ,@(wg-docar (b (wg-partition binds 2))
-           `(define-key ,km ,@b))
-       ,km)))
+  (while binds
+    (define-key keymap (car binds) (cadr binds))
+    (setq binds (cddr binds)))
+  keymap)
 
 (defun wg-write-sexp-to-file (sexp file)
   "Write the printable representation of SEXP to FILE."
@@ -1905,26 +1911,7 @@ Otherwise, reverse WTREE vertically."
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-;; ;; FIXME: Tag the restored buffer with the wgbuf's UID.
-;; (defun wg-restore-buffer (wgbuf)
-;;   "Restore WGBUF and return it."
-;;   (wg-bind-params wgbuf
-;;       ((wg-buffer-name bname)
-;;        (wg-buffer-file-name fname)
-;;        (wg-buffer-major-mode major-mode)
-;;        (wg-buffer-mark mark)
-;;        (wg-buffer-mark-active markx)
-;;        (wg-buffer-extended-serialization extended))
-;;     (wg-acond ((wg-get-buffer wg-buffer-name wg-buffer-file-name)
-;;                (wg-restore-existing-buffer it))
-;;               ((wg-mode-deserializer wg-buffer-major-mode)
-;;                (wg-restore-extended-buffer it))
-;;               (wg-buffer-file-name
-;;                (wg-restore-file-buffer))
-;;               (t (wg-restore-default-buffer)))
-;;     (wg-buffer-local-setq
-;;      (window-buffer (selected-window))
-;;      'wg-buffer-uid wg-current-wgbuf-uid)))
+;; FIXME: Add restore-extended-serialization customization option
 
 (defun wg-restore-buffer (wgbuf)
   "Restore WGBUF and return it."
@@ -1979,6 +1966,8 @@ Otherwise, reverse WTREE vertically."
 ;;         (set-window-margins wg-selected-window left-width right-width)))))
 
 ;; FIXME: fix varnames here to reflect buffer uids
+;; FIXME: fringes, margins, scroll-bars, etc. shouldn't be restored with the
+;; buffer, not the window
 (defun wg-restore-window (wg-window)
   "Restore WG-WINDOW in `selected-window'."
   (wg-bind-params wg-window
@@ -2366,7 +2355,7 @@ WORKGROUP should be a value accepted by
 
 ;; workgroup associated buffers
 
-;; FIXME: convert all this to reference by UID, including the association type
+;; FIXME: convert all this to reference by UID.  Include the association type
 ;; FIXME: change soft/hard to weakly/strongly
 ;; FIXME: refactor and clean up all this stuff -- a lot of it's no longer necessary
 
@@ -2388,6 +2377,7 @@ associated-buffers list, or error unless NOERROR."
                (wg-bufobj-name bufobj)
                (wg-workgroup-name workgroup)))))
 
+;; FIXME: this is bollox
 (defun wg-workgroup-buffer-association-type (workgroup bufobj)
   "Return BUFOBJ's association-type in WORKGROUP, or nil if unassociated."
   (wg-awhen (wg-workgroup-get-wgbuf workgroup bufobj t)
@@ -3358,8 +3348,8 @@ Added to `iswitchb-make-buflist-hook'."
     (wg-read-object
      (or prompt (format "Name (default: %S): " default))
      (lambda (new) (and (stringp new)
-                        (not (equal new ""))
-                        (wg-unique-workgroup-name-p new)))
+                   (not (equal new ""))
+                   (wg-unique-workgroup-name-p new)))
      "Please enter a unique, non-empty name"
      nil nil nil nil default)))
 
@@ -3490,7 +3480,7 @@ as well.  For that, use `wg-clone-workgroup'."
 Keep in mind that only WORKGROUP's top-level alist structure is
 copied, so destructive operations on the keys or values of
 WORKGROUP will be reflected in the clone, and vice-versa.  Be
-safe -- be immutable."
+safe -- don't mutate them."
   (interactive (list (wg-current-workgroup) (wg-read-new-workgroup-name)))
   (let ((clone (wg-copy-workgroup workgroup)))
     (wg-set-workgroup-name clone name)
@@ -4088,6 +4078,11 @@ command's docstring;  But why, when there's `apropos-command'?"
 
 
 ;;; wg-minibuffer-mode commands
+
+;; FIXME: These commands should give a more informative error msg when no
+;; workgroups are defined than "C-x C-n is undefined", etc.
+;; `wg-minibuffer-mode' isn't currently turned on when no workgroups are
+;; defined.
 
 (defun wg-next-buffer-list-filter ()
   "Trigger a switch to the next buffer-list-filter."
