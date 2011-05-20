@@ -49,6 +49,9 @@
 ;; WGBUF always refers to a Workgroups buffer object.
 
 
+;; FIXME: convert alist objects to structs.  Write a defstruct wrapper to
+;; namespace-prefix the generated `copy-NAME' and `make-NAME' fns
+
 
 ;;; Code:
 
@@ -956,13 +959,6 @@ Return M when the difference between N and M is less than STEP."
   "Return t when NUM is within bounds LO and HI.
 HI-INCLUSIVE non-nil means the HI bound is inclusive."
   (and (>= num lo) (if hi-inclusive (<= num hi) (< num hi))))
-
-(defun wg-greater-than-all (list &optional key)
-  "Return an integer 1 greater than any in LIST.
-Non-nil, KEY behaves as in cl-seq."
-  (let ((n -1))
-    (dolist (elt list (1+ n))
-      (setq n (max n (if key (funcall key elt) elt))))))
 
 (defun wg-filter (pred seq)
   "Return a list of elements in SEQ on which PRED returns non-nil."
@@ -2333,9 +2329,10 @@ WORKGROUP should be a value accepted by
   "Return a list of workgroups uids."
   (mapcar 'wg-workgroup-uid (wg-workgroup-list noerror)))
 
+;; FIXME: convert this to return b36 uids
 (defun wg-new-workgroup-uid ()
   "Return a uid greater than any in `wg-workgroup-list'."
-  (wg-greater-than-all (wg-workgroup-list t) 'wg-workgroup-uid))
+  (wg-aif (wg-workgroup-uids t) (1+ (apply 'max it)) 0))
 
 
 ;; workgroup name
@@ -2359,92 +2356,220 @@ WORKGROUP should be a value accepted by
 ;; FIXME: change soft/hard to weakly/strongly
 ;; FIXME: refactor and clean up all this stuff -- a lot of it's no longer necessary
 
+;; (defun wg-workgroup-associated-buffers (workgroup)
+;;   "Return the associated-buffers of WORKGROUP."
+;;   (wg-workgroup-parameter workgroup 'associated-buffers))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; (defun wg-workgroup-strongly-associated-buffer-uids (workgroup)
+;;   "FIXME: docstring this"
+;;   (wg-workgroup-parameter workgroup 'strongly-associated-buffer-uids))
+;; (defun wg-workgroup-weakly-associated-buffer-uids (workgroup)
+;;   "FIXME: docstring this"
+;;   (wg-workgroup-parameter workgroup 'weakly-associated-buffer-uids))
+;; (defun wg-workgroup-strongly-associated-buffers (workgroup)
+;;   "FIXME: docstring this"
+;;   (mapcar 'wg-get-tracked-buffer-by-uid
+;;           (wg-workgroup-strongly-associated-buffer-uids)))
+;; (defun wg-workgroup-weakly-associated-buffers (workgroup)
+;;   "FIXME: docstring this"
+;;   (mapcar 'wg-get-tracked-buffer-by-uid
+;;           (wg-workgroup-weakly-associated-buffer-uids)))
+;; (defun wg-workgroup-associated-buffer-uids (workgroup)
+;;   "Return WORKGROUP's strongly and weakly associated buffer uids."
+;;   (append (wg-workgroup-strongly-associated-buffer-uids workgroup)
+;;           (wg-workgroup-weakly-associated-buffer-uids workgroup)))
+;; ;; (defun wg-workgroup-associated-buffers (workgroup)
+;; ;;   "FIXME: docstring this"
+;; ;;   (wg-workgroup-parameter workgroup 'associated-buffers))
+;; (defun wg-workgroup-associated-buffers (workgroup)
+;;   "FIXME: docstring this"
+;;   (append (wg-workgroup-strongly-associated-buffers workgroup)
+;;           (wg-workgroup-weakly-associated-buffers workgroup)))
+;; ;; (defun wg-set-workgroup-associated-buffers (workgroup wgbufs)
+;; ;;   "Set WORKGROUP's `associated-buffers' to WGBUFS."
+;; ;;   (wg-set-workgroup-parameter workgroup 'associated-buffers wgbufs))
+;; ;; (defun wg-set-workgroup-associated-buffers (workgroup list)
+;; ;;   "Set WORKGROUP's `associated-buffers' to LIST."
+;; ;;   (wg-set-workgroup-parameter workgroup 'associated-buffers list))
+;; (defun wg-set-workgroup-strongly-associated-buffer-uids (workgroup uids)
+;;   "Set WORKGROUP's `strongly-associated-buffer-uids' to UIDS."
+;;   (wg-set-workgroup-parameter workgroup 'strongly-associated-buffer-uids uids))
+;; (defun wg-set-workgroup-weakly-associated-buffers (workgroup uids)
+;;   "Set WORKGROUP's `weakly-associated-buffer-uids' to UIDS."
+;;   (wg-set-workgroup-parameter workgroup 'weakly-associated-buffer-uids uids))
+;; ;; FIXME: Maybe this should move near `wg-get-bufobj'
+;; (defun wg-workgroup-get-wgbuf (workgroup bufobj &optional noerror)
+;;   "Return the wgbuf in WORKGROUP's associated buffers list
+;; corresponding to BUFOBJ, or error unless NOERROR."
+;;   (or (wg-get-bufobj bufobj (wg-workgroup-strongly-associated-buffers workgroup))
+;;       (wg-get-bufobj bufobj (wg-workgroup-weakly-associated-buffers workgroup))
+;;       (unless noerror
+;;         (error "%S is not associated with %S"
+;;                (wg-bufobj-name bufobj)
+;;                (wg-workgroup-name workgroup)))))
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun wg-workgroup-associated-buffer-entries (workgroup)
+  "FIXME: docstring this"
+  (wg-workgroup-parameter workgroup 'associated-buffer-entries))
+
+(defun wg-set-workgroup-associated-buffer-entries (workgroup entries)
+  "Set WORKGROUP's `strongly-associated-buffer-uids' to ENTRIES."
+  (wg-set-workgroup-parameter workgroup 'associated-buffer-entries entries))
+
 (defun wg-workgroup-associated-buffers (workgroup)
-  "Return the associated-buffers of WORKGROUP."
-  (wg-workgroup-parameter workgroup 'associated-buffers))
+  "FIXME: docstring this"
+  (mapcar (lambda (entry) (wg-get-tracked-buffer-by-uid (car entry)))
+          (wg-workgroup-associated-buffer-entries workgroup)))
 
-(defun wg-set-workgroup-associated-buffers (workgroup wgbufs)
-  "Set WORKGROUP's `associated-buffers' to WGBUFS."
-  (wg-set-workgroup-parameter workgroup 'associated-buffers wgbufs))
-
-;; FIXME: Maybe this should move near `wg-get-bufobj'
 (defun wg-workgroup-get-wgbuf (workgroup bufobj &optional noerror)
-  "Return the wgbuf corresponding to BUFOBJ in WORKGROUP's
-associated-buffers list, or error unless NOERROR."
+  "Return WORKGROUP's associated wgbuf corresponding to BUFOBJ."
   (or (wg-get-bufobj bufobj (wg-workgroup-associated-buffers workgroup))
       (unless noerror
         (error "%S is not associated with %S"
                (wg-bufobj-name bufobj)
                (wg-workgroup-name workgroup)))))
 
-;; FIXME: this is bollox
+(defun wg-get-tracked-buffer (bufobj)
+  "FIXME: docstring this"
+  (wg-get-bufobj bufobj (wg-workgroup-set-tracked-buffers)))
+
+;; ;; FIXME: this is bollox
+;; (defun wg-workgroup-buffer-association-type (workgroup bufobj)
+;;   "Return BUFOBJ's association-type in WORKGROUP, or nil if unassociated."
+;;   (wg-awhen (wg-workgroup-get-wgbuf workgroup bufobj t)
+;;     (wg-get it 'association-type)))
+
+(defun wg-workgroup-associated-buffer-entry (workgroup bufobj)
+  "FIXME: docstring this"
+  (assoc (wg-buffer-uid (wg-get-tracked-buffer bufobj))
+         (wg-workgroup-associated-buffer-entries workgroup)))
+
 (defun wg-workgroup-buffer-association-type (workgroup bufobj)
   "Return BUFOBJ's association-type in WORKGROUP, or nil if unassociated."
-  (wg-awhen (wg-workgroup-get-wgbuf workgroup bufobj t)
-    (wg-get it 'association-type)))
+  (wg-awhen (wg-workgroup-associated-buffer-entry workgroup bufobj)
+    (if (cdr it) 'soft 'hard)))
 
-(defun wg-wgbuf-soft-associated-p (wgbuf)
-  "Return t if WGBUF's `association-type' is `soft'."
-  (eq (wg-get wgbuf 'association-type) 'soft))
+;; (defun wg-workgroup-wgbuf-soft-associated-p (workgroup wgbuf)
+;;   "Return t if WGBUF's `association-type' is `soft'."
+;;   (eq (wg-workgroup-buffer-association-type workgroup wgbuf) 'soft))
+;; (defun wg-workgroup-wgbuf-hard-associated-p (wgbuf)
+;;   "Return t if WGBUF's `association-type' is `hard'."
+;;   (eq (wg-workgroup-buffer-association-type workgroup wgbuf) 'hard))
 
-(defun wg-wgbuf-hard-associated-p (wgbuf)
-  "Return t if WGBUF's `association-type' is `hard'."
-  (eq (wg-get wgbuf 'association-type) 'hard))
+;; (defun wg-buffer-hard-associated-p (workgroup bufobj)
+;;   "Return t if BUFOBJ is hard-associated with WORKGROUP."
+;;   (wg-awhen (wg-workgroup-associated-buffer-entry workgroup bufobj)
+;;     (wg-workgroup-hard-associated-buffer-entry-p it)))
+;; (defun wg-buffer-soft-associated-p (workgroup bufobj)
+;;   "Return t if BUFOBJ is soft-associated with WORKGROUP."
+;;   (wg-awhen (wg-workgroup-associated-buffer-entry workgroup bufobj)
+;;     (wg-workgroup-soft-associated-buffer-entry-p it)))
 
-(defun wg-buffer-soft-associated-p (workgroup bufobj)
-  "Return t if BUFOBJ is soft-associated with WORKGROUP."
-  (wg-awhen (wg-workgroup-get-wgbuf workgroup bufobj t)
-    (wg-wgbuf-soft-associated-p it)))
+(defun wg-workgroup-hard-associated-buffer-entry-p (entry)
+  "FIXME: docstring this"
+  (not (cdr entry)))
 
-(defun wg-buffer-hard-associated-p (workgroup bufobj)
-  "Return t if BUFOBJ is hard-associated with WORKGROUP."
-  (wg-awhen (wg-workgroup-get-wgbuf workgroup bufobj t)
-    (wg-wgbuf-hard-associated-p it)))
+(defun wg-workgroup-soft-associated-buffer-entry-p (entry)
+  "FIXME: docstring this"
+  (cdr entry))
 
-(defun wg-check-association-type (type)
-  "Error unless TYPE is a valid association type."
-  (if (memq type '(soft hard nil)) type
-    (error "%S is not a valid association type" type)))
+;; (defun wg-check-association-type (type)
+;;   "Error unless TYPE is a valid association type."
+;;   (if (memq type '(soft hard nil)) type
+;;     (error "%S is not a valid association type" type)))
 
-(defun wg-workgroup-associate-buffer (workgroup bufobj type &optional noerror)
-  "Add BUFOBJ to WORKGROUP.
-If TYPE is non-nil, set BUFOBJ's `association-type' parameter to it.
-See `wg-get-bufobj' for allowable values for BUFOBJ."
-  (wg-check-association-type type)
-  (if (wg-workgroup-get-wgbuf workgroup bufobj t)
-      (unless noerror
-        (error "%S is already associated with %S"
-               (wg-bufobj-name bufobj)
-               (wg-workgroup-name workgroup)))
-    (let ((wgbuf (wg-get-wgbuf bufobj)))
-      (wg-set wgbuf 'association-type type)
-      (wg-set-workgroup-associated-buffers
-       workgroup (cons wgbuf (wg-workgroup-associated-buffers workgroup)))
-      wgbuf)))
+;; (defun wg-workgroup-associate-buffer (workgroup bufobj type &optional noerror)
+;;   "Add BUFOBJ to WORKGROUP.
+;; If TYPE is non-nil, set BUFOBJ's `association-type' parameter to it.
+;; See `wg-get-bufobj' for allowable values for BUFOBJ."
+;;   (wg-check-association-type type)
+;;   (if (wg-workgroup-get-wgbuf workgroup bufobj t)
+;;       (unless noerror
+;;         (error "%S is already associated with %S"
+;;                (wg-bufobj-name bufobj)
+;;                (wg-workgroup-name workgroup)))
+;;     (let ((wgbuf (wg-get-wgbuf bufobj)))
+;;       (wg-set wgbuf 'association-type type)
+;;       (wg-set-workgroup-associated-buffers
+;;        workgroup (cons wgbuf (wg-workgroup-associated-buffers workgroup)))
+;;       wgbuf)))
 
-(defun wg-workgroup-dissociate-buffer (workgroup bufobj &optional noerror)
+;; (wg-track-buffer
+
+;; (defun wg-workgroup-dissociate-buffer (workgroup bufobj &optional noerror)
+;;   "Dissociate BUFOBJ from WORKGROUP.
+;; See `wg-get-bufobj' for allowable values for BUFOBJ."
+;;   (wg-awhen (wg-workgroup-get-wgbuf workgroup bufobj noerror)
+;;     (wg-set-workgroup-associated-buffers
+;;      workgroup (remove it (wg-workgroup-associated-buffers workgroup)))
+;;     it))
+
+;; (defun wg-workgroup-associate-buffer (workgroup bufobj &optional soft)
+;;   "Add BUFOBJ to WORKGROUP. FIXME: docstring this"
+;;   (when (bufferp bufobj) (wg-track-buffer bufobj))
+;;   (let* ((uid (wg-buffer-uid bufobj))
+;;          (entries (wg-workgroup-associated-buffer-entries workgroup))
+;;          (entries (wg-aif (assoc uid entries) (remove it entries) entries)))
+;;     (wg-set-workgroup-associated-buffer-entries
+;;      workgroup (acons uid (not soft) entries))))
+
+;; (defun wg-workgroup-associate-buffer (workgroup bufobj &optional soft)
+;;   "Add BUFOBJ to WORKGROUP. FIXME: docstring this"
+;;   (when (bufferp bufobj) (wg-track-buffer bufobj))
+;;   (let* ((uid (wg-buffer-uid bufobj))
+;;          (entries (wg-workgroup-associated-buffer-entries workgroup))
+;;          (entry (assoc uid entries)))
+;;     (cond ((not entry)
+;;            (wg-set-workgroup-associated-buffer-entries
+;;             workgroup (acons uid (not soft) entries)))
+;;           ((not (eq soft (cdr entry)))
+;;            (wg-set-workgroup-associated-buffer-entries
+;;             workgroup (acons uid (not soft) (remove entry entries))))
+;;           (t nil))))
+
+;; FIXME: clean this up
+(defun wg-workgroup-associate-buffer (workgroup bufobj &optional soft)
+  "Add BUFOBJ to WORKGROUP. FIXME: docstring this"
+  (when (bufferp bufobj) (wg-track-buffer bufobj))
+  (let* ((uid (wg-buffer-uid bufobj))
+         (entries (wg-workgroup-associated-buffer-entries workgroup))
+         (entry (assoc uid entries)))
+    (unless (and entry (eq soft (cdr entry)))
+      (wg-set-workgroup-associated-buffer-entries
+       workgroup (acons uid soft (if entry (remove entry entries) entries)))
+      uid)))
+
+;; FIXME: clean this up
+(defun wg-workgroup-dissociate-buffer (workgroup bufobj)
   "Dissociate BUFOBJ from WORKGROUP.
 See `wg-get-bufobj' for allowable values for BUFOBJ."
-  (wg-awhen (wg-workgroup-get-wgbuf workgroup bufobj noerror)
-    (wg-set-workgroup-associated-buffers
-     workgroup (remove it (wg-workgroup-associated-buffers workgroup)))
-    it))
+  (when (bufferp bufobj) (wg-track-buffer bufobj))
+  (let ((uid (wg-buffer-uid bufobj))
+        (entries (wg-workgroup-associated-buffer-entries workgroup)))
+    (wg-awhen (assoc uid entries)
+      (wg-set-workgroup-associated-buffer-entries
+       workgroup (remove it entries))
+      uid)))
 
-(defun wg-workgroup-update-buffer (workgroup bufobj type &optional noerror)
-  "Update BUFOBJ in WORKGROUP.
-If TYPE is non-nil, set BUFOBJ's `association-type' parameter to it.
-See `wg-get-bufobj' for allowable values for BUFOBJ."
-  (wg-check-association-type type)
-  (when (wg-workgroup-dissociate-buffer workgroup bufobj noerror)
-    (wg-workgroup-associate-buffer workgroup bufobj type)))
+;; (defun wg-workgroup-update-buffer (workgroup bufobj type &optional noerror)
+;;   "Update BUFOBJ in WORKGROUP.
+;; If TYPE is non-nil, set BUFOBJ's `association-type' parameter to it.
+;; See `wg-get-bufobj' for allowable values for BUFOBJ."
+;;   (wg-check-association-type type)
+;;   (when (wg-workgroup-dissociate-buffer workgroup bufobj noerror)
+;;     (wg-workgroup-associate-buffer workgroup bufobj type)))
 
-(defun wg-workgroup-update-or-associate-buffer (workgroup bufobj type)
-  "Update BUFOBJ in or add it to WORKGROUP.
-If TYPE is non-nil, set BUFOBJ's `association-type' parameter to it.
-See `wg-get-bufobj' for allowable values for BUFOBJ."
-  (wg-check-association-type type)
-  (or (wg-workgroup-update-buffer workgroup bufobj type t)
-      (progn (wg-workgroup-associate-buffer workgroup bufobj type t) nil)))
+;; (defun wg-workgroup-update-or-associate-buffer (workgroup bufobj type)
+;;   "Update BUFOBJ in or add it to WORKGROUP.
+;; If TYPE is non-nil, set BUFOBJ's `association-type' parameter to it.
+;; See `wg-get-bufobj' for allowable values for BUFOBJ."
+;;   (wg-check-association-type type)
+;;   (or (wg-workgroup-update-buffer workgroup bufobj type t)
+;;       (progn (wg-workgroup-associate-buffer workgroup bufobj type t) nil)))
 
 (defun wg-workgroup-live-buffers (workgroup &optional initial names)
   "Return a list of WORKGROUP's live associated buffers."
@@ -2452,27 +2577,61 @@ See `wg-get-bufobj' for allowable values for BUFOBJ."
     (wg-filter-map (lambda (buf) (when (wg-get-bufobj buf assoc-bufs) buf))
                    (or initial (wg-interesting-buffers names)))))
 
+;; (defun wg-workgroup-cycle-buffer-association-type (workgroup bufobj)
+;;   "Cycle the BUFOBJ's association type in WORKGROUP.
+;; If it's hard-associated with the workgroup, mark it as soft-associated.
+;; If it's soft-associated with the workgroup, dissociate it from the workgroup.
+;; If it's not associated with the workgroup, mark it as hard-associated."
+;;   (case (wg-workgroup-buffer-association-type workgroup bufobj)
+;;     (hard (wg-workgroup-update-buffer workgroup bufobj 'soft))
+;;     (soft (wg-workgroup-dissociate-buffer workgroup bufobj))
+;;     (otherwise (wg-workgroup-associate-buffer workgroup bufobj 'hard))))
+
 (defun wg-workgroup-cycle-buffer-association-type (workgroup bufobj)
   "Cycle the BUFOBJ's association type in WORKGROUP.
 If it's hard-associated with the workgroup, mark it as soft-associated.
 If it's soft-associated with the workgroup, dissociate it from the workgroup.
 If it's not associated with the workgroup, mark it as hard-associated."
   (case (wg-workgroup-buffer-association-type workgroup bufobj)
-    (hard (wg-workgroup-update-buffer workgroup bufobj 'soft))
+    (hard (wg-workgroup-associate-buffer workgroup bufobj t))
     (soft (wg-workgroup-dissociate-buffer workgroup bufobj))
-    (otherwise (wg-workgroup-associate-buffer workgroup bufobj 'hard))))
+    (otherwise (wg-workgroup-associate-buffer workgroup bufobj))))
+
+;; (defun wg-workgroup-purge-soft-associated-buffers (workgroup)
+;;   "Remove from WORKGROUP all wgbufs with `association-type' `soft'."
+;;   (wg-set-workgroup-associated-buffers
+;;    workgroup (remove-if 'wg-wgbuf-soft-associated-p
+;;                         (wg-workgroup-associated-buffers workgroup))))
+
+;; (defun wg-workgroup-purge-soft-associated-buffers (workgroup)
+;;   "Remove from WORKGROUP all wgbufs with `association-type' `soft'."
+;;   (wg-set-workgroup-associated-buffers
+;;    workgroup
+;;    (remove* nil (wg-workgroup-associated-buffer-entries workgroup) :key 'cdr)))
+
+;; (defun wg-workgroup-purge-soft-associated-buffers (workgroup)
+;;   "Remove from WORKGROUP all wgbufs with `association-type' `soft'."
+;;   (wg-set-workgroup-associated-buffers
+;;    workgroup (remove-if 'wg-workgroup-soft-associated-buffer-entry-p
+;;                         (wg-workgroup-associated-buffer-entries workgroup))))
 
 (defun wg-workgroup-purge-soft-associated-buffers (workgroup)
   "Remove from WORKGROUP all wgbufs with `association-type' `soft'."
-  (wg-set-workgroup-associated-buffers
-   workgroup (remove-if 'wg-wgbuf-soft-associated-p
-                        (wg-workgroup-associated-buffers workgroup))))
+  (wg-set-workgroup-associated-buffer-entries
+   workgroup (remove-if 'wg-workgroup-soft-associated-buffer-entry-p
+                        (wg-workgroup-associated-buffer-entries workgroup))))
+
+;; (defun wg-auto-dissociate-buffer-hook ()
+;;   "`kill-buffer-hook' that automatically dissociates buffers from workgroups."
+;;   (when wg-dissociate-buffer-on-kill-buffer
+;;     (wg-awhen (wg-current-workgroup t)
+;;       (wg-workgroup-dissociate-buffer it (current-buffer) t))))
 
 (defun wg-auto-dissociate-buffer-hook ()
   "`kill-buffer-hook' that automatically dissociates buffers from workgroups."
   (when wg-dissociate-buffer-on-kill-buffer
     (wg-awhen (wg-current-workgroup t)
-      (wg-workgroup-dissociate-buffer it (current-buffer) t))))
+      (wg-workgroup-dissociate-buffer it (current-buffer)))))
 
 
 ;; filtered buffer-list construction
@@ -3348,8 +3507,8 @@ Added to `iswitchb-make-buflist-hook'."
     (wg-read-object
      (or prompt (format "Name (default: %S): " default))
      (lambda (new) (and (stringp new)
-                   (not (equal new ""))
-                   (wg-unique-workgroup-name-p new)))
+                        (not (equal new ""))
+                        (wg-unique-workgroup-name-p new)))
      "Please enter a unique, non-empty name"
      nil nil nil nil default)))
 
@@ -3777,25 +3936,54 @@ and switch to the next buffer in the buffer-list-filter."
   "Dissociate BUFFER-OR-NAME from the current workgroup, and bury it."
   (interactive)
   (let ((buffer (or buffer-or-name (current-buffer))))
-    (wg-workgroup-dissociate-buffer (wg-current-workgroup) buffer t)
+    (wg-workgroup-dissociate-buffer (wg-current-workgroup) buffer)
     (wg-bury-buffer buffer)))
+
+;; (defun wg-associate-buffer-with-workgroup (workgroup buffer &optional soft)
+;;   "Hard-associate BUFFER with WORKGROUP.  SOFT non-nil means soft-associate."
+;;   (interactive (list nil (current-buffer) current-prefix-arg))
+;;   (let ((bname (buffer-name (get-buffer buffer)))
+;;         (wgname (wg-workgroup-name workgroup)))
+;;     (if (wg-workgroup-update-or-associate-buffer
+;;          workgroup buffer (if soft 'soft 'hard))
+;;         (wg-message "Updated %S in %s" bname wgname)
+;;       (wg-message "%s-associated %S with %s"
+;;                   (if soft "Soft" "Hard") bname wgname))))
+
+;; (defun wg-associate-buffer-with-workgroup (workgroup buffer &optional soft)
+;;   "Hard-associate BUFFER with WORKGROUP.  SOFT non-nil means soft-associate."
+;;   (interactive (list nil (current-buffer) current-prefix-arg))
+;;   (let ((bname (buffer-name (get-buffer buffer)))
+;;         (wgname (wg-workgroup-name workgroup)))
+;;     (if (wg-workgroup-associate-buffer workgroup buffer soft)
+;;         (wg-message "Updated %S in %s" bname wgname)
+;;       (wg-message "%s-associated %S with %s"
+;;                   (if soft "Soft" "Hard") bname wgname))))
+
+;; (defun wg-associate-buffer-with-workgroup (workgroup buffer &optional soft)
+;;   "Hard-associate BUFFER with WORKGROUP.  SOFT non-nil means soft-associate."
+;;   (interactive (list nil (current-buffer) current-prefix-arg))
+;;   (when (wg-workgroup-associate-buffer workgroup buffer soft)
+;;     (wg-message "%s-associated %S with %s"
+;;                 (if soft "Soft" "Hard")
+;;                 (buffer-name (get-buffer buffer))
+;;                 (wg-workgroup-name workgroup))))
 
 (defun wg-associate-buffer-with-workgroup (workgroup buffer &optional soft)
   "Hard-associate BUFFER with WORKGROUP.  SOFT non-nil means soft-associate."
   (interactive (list nil (current-buffer) current-prefix-arg))
   (let ((bname (buffer-name (get-buffer buffer)))
         (wgname (wg-workgroup-name workgroup)))
-    (if (wg-workgroup-update-or-associate-buffer
-         workgroup buffer (if soft 'soft 'hard))
-        (wg-message "Updated %S in %s" bname wgname)
-      (wg-message "%s-associated %S with %s"
-                  (if soft "Soft" "Hard") bname wgname))))
+    (if (wg-workgroup-associate-buffer workgroup buffer soft)
+        (wg-message "%s-associated %S with %s"
+                    (if soft "Soft" "Hard") bname wgname)
+      (wg-message "%S is already associated with %s" bname wgname))))
 
 (defun wg-dissociate-buffer-from-workgroup (workgroup buffer)
   "Dissociate BUFFER from WORKGROUP."
   (interactive (list nil (current-buffer)))
   (wg-message
-   (if (wg-workgroup-dissociate-buffer workgroup buffer t)
+   (if (wg-workgroup-dissociate-buffer workgroup buffer)
        "Dissociated %S from %s" "%S isn't associated with %s")
    (buffer-name (get-buffer buffer))
    (wg-workgroup-name workgroup)))
@@ -4114,9 +4302,19 @@ in which case call `wg-previous-buffer-list-filter'."
   (wg-when-let ((mode (wg-read-buffer-mode))
                 (buffer (wg-current-match mode))
                 (pos (position buffer (wg-filtered-buffer-list t) :test 'equal)))
-    (wg-workgroup-dissociate-buffer nil buffer t)
+    (wg-workgroup-dissociate-buffer nil buffer)
     (wg-set-current-matches
      (wg-rotate-list (wg-filtered-buffer-list t) pos) mode)))
+
+;; (defun wg-associate-first-match ()
+;;   "Associate the first match with or update it in the current workgroup."
+;;   (interactive)
+;;   (wg-when-let ((mode (wg-read-buffer-mode))
+;;                 (buffer (wg-current-match mode))
+;;                 (pos (position buffer (wg-filtered-buffer-list t) :test 'equal)))
+;;     (wg-workgroup-update-or-associate-buffer nil buffer 'hard)
+;;     (wg-set-current-matches
+;;      (wg-rotate-list (wg-filtered-buffer-list t) pos) mode)))
 
 (defun wg-associate-first-match ()
   "Associate the first match with or update it in the current workgroup."
@@ -4124,7 +4322,7 @@ in which case call `wg-previous-buffer-list-filter'."
   (wg-when-let ((mode (wg-read-buffer-mode))
                 (buffer (wg-current-match mode))
                 (pos (position buffer (wg-filtered-buffer-list t) :test 'equal)))
-    (wg-workgroup-update-or-associate-buffer nil buffer 'hard)
+    (wg-workgroup-associate-buffer nil buffer)
     (wg-set-current-matches
      (wg-rotate-list (wg-filtered-buffer-list t) pos) mode)))
 
@@ -4142,11 +4340,21 @@ in which case call `wg-previous-buffer-list-filter'."
 
 ;;; advice
 
+;; (defun wg-auto-associate-buffer-helper (workgroup buffer assoc)
+;;   "Associate BUFFER with WORKGROUP based on ASSOC.
+;; See `wg-buffer-auto-association' for allowable values of ASSOC."
+;;   (cond ((memq assoc '(soft hard))
+;;          (wg-workgroup-associate-buffer workgroup buffer assoc t))
+;;         ((functionp assoc)
+;;          (wg-auto-associate-buffer-helper
+;;           workgroup buffer (funcall assoc workgroup buffer)))
+;;         (t nil)))
+
 (defun wg-auto-associate-buffer-helper (workgroup buffer assoc)
   "Associate BUFFER with WORKGROUP based on ASSOC.
 See `wg-buffer-auto-association' for allowable values of ASSOC."
   (cond ((memq assoc '(soft hard))
-         (wg-workgroup-associate-buffer workgroup buffer assoc t))
+         (wg-workgroup-associate-buffer workgroup buffer (eq assoc 'soft)))
         ((functionp assoc)
          (wg-auto-associate-buffer-helper
           workgroup buffer (funcall assoc workgroup buffer)))
