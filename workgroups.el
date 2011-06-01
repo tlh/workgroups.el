@@ -1,7 +1,7 @@
 ;;; workgroups.el --- Workgroups For Windows (for Emacs)
 ;;
-;; FIXME: some text got deleted here:
 ;; Workgroups is an Emacs session manager providing window-configuration
+;; switching, persistence, undo/redo, killing/yanking, animated morphing,
 ;; per-workgroup buffer-lists, and more.
 
 ;; Copyright (C) 2010 tlh <thunkout@gmail.com>
@@ -3121,7 +3121,7 @@ Added to `iswitchb-make-buflist-hook'."
   "Return a new, unique, default workgroup name."
   (let ((names (wg-workgroup-names t)) (index -1) result)
     (while (not result)
-      (let ((new-name (format "workgroup-%s" (incf index))))
+      (let ((new-name (format "wg%s" (incf index))))
         (unless (member new-name names)
           (setq result new-name))))
     result))
@@ -3137,8 +3137,8 @@ Added to `iswitchb-make-buflist-hook'."
     (wg-read-object
      (or prompt (format "Name (default: %S): " default))
      (lambda (new) (and (stringp new)
-                        (not (equal new ""))
-                        (wg-unique-workgroup-name-p new)))
+                   (not (equal new ""))
+                   (wg-unique-workgroup-name-p new)))
      "Please enter a unique, non-empty name"
      nil nil nil nil default)))
 
