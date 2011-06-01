@@ -643,12 +643,12 @@ temporarily disable flagging `modified'.")
 
 ;; undo vars
 
-(defvar wg-window-config-changed nil
+(defvar wg-window-configuration-changed nil
   "Flag set by `window-configuration-change-hook'.")
 
-(defvar wg-do-not-update-undo-info nil
-  "Flag set when changes to the window config shouldn't cause
-  workgroups' undo info to be updated.")
+(defvar wg-undoify-window-configuration-change t
+  "Flag unset when changes to the window config shouldn't cause
+workgroups' undo info to be updated.")
 
 (defvar wg-just-exited-minibuffer nil
   "Flag set by `minibuffer-exit-hook' to exempt from
@@ -1405,14 +1405,6 @@ Similar to `org-id-int-to-b36'."
     (wg-buf (wg-buf-file-name bufobj))
     (string (wg-bufobj-file-name (wg-get-buffer bufobj)))))
 
-;; (defun wg-equal-bufobjs (bufobj1 bufobj2)
-;;   "Return t if BUFOBJ1 is \"equal\" to BUFOBJ2."
-;;   (let ((fname1 (wg-bufobj-file-name bufobj1))
-;;         (fname2 (wg-bufobj-file-name bufobj2)))
-;;     (cond ((and fname1 fname2) (string= fname1 fname2))
-;;           ((or fname1 fname2) nil)
-;;           ((string= (wg-bufobj-name bufobj1) (wg-bufobj-name bufobj2)) t))))
-
 ;; FIXME: beef this up
 (defun wg-equal-bufobjs (bufobj1 bufobj2)
   "Return t if BUFOBJ1 is \"equal\" to BUFOBJ2."
@@ -2147,20 +2139,6 @@ Assumes both FROM and TO fit in `selected-frame'."
 
 ;;; workgroup utils
 
-;; (defmacro wg-set-workgroup-slot (workgroup accessor value)
-;;   "wg-workgroup slot `setf' wrapper that also sets various 'modified' flags.
-;; WORKGROUP should be a wg-workgroup struct; ACCESSOR should be the
-;; unquoted slot accessor function symbol; And VALUE is the value to
-;; which to set the slot."
-;;   (wg-with-gensyms (wg val)
-;;     `(let ((,wg (wg-get-workgroup ,workgroup))
-;;            (,val ,value))
-;;        (setf (,accessor ,wg) ,val)
-;;        (when wg-flag-modified
-;;          (setf (wg-workgroup-modified ,wg) t)
-;;          (setq wg-modified t))
-;;        ,val)))
-
 (defmacro wg-set-workgroup-slot (workgroup accessor value)
   "wg-workgroup slot `setf' wrapper that also sets various 'modified' flags.
 WORKGROUP should be a wg-workgroup struct; ACCESSOR should be the
@@ -2535,6 +2513,24 @@ Binds `wg-current-workgroup', `wg-current-buffer-command' and
             (,undo-list (wg-workgroup-state-undo-list ,state)))
        ,@body)))
 
+(defun wg-flag-just-exited-minibuffer ()
+  "Added to `minibuffer-exit-hook'."
+  (setq wg-just-exited-minibuffer t))
+
+(defun wg-flag-window-configuration-changed ()
+  "Set `wg-window-configuration-changed' to t unless the
+minibuffer was just exited.  Added to
+`window-configuration-change-hook'."
+  (if wg-just-exited-minibuffer
+      (setq wg-just-exited-minibuffer nil)
+    (setq wg-window-configuration-changed t)))
+
+(defun wg-unflag-undoify-window-configuration-change ()
+  "Set `wg-undoify-window-configuration-change' to nil, exempting
+from undoification any window-configuration changes caused by the
+current command."
+  (setq wg-undoify-window-configuration-change nil))
+
 (defun wg-set-workgroup-working-wconfig (workgroup wconfig)
   "Set the working-wconfig of WORKGROUP to WCONFIG."
   (wg-set-workgroup-slot
@@ -2572,11 +2568,10 @@ unupdated."
 
 (defun wg-restore-wconfig-undoably (wconfig &optional noundo)
   "Restore WCONFIG in `selected-frame', saving undo information."
-  (setq wg-do-not-update-undo-info noundo)
+  (when noundo (wg-unflag-undoify-window-configuration-change))
   (wg-update-current-workgroup-working-wconfig)
   (wg-restore-wconfig wconfig))
 
-;; FIXME: remove the call to `wg-restore-wconfig-undoably'
 (defun wg-increment-workgroup-undo-pointer (workgroup increment)
   "Increment WORKGROUP's undo-pointer by INCREMENT.
 Also restore the wconfig at the incremented undo-pointer if
@@ -2588,63 +2583,23 @@ WORKGROUP is current."
           (wg-restore-wconfig-undoably (nth new-pointer undo-list) t))
         (setf (wg-workgroup-state-undo-pointer state) new-pointer)))))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-;; undo/redo hook functions
-;;
-;; Exempting certain window-configuration changes (e.g. entering and exiting the
-;; minibuffer, and restoring wconfigs in some situations) from undoification is
-;; tricky, which is why all the flag-setting hooks.
-;;
-;; Example hook call order:
-;;
-;; pre-command-hook called ido-switch-buffer
-;; window-configuration-change-hook called
-;; minibuffer-setup-hook called
-;; post-command-hook called
-;; pre-command-hook called self-insert-command
-;; post-command-hook called
-;; ...
-;; pre-command-hook called self-insert-command
-;; post-command-hook called
-;; pre-command-hook called ido-exit-minibuffer
-;; minibuffer-exit-hook called
-;; window-configuration-change-hook called [2 times]
-;; post-command-hook called
-;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defun wg-flag-do-not-update-undo-info ()
-  "Set `wg-do-not-update-undo-info' to t, exempting from
-undoification and window-configuration changes caused by the
-current command."
-  (setq wg-do-not-update-undo-info t))
-
-;; (defun wg-flag-just-exited-minibuffer ()
-;;   "Set `wg-just-exited-minibuffer' on minibuffer exit."
-;;   (setq wg-just-exited-minibuffer t))
-
-(defun wg-flag-just-exited-minibuffer ()
-  (setq wg-do-not-update-undo-info t))
-
-;; (defun wg-flag-wconfig-change ()
-;;   "Conditionally set `wg-window-config-changed' to t.
-;; Added to `window-configuration-change-hook'."
-;;   ;; When there's been a window configuration change,
-;;   (when (and
-;;          ;; and it didn't occur while the minibuffer was active,
-;;          (zerop (minibuffer-depth))
-;;          ;; and it wasn't caused by exiting the minibuffer,
-;;          (not wg-just-exited-minibuffer))
-;;     ;; set the flag to trigger `wg-save-undo-after-wconfig-change',
-;;     (setq wg-window-config-changed t))
-;;   ;; and null this out no matter what:
-;;   (setq wg-just-exited-minibuffer nil))
-
-(defun wg-flag-wconfig-change ()
-  "Conditionally set `wg-window-config-changed' to t.
-Added to `window-configuration-change-hook'."
-  (setq wg-window-config-changed t))
+(defun wg-undoify-window-configuration-change ()
+  "Conditionally `wg-add-wconfig-to-undo-list'.
+Added to `post-command-hook'."
+  (when (and
+         ;; When the window config has changed,
+         wg-window-configuration-changed
+         ;; and undoification is still on for the current command
+         wg-undoify-window-configuration-change
+         ;; and the change didn't occur while the minibuffer is active,
+         (zerop (minibuffer-depth)))
+    ;; and there's a current workgroup,
+    (wg-when-let ((wg (wg-current-workgroup t)))
+      ;; add the current wconfig to that workgroup's undo list:
+      (wg-add-wconfig-to-undo-list wg (wg-frame-to-wconfig))))
+  ;; Reset both flags no matter what:
+  (setq wg-window-configuration-changed nil
+        wg-undoify-window-configuration-change t))
 
 (defun wg-update-working-wconfig-before-command ()
   "Update the current workgroup's working-wconfig before
@@ -2652,28 +2607,6 @@ Added to `window-configuration-change-hook'."
 `pre-command-hook'."
   (when (gethash this-command wg-commands-that-alter-window-configs)
     (wg-update-current-workgroup-working-wconfig)))
-
-(defun wg-save-undo-after-wconfig-change ()
-  "`wg-add-wconfig-to-undo-list' when `wg-window-config-changed'
-is non-nil.  Added to `post-command-hook'."
-  (when (and
-         ;; When the window config has changed,
-         wg-window-config-changed
-         ;; and we haven't specified not to update the undo info,
-         (not wg-do-not-update-undo-info)
-         ;; and the change didn't occur while the minibuffer is active,
-         (zerop (minibuffer-depth)))
-    ;; and there's a current workgroup,
-    (wg-when-let ((wg (wg-current-workgroup t)))
-      ;; add the current wconfig to that workgroup's undo list
-      (wg-add-wconfig-to-undo-list wg (wg-frame-to-wconfig))))
-  ;; and reset both flags
-  (setq wg-window-config-changed nil
-        wg-do-not-update-undo-info nil))
-
-
-
-;; commands that alter window-configs
 
 (defun wg-add-commands-that-modify-window-configs (&rest command-symbols)
   "Add command symbols to `wg-commands-that-alter-window-configs'."
@@ -2728,8 +2661,7 @@ is non-nil.  Added to `post-command-hook'."
     (wg-restore-workgroup-associated-buffers-internal workgroup))
   (let (wg-flag-modified)
     (wg-restore-wconfig-undoably
-     (wg-workgroup-working-wconfig workgroup)
-     t)))
+     (wg-workgroup-working-wconfig workgroup) t)))
 
 
 
@@ -3205,8 +3137,8 @@ Added to `iswitchb-make-buflist-hook'."
     (wg-read-object
      (or prompt (format "Name (default: %S): " default))
      (lambda (new) (and (stringp new)
-                   (not (equal new ""))
-                   (wg-unique-workgroup-name-p new)))
+                        (not (equal new ""))
+                        (wg-unique-workgroup-name-p new)))
      "Please enter a unique, non-empty name"
      nil nil nil nil default)))
 
@@ -4356,21 +4288,35 @@ Called when `workgroups-mode' is turned off."
     (query (wg-query-for-save) t)
     (nosave t)))
 
+;; (defun wg-add-or-remove-workgroups-hooks (remove)
+;;   "Add or remove all of Workgroups' hooks, depending on REMOVE."
+;;   (wg-add-or-remove-hooks
+;;    remove
+;;    'kill-emacs-query-functions 'wg-save-workgroups-on-emacs-exit
+;;    'window-configuration-change-hook 'wg-flag-window-configuration-changed
+;;    'pre-command-hook 'wg-update-working-wconfig-before-command
+;;    'post-command-hook 'wg-undoify-window-configuration-change
+;;    'minibuffer-setup-hook 'wg-turn-on-minibuffer-mode
+;;    'minibuffer-exit-hook 'wg-unflag-undoify-window-configuration-change
+;;    'minibuffer-exit-hook 'wg-turn-off-minibuffer-mode
+;;    'ido-make-buffer-list-hook 'wg-set-ido-buffer-list
+;;    'iswitchb-make-buflist-hook 'wg-set-iswitchb-buffer-list
+;;    'kill-buffer-hook 'wg-auto-dissociate-buffer-hook))
+
 (defun wg-add-or-remove-workgroups-hooks (remove)
   "Add or remove all of Workgroups' hooks, depending on REMOVE."
   (wg-add-or-remove-hooks
    remove
-   'kill-emacs-query-functions       'wg-save-workgroups-on-emacs-exit
-   'window-configuration-change-hook 'wg-flag-wconfig-change
-   'pre-command-hook                 'wg-update-working-wconfig-before-command
-   'post-command-hook                'wg-save-undo-after-wconfig-change
-   'minibuffer-setup-hook            'wg-flag-do-not-update-undo-info
-   'minibuffer-setup-hook            'wg-turn-on-minibuffer-mode
-   'minibuffer-exit-hook             'wg-flag-just-exited-minibuffer
-   'minibuffer-exit-hook             'wg-turn-off-minibuffer-mode
-   'ido-make-buffer-list-hook        'wg-set-ido-buffer-list
-   'iswitchb-make-buflist-hook       'wg-set-iswitchb-buffer-list
-   'kill-buffer-hook                 'wg-auto-dissociate-buffer-hook))
+   'kill-emacs-query-functions 'wg-save-workgroups-on-emacs-exit
+   'window-configuration-change-hook 'wg-flag-window-configuration-changed
+   'pre-command-hook 'wg-update-working-wconfig-before-command
+   'post-command-hook 'wg-undoify-window-configuration-change
+   'minibuffer-setup-hook 'wg-turn-on-minibuffer-mode
+   'minibuffer-exit-hook 'wg-flag-just-exited-minibuffer
+   'minibuffer-exit-hook 'wg-turn-off-minibuffer-mode
+   'ido-make-buffer-list-hook 'wg-set-ido-buffer-list
+   'iswitchb-make-buflist-hook 'wg-set-iswitchb-buffer-list
+   'kill-buffer-hook 'wg-auto-dissociate-buffer-hook))
 
 (defun wg-add-workgroups-mode-minor-mode-entries ()
   "Add Workgroups' minor-mode entries.
