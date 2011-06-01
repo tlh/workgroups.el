@@ -636,10 +636,6 @@ unambiguously pair the two.")
 (defvar wg-visited-file-name nil
   "Current workgroups file.")
 
-;; FIXME: move this into the workgroup-set
-(defvar wg-modified nil
-  "Global modified flag.  Non-nil when there are unsaved changes.")
-
 (defvar wg-flag-modified t
   "Dynamically bound to nil around destructive operations to
 temporarily disable flagging `modified'.")
@@ -647,11 +643,12 @@ temporarily disable flagging `modified'.")
 
 ;; undo vars
 
-(defvar wg-flag-wconfig-changes t
-  "Non-nil means window config changes should be flagged for undoification.")
-
-(defvar wg-window-config-changed-p nil
+(defvar wg-window-config-changed nil
   "Flag set by `window-configuration-change-hook'.")
+
+(defvar wg-do-not-update-undo-info nil
+  "Flag set when changes to the window config shouldn't cause
+  workgroups' undo info to be updated.")
 
 (defvar wg-just-exited-minibuffer nil
   "Flag set by `minibuffer-exit-hook' to exempt from
@@ -1355,17 +1352,10 @@ Similar to `org-id-int-to-b36'."
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; (defun wg-set-workgroup-set-parameter (workgroup-set parameter value)
-;;   "FIXME: docstring this"
 ;;   (let ((workgroup-set (or workgroup-set (wg-current-workgroup-set))))
-;;     ;; FIXME: move wg-modified and related into the workgroup-set object?
 ;;     (unless wg-no-flag-modified (setq wg-modified t))
 ;;     (wg-set workgroup-set parameter value)
 ;;     value))
-
-;; (defun wg-set-workgroup-set-tracked-buffers (workgroup-set tracked-buffers)
-;;   "FIXME: docstring this"
-;;   (wg-set-workgroup-set-parameter
-;;    workgroup-set 'tracked-buffers tracked-buffers))
 
 (defun wg-current-workgroup-set ()
   "Return `wg-current-workgroup-set', setting it first if necessary."
@@ -1373,18 +1363,17 @@ Similar to `org-id-int-to-b36'."
       (setq wg-current-workgroup-set (wg-make-workgroup-set))))
 
 (defun wg-workgroup-list (&optional noerror)
-  "FIXME: docstring this"
+  "Return the value of `wg-current-workgroup-set's :workgroup-list slot."
   (or (wg-workgroup-set-workgroup-list (wg-current-workgroup-set))
       (unless noerror
         (error "No workgroups are defined."))))
 
-;; (defun wg-tracked-buffers ()
-;;   "FIXME: docstring this"
-;;   (wg-workgroup-set-tracked-buffers (wg-current-workgroup-set)))
+(defmacro wg-modified ()
+  "setf'ably expands to `wg-current-workgroup-set's modified slot."
+  `(wg-workgroup-set-modified (wg-current-workgroup-set)))
 
 (defmacro wg-tracked-buffers ()
-  "Return `wg-current-workgroup-set's tracked buffers list.
-This was made a macro so that it's setf'able."
+  "setf'ably expands to `wg-current-workgroup-set's tracked-buffers slot."
   `(wg-workgroup-set-tracked-buffers (wg-current-workgroup-set)))
 
 
@@ -2131,7 +2120,6 @@ Assumes both FROM and TO fit in `selected-frame'."
          (wg-morph-determine-steps wg-morph-hsteps wg-morph-terminal-hsteps))
         (wg-morph-vsteps
          (wg-morph-determine-steps wg-morph-vsteps wg-morph-terminal-vsteps))
-        (wg-flag-wconfig-changes nil)
         (wg-restore-scroll-bars nil)
         (wg-restore-fringes nil)
         (wg-restore-margins nil)
@@ -2159,6 +2147,20 @@ Assumes both FROM and TO fit in `selected-frame'."
 
 ;;; workgroup utils
 
+;; (defmacro wg-set-workgroup-slot (workgroup accessor value)
+;;   "wg-workgroup slot `setf' wrapper that also sets various 'modified' flags.
+;; WORKGROUP should be a wg-workgroup struct; ACCESSOR should be the
+;; unquoted slot accessor function symbol; And VALUE is the value to
+;; which to set the slot."
+;;   (wg-with-gensyms (wg val)
+;;     `(let ((,wg (wg-get-workgroup ,workgroup))
+;;            (,val ,value))
+;;        (setf (,accessor ,wg) ,val)
+;;        (when wg-flag-modified
+;;          (setf (wg-workgroup-modified ,wg) t)
+;;          (setq wg-modified t))
+;;        ,val)))
+
 (defmacro wg-set-workgroup-slot (workgroup accessor value)
   "wg-workgroup slot `setf' wrapper that also sets various 'modified' flags.
 WORKGROUP should be a wg-workgroup struct; ACCESSOR should be the
@@ -2170,7 +2172,7 @@ which to set the slot."
        (setf (,accessor ,wg) ,val)
        (when wg-flag-modified
          (setf (wg-workgroup-modified ,wg) t)
-         (setq wg-modified t))
+         (setf (wg-modified) t))
        ,val)))
 
 (defun wg-find-workgroup-by (slotkey value &optional noerror)
@@ -2242,8 +2244,8 @@ If OBJ is nil, return the current workgroup, or error unless NOERROR."
 ;;; workgroup parameters
 
 (defun wg-mark-everything-unmodified ()
-  "Set `wg-modified' and all workgroup modified flags to nil."
-  (setq wg-modified nil)
+  "Mark the workgroup-set and all workgroups as unmodified."
+  (setf (wg-modified) nil)
   (mapc (lambda (wg) (setf (wg-workgroup-modified wg) nil))
         (wg-workgroup-list t)))
 
@@ -2256,7 +2258,6 @@ WORKGROUP should be accepted by `wg-get-workgroup'."
 
 (defun wg-set-workgroup-parameter (workgroup parameter value)
   "Set WORKGROUP's value of PARAMETER to VALUE.
-Sets `wg-modified' to t unless `wg-flag-modified' is nil.
 WORKGROUP should be a value accepted by `wg-get-workgroup'.
 Return VALUE."
   (let ((workgroup (wg-get-workgroup workgroup)))
@@ -2274,7 +2275,7 @@ Return VALUE."
 
 (defun wg-modified-p ()
   "Return t when `wg-modified' or any workgroup modified parameter all is non-nil."
-  (or wg-modified (some 'wg-workgroup-modified (wg-workgroup-list t))))
+  (or (wg-modified) (some 'wg-workgroup-modified (wg-workgroup-list t))))
 
 (defun wg-workgroup-names (&optional noerror)
   "Return a list of workgroup names."
@@ -2569,12 +2570,11 @@ unupdated."
   (wg-awhen (wg-current-workgroup t)
     (wg-set-workgroup-working-wconfig it (wg-frame-to-wconfig))))
 
-(defun wg-restore-wconfig-undoably (wconfig &optional noflag)
+(defun wg-restore-wconfig-undoably (wconfig &optional noundo)
   "Restore WCONFIG in `selected-frame', saving undo information."
-  (let ((wg-flag-wconfig-changes nil))
-    (unless noflag (setq wg-window-config-changed-p t))
-    (wg-update-current-workgroup-working-wconfig)
-    (wg-restore-wconfig wconfig)))
+  (setq wg-do-not-update-undo-info noundo)
+  (wg-update-current-workgroup-working-wconfig)
+  (wg-restore-wconfig wconfig))
 
 ;; FIXME: remove the call to `wg-restore-wconfig-undoably'
 (defun wg-increment-workgroup-undo-pointer (workgroup increment)
@@ -2588,13 +2588,12 @@ WORKGROUP is current."
           (wg-restore-wconfig-undoably (nth new-pointer undo-list) t))
         (setf (wg-workgroup-state-undo-pointer state) new-pointer)))))
 
-
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; undo/redo hook functions
 ;;
-;; Exempting minibuffer-related window-config changes from undoification is
+;; Exempting certain window-configuration changes (e.g. entering and exiting the
+;; minibuffer, and restoring wconfigs in some situations) from undoification is
 ;; tricky, which is why all the flag-setting hooks.
 ;;
 ;; Example hook call order:
@@ -2615,24 +2614,37 @@ WORKGROUP is current."
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defun wg-unflag-window-config-changed ()
-  "Set `wg-window-config-changed-p' to nil, exempting from
-undoification those window-configuration changes caused by
-entering the minibuffer."
-  (setq wg-window-config-changed-p nil))
+(defun wg-flag-do-not-update-undo-info ()
+  "Set `wg-do-not-update-undo-info' to t, exempting from
+undoification and window-configuration changes caused by the
+current command."
+  (setq wg-do-not-update-undo-info t))
+
+;; (defun wg-flag-just-exited-minibuffer ()
+;;   "Set `wg-just-exited-minibuffer' on minibuffer exit."
+;;   (setq wg-just-exited-minibuffer t))
 
 (defun wg-flag-just-exited-minibuffer ()
-  "Set `wg-just-exited-minibuffer' on minibuffer exit."
-  (setq wg-just-exited-minibuffer t))
+  (setq wg-do-not-update-undo-info t))
+
+;; (defun wg-flag-wconfig-change ()
+;;   "Conditionally set `wg-window-config-changed' to t.
+;; Added to `window-configuration-change-hook'."
+;;   ;; When there's been a window configuration change,
+;;   (when (and
+;;          ;; and it didn't occur while the minibuffer was active,
+;;          (zerop (minibuffer-depth))
+;;          ;; and it wasn't caused by exiting the minibuffer,
+;;          (not wg-just-exited-minibuffer))
+;;     ;; set the flag to trigger `wg-save-undo-after-wconfig-change',
+;;     (setq wg-window-config-changed t))
+;;   ;; and null this out no matter what:
+;;   (setq wg-just-exited-minibuffer nil))
 
 (defun wg-flag-wconfig-change ()
-  "Conditionally set `wg-window-config-changed-p' to t.
+  "Conditionally set `wg-window-config-changed' to t.
 Added to `window-configuration-change-hook'."
-  (when (and wg-flag-wconfig-changes
-             (zerop (minibuffer-depth))
-             (not wg-just-exited-minibuffer))
-    (setq wg-window-config-changed-p t))
-  (setq wg-just-exited-minibuffer nil))
+  (setq wg-window-config-changed t))
 
 (defun wg-update-working-wconfig-before-command ()
   "Update the current workgroup's working-wconfig before
@@ -2642,12 +2654,23 @@ Added to `window-configuration-change-hook'."
     (wg-update-current-workgroup-working-wconfig)))
 
 (defun wg-save-undo-after-wconfig-change ()
-  "`wg-add-wconfig-to-undo-list' when `wg-window-config-changed-p'
+  "`wg-add-wconfig-to-undo-list' when `wg-window-config-changed'
 is non-nil.  Added to `post-command-hook'."
-  (when (and wg-window-config-changed-p (zerop (minibuffer-depth)))
-    (wg-awhen (wg-current-workgroup t)
-      (wg-add-wconfig-to-undo-list it (wg-frame-to-wconfig))))
-  (setq wg-window-config-changed-p nil))
+  (when (and
+         ;; When the window config has changed,
+         wg-window-config-changed
+         ;; and we haven't specified not to update the undo info,
+         (not wg-do-not-update-undo-info)
+         ;; and the change didn't occur while the minibuffer is active,
+         (zerop (minibuffer-depth)))
+    ;; and there's a current workgroup,
+    (wg-when-let ((wg (wg-current-workgroup t)))
+      ;; add the current wconfig to that workgroup's undo list
+      (wg-add-wconfig-to-undo-list wg (wg-frame-to-wconfig))))
+  ;; and reset both flags
+  (setq wg-window-config-changed nil
+        wg-do-not-update-undo-info nil))
+
 
 
 ;; commands that alter window-configs
@@ -2705,7 +2728,8 @@ is non-nil.  Added to `post-command-hook'."
     (wg-restore-workgroup-associated-buffers-internal workgroup))
   (let (wg-flag-modified)
     (wg-restore-wconfig-undoably
-     (wg-workgroup-working-wconfig workgroup) t)))
+     (wg-workgroup-working-wconfig workgroup)
+     t)))
 
 
 
@@ -2727,7 +2751,7 @@ Also delete all references to it by `wg-workgroup-state-table',
     (when (wg-previous-workgroup-p workgroup t frame)
       (wg-set-previous-workgroup nil frame)))
   (wg-set-workgroup-list (remove workgroup (wg-workgroup-list)))
-  (setq wg-modified t)
+  (setf (wg-modified) t)
   workgroup)
 
 (defun wg-add-workgroup (workgroup &optional pos)
@@ -2736,9 +2760,8 @@ If a workgroup with the same name exists, overwrite it."
   (wg-awhen (wg-find-workgroup-by :name (wg-workgroup-name workgroup) t)
     (unless pos (setq pos (position it (wg-workgroup-list))))
     (wg-delete-workgroup it))
-  ;; (wg-set-workgroup-uid workgroup (wg-generate-uid))
   (wg-set-workgroup-list (wg-insert-elt workgroup (wg-workgroup-list t) pos))
-  (setq wg-modified t)
+  (setf (wg-modified) t)
   workgroup)
 
 (defun wg-check-and-add-workgroup (workgroup)
@@ -2783,7 +2806,7 @@ existing workgroup, offer to create it."
       (error "Workgroup isn't present in `wg-workgroup-list'."))
     (wg-set-workgroup-list
      (wg-cyclic-offset-elt workgroup workgroup-list n))
-    (setq wg-modified t)))
+    (setf (wg-modified) t)))
 
 (defun wg-swap-workgroups-in-workgroup-list (workgroup1 workgroup2)
   "Swap the positions of WORKGROUP1 and WORKGROUP2 in `wg-workgroup-list'."
@@ -2794,7 +2817,7 @@ existing workgroup, offer to create it."
                  (memq workgroup2 workgroup-list))
       (error "Both workgroups aren't present in `wg-workgroup-list'."))
     (wg-set-workgroup-list (wg-util-swap workgroup1 workgroup2 workgroup-list))
-    (setq wg-modified t)))
+    (setf (wg-modified) t)))
 
 (defun wg-cyclic-nth-from-workgroup (workgroup &optional n)
   "Return the workgroup N places from WORKGROUP in `wg-workgroup-list'."
@@ -2831,7 +2854,7 @@ existing workgroup, offer to create it."
                 (:div divider)
                 (:mode (wg-mode-line-buffer-association-indicator wg))
                 (:div divider)
-                (:mode (wg-mode-line-decor (if wg-modified 'modified 'unmodified)))
+                (:mode (wg-mode-line-decor (if (wg-modified) 'modified 'unmodified)))
                 (:mode (wg-mode-line-decor
                         (if (wg-workgroup-modified wg) 'modified 'unmodified)))
                 (:div (wg-mode-line-decor 'right-brace))))
@@ -3714,8 +3737,8 @@ Deletes all state saved in frame parameters, and nulls out
     (error "Canceled"))
   (mapc 'wg-reset-frame (frame-list))
   (setq wg-current-workgroup-set nil
-        wg-visited-file-name nil
-        wg-modified nil)
+        wg-visited-file-name nil)
+  (setf (wg-modified) nil)
   (wg-fontified-message
     (:cmd "Reset: ")
     (:msg "Workgroups")))
@@ -4341,7 +4364,7 @@ Called when `workgroups-mode' is turned off."
    'window-configuration-change-hook 'wg-flag-wconfig-change
    'pre-command-hook                 'wg-update-working-wconfig-before-command
    'post-command-hook                'wg-save-undo-after-wconfig-change
-   'minibuffer-setup-hook            'wg-unflag-window-config-changed
+   'minibuffer-setup-hook            'wg-flag-do-not-update-undo-info
    'minibuffer-setup-hook            'wg-turn-on-minibuffer-mode
    'minibuffer-exit-hook             'wg-flag-just-exited-minibuffer
    'minibuffer-exit-hook             'wg-turn-off-minibuffer-mode
