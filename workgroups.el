@@ -1001,14 +1001,6 @@ HI-INCLUSIVE non-nil means the HI bound is inclusive."
     (mapc (lambda (elt) (and (funcall pred elt) (push elt acc))) seq)
     (nreverse acc)))
 
-(defun wg-stable-union (test &rest lists)
-  "Return the stable-ordered `union' of LISTS, testing membership with TEST."
-  (let (result)
-    (nreverse
-     (dolist (list lists result)
-       (dolist (elt list)
-         (pushnew elt result :test test))))))
-
 (defun wg-last1 (list)
   "Return the last element of LIST."
   (car (last list)))
@@ -1397,8 +1389,8 @@ Similar to `org-id-int-to-b36'."
   (modified)
   (base-wconfig)
   (most-recent-working-wconfig)
-  (weak-buf-uids)
   (strong-buf-uids)
+  (weak-buf-uids)
   (parameters))
 
 (wg-defstruct wg workgroup-set
@@ -1901,11 +1893,6 @@ list of the returns values of calling KEY on all wins."
   "Construct and return a list of all wg-wins in WTREE."
   (wg-flatten-wtree wtree))
 
-(defun wg-wtree-buf-uids (wtree)
-  "Return a list of the buf uids of all wins in wtree."
-  (wg-flatten-wtree wtree 'wg-win-buf-uid))
-
-
 
 ;;; special buffer serdes functions ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -2394,7 +2381,7 @@ Return VALUE."
 
 ;;; workgroup associated buffers
 
-(defun wg-workgroup-associated-buffer-uids (workgroup)
+(defun wg-workgroup-associated-buf-uids (workgroup)
   "Return a new list containing all of WORKGROUP's associated buf uids."
   (append (wg-workgroup-strong-buf-uids workgroup)
           (wg-workgroup-weak-buf-uids workgroup)))
@@ -2402,7 +2389,7 @@ Return VALUE."
 (defun wg-workgroup-associated-bufs (workgroup)
   "Return a new list containing all of WORKGROUP's associated bufs."
   (mapcar 'wg-find-tracked-buf-by-uid
-          (wg-workgroup-associated-buffer-uids workgroup)))
+          (wg-workgroup-associated-buf-uids workgroup)))
 
 (defun wg-workgroup-bufobj-association-type (workgroup bufobj)
   "Return BUFOBJ's association-type in WORKGROUP, or nil if unassociated."
@@ -2798,20 +2785,85 @@ Added to `post-command-hook'."
 ;; ** We'll also need to gc dead uids from workgroups' associated-buffer-uids,
 ;;    since they don't get overridden like wtrees' buf uids.
 ;;
-;; ** Add `wg-update-tracked-buffer'.  It takes a buf arg which replaces the buf
-;;    with the same uid.
-;;
-;; ** Add `wg-update-all-live-buffers'
-;;
-;; ** Call `wg-update-all-live-buffers' on `wg-save-workgroups'
-;;
 
+(defun wg-update-tracked-buffer (buffer)
+  "FIXME: docstring this"
+  (wg-when-let ((uid (wg-buffer-uid buffer))
+                (old-buf (wg-find-tracked-buf-by-uid uid)))
+    (setf (wg-tracked-buffers)
+          (cons (let ((new-buf (wg-buffer-to-buf buffer)))
+                  (setf (wg-buf-uid new-buf) (wg-buf-uid old-buf))
+                  new-buf)
+                (remove old-buf (wg-tracked-buffers))))))
 
-;; (wg-wtree-buf-uids )
+(defun wg-update-all-tracked-buffers (&optional buffer-list)
+  "FIXME: docstring this"
+  (mapc 'wg-update-tracked-buffer (or buffer-list (buffer-list))))
 
+(defun wg-tracked-buf-uid-p (uid)
+  "FIXME: docstring this"
+  (member* uid (wg-tracked-buffers) :key 'wg-buf-uid))
 
+(defun wg-workgroup-remove-stale-assoc-buf-uids (workgroup)
+  "FIXME: docstring this"
+  (setf (wg-workgroup-strong-buf-uids workgroup)
+        (remove-if-not 'wg-tracked-buf-uid-p
+                       (wg-workgroup-strong-buf-uids workgroup))
+        (wg-workgroup-weak-buf-uids workgroup)
+        (remove-if-not 'wg-tracked-buf-uid-p
+                       (wg-workgroup-weak-buf-uids workgroup))))
 
+(defun wg-wtree-buf-uids (wtree)
+  "Return a list of the buf uids of all wins in wtree."
+  (wg-flatten-wtree wtree 'wg-win-buf-uid))
 
+(defun wg-wtree-unique-buf-uids (wtree)
+  "Return a list of the unique buf uids of all wins in wtree."
+  (delete-duplicates (wg-wtree-buf-uids wtree)))
+
+(defun wg-wconfig-buf-uids (wconfig)
+  "Return WCONFIG's wtree's `wg-wtree-buf-uids'."
+  (wg-wtree-unique-buf-uids (wg-wconfig-wtree wconfig)))
+
+(defun wg-workgroup-all-buf-uids (workgroup)
+  "Return the union of WORKGROUP's base `wg-wconfig-buf-uids',
+ working `wg-wconfig-buf-uids', and
+`wg-workgroup-associated-buf-uids'."
+  (delete-duplicates
+   (append
+    (wg-wconfig-buf-uids (wg-workgroup-base-wconfig workgroup))
+    (wg-wconfig-buf-uids (wg-workgroup-most-recent-working-wconfig workgroup))
+    (wg-workgroup-associated-buf-uids workgroup))))
+
+(defun wg-workgroup-list-all-extant-buf-uids ()
+  "Return the union of all workgroups' `wg-workgroup-all-buf-uids'."
+  (delete-duplicates (mapcan 'wg-workgroup-all-buf-uids (wg-workgroup-list))))
+
+(defun wg-buffer-uids ()
+  "Return a list of the uids of all buffers in which
+`wg-buffer-uid' is locally bound."
+  (delq nil (mapcar 'wg-buffer-uid (buffer-list))))
+
+(defun wg-all-extant-buf-uids ()
+  "Return the union of all workgroups' `wg-workgroup-all-buf-uids'."
+  (union (wg-workgroup-list-all-extant-buf-uids)
+         (wg-buffer-uids)))
+
+(defun wg-remove-stale-tracked-bufs ()
+  "Remove all bufs from `wg-tracked-buffers' with uids not
+present in `wg-all-extant-buf-uids'."
+  (let ((uids (wg-all-extant-buf-uids)))
+    (setf (wg-tracked-buffers)
+          (remove-if-not (lambda (uid) (member uid uids))
+                         (wg-tracked-buffers)
+                         :key 'wg-buf-uid))))
+
+(defun wg-cleanup-bufs-and-uids ()
+  "Update all tracked bufs, remove stale associated buf uids, and
+remove stale tracked buffers."
+  (wg-update-all-tracked-buffers)
+  (mapc 'wg-workgroup-remove-stale-assoc-buf-uids (wg-workgroup-list))
+  (wg-remove-stale-tracked-bufs))
 
 
 
@@ -3282,8 +3334,8 @@ Added to `iswitchb-make-buflist-hook'."
     (wg-read-object
      (or prompt (format "Name (default: %S): " default))
      (lambda (new) (and (stringp new)
-                   (not (equal new ""))
-                   (wg-unique-workgroup-name-p new)))
+                        (not (equal new ""))
+                        (wg-unique-workgroup-name-p new)))
      "Please enter a unique, non-empty name"
      nil nil nil nil default)))
 
@@ -3850,6 +3902,7 @@ is nil, read a filename.  Otherwise use `wg-visited-file-name'."
       (wg-message "(No workgroups need to be saved)")
     (setf (wg-visited-file-name) file)
     (wg-update-current-workgroup-working-wconfig)
+    (wg-cleanup-bufs-and-uids)
     (wg-write-sexp-to-file (wg-current-workgroup-set) file)
     (wg-mark-everything-unmodified)
     (wg-fontified-message (:cmd "Wrote: ") (:file file))))
