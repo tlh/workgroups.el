@@ -125,7 +125,6 @@ it should be made here."
 ;; like: "<jlf> or maybe have wg-save-file-name be one of 'auto (as above),
 ;; 'confirm-auto (as above, but overridable), or 'ask (always ask) [10:30]"
 
-
 (defcustom wg-switch-to-first-workgroup-on-find-workgroups-file t
   "Non-nil means switch to the first workgroup in a file when
 it's found with `wg-find-workgroups-file'."
@@ -178,16 +177,21 @@ minibuffer is active."
 
 (defcustom wg-special-buffer-serdes-functions
   '(wg-serialize-Info-buffer
-    wg-serialize-help-buffer)
-  "FIXME: Make this doc clearer and longer
-List of functions returning special serialization data.
-Each function should accept a buffer argument.  Functions serve
-as both predicates and serializers.  Returning nil indicates that
-the function is unable to serialize the buffer.  Returning a list
-indicates that the function is able to serialize the buffer.  The
-car of the list should be the deserialization function that
-understands what to with the rest of the list.  The
-deserialization function is passed the wg-buf."
+    wg-serialize-help-buffer
+    wg-serialize-ielm-buffer
+    wg-serialize-shell-buffer
+    wg-serialize-eshell-buffer
+    wg-serialize-term-buffer)
+  "FIXME: Make this doc clearer and longer List of functions
+returning special serialization data.  Each function should
+accept a buffer argument.  Functions serve as both predicates and
+serializers.  Returning nil indicates that the function is unable
+to serialize the buffer.  Returning a list indicates that the
+function is able to serialize the buffer.  The car of the list
+should be the deserialization function that understands what to
+with the rest of the list.  The deserialization function is
+passed the wg-buf, from which it must restore the buffer.  It
+should return the restored buffer object."
   :type 'alist
   :group 'workgroups)
 
@@ -626,37 +630,37 @@ current workgroup"))
   :group 'workgroups)
 
 (defcustom wg-list-display-decor-left-brace "( "
-  "FIXME: docstring this"
+  "String displayed to the left of the list display."
   :type 'string
   :group 'workgroups)
 
 (defcustom wg-list-display-decor-right-brace " )"
-  "FIXME: docstring this"
+  "String displayed to the right of the list display."
   :type 'string
   :group 'workgroups)
 
 (defcustom wg-list-display-decor-divider " | "
-  "FIXME: docstring this"
+  "String displayed between elements of the list display."
   :type 'string
   :group 'workgroups)
 
 (defcustom wg-list-display-decor-current-left "-<{ "
-  "FIXME: docstring this"
+  "String displayed to the left of the current element of the list display."
   :type 'string
   :group 'workgroups)
 
 (defcustom wg-list-display-decor-current-right " }>-"
-  "FIXME: docstring this"
+  "String displayed to the right of the current element of the list display."
   :type 'string
   :group 'workgroups)
 
 (defcustom wg-list-display-decor-previous-left "< "
-  "FIXME: docstring this"
+  "String displayed to the left of the previous element of the list display."
   :type 'string
   :group 'workgroups)
 
 (defcustom wg-list-display-decor-previous-right " >"
-  "FIXME: docstring this"
+  "String displayed to the right of the previous element of the list display."
   :type 'string
   :group 'workgroups)
 
@@ -1252,6 +1256,10 @@ the cadr as the accessor function."
   "Return non-nil if OBJ's printed representation is readable."
   (memq (type-of obj) wg-readable-types))
 
+(defun wg-take-until-unreadable (list)
+  "Return a new list of elements of LIST up to the first unreadable element."
+  (wg-take-until-fail 'wg-is-readable-p list))
+
 (defun wg-add-face (facekey string)
   "Return a copy of STRING fontified according to FACEKEY.
 FACEKEY must be a key in `wg-face-abbrevs'."
@@ -1321,8 +1329,7 @@ Similar to `org-id-int-to-b36'."
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-;; FIXME: finges, margins, scroll-bars and some other stuff should be set as
-;; buffer-local variables, not properties of windows.  variables to be set:
+;; FIXME: buffer-local variables
 ;;
 ;; fringes:
 ;;   fringes-outside-margins
@@ -1336,14 +1343,9 @@ Similar to `org-id-int-to-b36'."
 ;; scroll-bars (can be set at the frame, window and buffer levels - gah):
 ;;   buffer: vertical-scroll-bar
 ;;
-;; Others: text-scale-mode-amount
-;;
-;;
-;; TODO: window-dedicated-p is not a window parameter, so it does need its own
-;; slot in the wg-win stuct
+;; possibly: buffer-file-coding-system, text-scale-mode-amount
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 
 (wg-defstruct wg buf
   (uid (wg-generate-uid))
@@ -1905,11 +1907,11 @@ list of the returns values of calling KEY on all wins."
 
 
 
-;;; non-file buffer serdes functions
+;;; special buffer serdes functions ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-;; FIXME: Add restore-special-data customization option
+;; TODO: Possibly add restore-special-data customization option
 ;;
-;; TODO: Add ielm, shell, eshell, term, ansi-term
+;; TODO: Some of these could probably be a little more thorough
 ;;
 
 ;; Info buffer serdes
@@ -1934,19 +1936,92 @@ list of the returns values of calling KEY on all wins."
 ;; help buffer serdes
 
 (defun wg-deserialize-help-buffer (buf)
-  "Deserialize a `help-mode' buffer."
+  "Deserialize a help buffer.
+See `wg-serialize-help-buffer'."
   (require 'help-mode)
-  (wg-dbind (method . args) (cdr (wg-buf-special-data buf))
-    (apply method args)))
+  (wg-dbind (this-function item stack forward-stack) (wg-buf-special-data buf)
+    (let ((help-window-select t))
+      (apply (car item) (cdr item))
+      (set-buffer (window-buffer (selected-window)))
+      (setq help-xref-stack stack
+            help-xref-forward-stack forward-stack))))
 
 (defun wg-serialize-help-buffer (buffer)
-  "Return `help-mode's extended serialization of BUFFER."
+  "Serialize a help buffer.
+Since `help-mode' is used by many buffers that aren't actually
+*Help* buffers (e.g. *Process List*), we also check that
+`help-xref-stack-item' has a local binding."
   (with-current-buffer buffer
-    (wg-when-boundp (help-xref-stack-item)
-      (when (and (eq major-mode 'help-mode)
-                 (assq 'help-xref-stack-item (buffer-local-variables)))
-        (cons 'wg-deserialize-help-buffer
-              (wg-take-until-fail 'wg-is-readable-p help-xref-stack-item))))))
+    (when (and (eq major-mode 'help-mode)
+               (local-variable-p 'help-xref-stack-item))
+      (list 'wg-deserialize-help-buffer
+            (wg-take-until-unreadable help-xref-stack-item)
+            (mapcar 'wg-take-until-unreadable help-xref-stack)
+            (mapcar 'wg-take-until-unreadable help-xref-forward-stack)))))
+
+
+;; ielm buffer serdes
+
+(defun wg-deserialize-ielm-buffer (buf)
+  "Deserialize an `inferior-emacs-lisp-mode' buffer."
+  (ielm)
+  (current-buffer))
+
+(defun wg-serialize-ielm-buffer (buffer)
+  "Serialize an `inferior-emacs-lisp-mode' buffer."
+  (with-current-buffer buffer
+    (when (eq major-mode 'inferior-emacs-lisp-mode)
+      (list 'wg-deserialize-ielm-buffer))))
+
+
+;; shell buffer serdes
+
+(defun wg-deserialize-shell-buffer (buf)
+  "Deserialize a `shell-mode' buffer."
+  (shell (wg-buf-name buf)))
+
+(defun wg-serialize-shell-buffer (buffer)
+  "Serialize a `shell-mode' buffer."
+  (with-current-buffer buffer
+    (when (eq major-mode 'shell-mode)
+      (list 'wg-deserialize-shell-buffer))))
+
+
+;; eshell buffer serdes
+
+(defun wg-deserialize-eshell-buffer (buf)
+  "Deserialize an `eshell-mode' buffer."
+  (prog1 (eshell t)
+    (rename-buffer (wg-buf-name buf) t)))
+
+(defun wg-serialize-eshell-buffer (buffer)
+  "Serialize an `eshell-mode' buffer."
+  (with-current-buffer buffer
+    (when (eq major-mode 'eshell-mode)
+      (list 'wg-deserialize-eshell-buffer))))
+
+
+;; term and ansi-term buffer serdes
+
+(defun wg-deserialize-term-buffer (buf)
+  "Deserialize a `term-mode' buffer."
+  (require 'term)
+  ;; flet'ing these prevents scrunched up wrapping when restoring during morph
+  (flet ((term-window-width () 80)
+         (window-height () 24))
+    (prog1 (term (nth 1 (wg-buf-special-data buf)))
+      (rename-buffer (wg-buf-name buf) t))))
+
+(defun wg-serialize-term-buffer (buffer)
+  "Serialize a `term-mode' buffer.
+This should work for `ansi-term's, too, as there doesn't seem to
+be any difference between the two except how the name of the
+buffer is generated."
+  (with-current-buffer buffer
+    (when (eq major-mode 'term-mode)
+      (list 'wg-deserialize-term-buffer
+            (wg-last1 (process-command (get-buffer-process buffer)))))))
+
 
 
 
@@ -1983,20 +2058,15 @@ If BUF's file doesn't exist, call `wg-restore-default-buffer'"
            (message "Attempt to restore nonexistent file: %S" file-name)
            (wg-restore-default-buffer)))))
 
-;; (defun wg-restore-special-buffer (buf)
-;;   "Restore a buffer with DESERIALIZER-FN."
-;;   (wg-when-let ((deserializer (wg-mode-deserializer (wg-buf-major-mode buf))))
-;;     (condition-case err
-;;         (funcall deserializer)
-;;       (error (message "Error deserializing %S: %S" (wg-buf-name buf) err)))
-;;     (current-buffer)))
-
 (defun wg-restore-special-buffer (buf)
   "Restore a buffer with DESERIALIZER-FN."
   (wg-when-let ((special-data (wg-buf-special-data buf)))
-    (condition-case err
-        (funcall (car special-data) buf)
-      (error (message "Error deserializing %S: %S" (wg-buf-name buf) err)))
+    (switch-to-buffer
+     (save-window-excursion
+       (condition-case err
+           (funcall (car special-data) buf)
+         (error (message "Error deserializing %S: %S"
+                         (wg-buf-name buf) err)))) t)
     (wg-set-buffer-uid-or-error (wg-buf-uid buf))
     (current-buffer)))
 
@@ -2733,9 +2803,13 @@ Added to `post-command-hook'."
 ;;
 ;; ** Add `wg-update-all-live-buffers'
 ;;
+;; ** Call `wg-update-all-live-buffers' on `wg-save-workgroups'
 ;;
-;; asdf
-;;
+
+
+;; (wg-wtree-buf-uids )
+
+
 
 
 
