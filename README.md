@@ -260,9 +260,11 @@ startup.  To do so you can add a line like this to your `.emacs`:
 
 So your final `.emacs` setup may look something like this:
 
-    (add-to-list 'load-path "/path/to/workgroups.el") (require 'workgroups)
-    (setq wg-prefix-key (kbd "C-c a")) (workgroups-mode 1) (wg-load
-    "/path/to/saved/workgroups")
+    (add-to-list 'load-path "/path/to/workgroups.el")
+    (require 'workgroups)
+    (setq wg-prefix-key (kbd "C-c a"))
+    (workgroups-mode 1)
+    (wg-load "/path/to/saved/workgroups")
 
 The customization variable `wg-switch-on-load` controls whether to automatically
 switch to the first workgroup in a file when the file is loaded.  It defaults to
