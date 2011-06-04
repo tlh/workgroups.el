@@ -176,10 +176,32 @@ minibuffer is active."
 
 ;; workgroup restoration customization
 
-;; FIXME: add `major-mode'
+;; ;; FIXME: add `major-mode'
+;; ;; TODO: possibly add `buffer-file-coding-system', `text-scale-mode-amount'
+;; (defcustom wg-buffer-local-variables-alist
+;;   `((left-fringe-width)
+;;     (right-fringe-width)
+;;     (fringes-outside-margins)
+;;     (left-margin-width)
+;;     (right-margin-width)
+;;     (vertical-scroll-bar))
+;;   "Alist mapping buffer-local-variable symbols to serdes functions.
+;; The `car' of each entry should be a buffer-local variable symbol.
+;; `cadr' on the entry should yield either nil or a serializer
+;; function of no arguments returning a serialization of the value
+;; of the variable.  If nil, the raw value of the variable is used.
+;; `caddr' on the entry should yield either nil or a deserializer
+;; function taking the value from above and doing whatever is
+;; necessary to properly restore the value of the variable. For
+;; example, in the case of `major-mode' it should funcall the value
+;; rather than just assigning it to `major-mode'."
+;;   :type 'alist
+;;   :group 'workgroups)
+
 ;; TODO: possibly add `buffer-file-coding-system', `text-scale-mode-amount'
 (defcustom wg-buffer-local-variables-alist
-  `((left-fringe-width)
+  `((major-mode nil wg-restore-buffer-major-mode)
+    (left-fringe-width)
     (right-fringe-width)
     (fringes-outside-margins)
     (left-margin-width)
@@ -1363,7 +1385,6 @@ Similar to `org-id-int-to-b36'."
   (uid (wg-generate-uid))
   (name)
   (file-name)
-  (major-mode)
   (point)
   (mark)
   (mark-active)
@@ -1507,6 +1528,11 @@ Similar to `org-id-int-to-b36'."
     (wg-buf (wg-buf-file-name bufobj))
     (string (wg-bufobj-file-name (wg-get-buffer bufobj)))))
 
+(defun wg-buf-major-mode (buf)
+  "Return BUF's `major-mode'.
+It's stored in BUF's local-vars list, since it's a local variable."
+  (wg-aget (wg-buf-local-vars buf) 'major-mode))
+
 (defun wg-bufobj-major-mode (bufobj)
   "Return BUFOBJ's major-mode."
   (etypecase bufobj
@@ -1605,13 +1631,25 @@ EWIN should be an Emacs window object."
             (wg-aif (car serdes) (funcall it)
               (symbol-value symbol))))))
 
+;; (defun wg-buffer-to-buf (buffer)
+;;   "Return a serialized buffer from Emacs buffer BUFFER."
+;;   (with-current-buffer buffer
+;;     (wg-make-buf
+;;      :name           (buffer-name)
+;;      :file-name      (buffer-file-name)
+;;      :major-mode     major-mode
+;;      :point          (point)
+;;      :mark           (mark)
+;;      :mark-active    mark-active
+;;      :local-vars     (wg-make-buffer-local-variable-alist)
+;;      :special-data   (wg-buffer-special-data buffer))))
+
 (defun wg-buffer-to-buf (buffer)
   "Return a serialized buffer from Emacs buffer BUFFER."
   (with-current-buffer buffer
     (wg-make-buf
      :name           (buffer-name)
      :file-name      (buffer-file-name)
-     :major-mode     major-mode
      :point          (point)
      :mark           (mark)
      :mark-active    mark-active
@@ -2088,6 +2126,22 @@ buffer is generated."
     (set-mark (wg-buf-mark buf))
     (unless (wg-buf-mark-active buf)
       (deactivate-mark))))
+
+;; (defun wg-restore-buffer-local-variables (buf)
+;;   "Restore BUF's buffer local variables in `current-buffer'."
+;;   (dolist (pair (wg-buf-local-vars buf))
+;;     (wg-dbind (symbol . value) pair
+;;       (let ((entry (assq symbol wg-buffer-local-variables-alist)))
+;;         (wg-acond
+;;          ((not entry) nil) ;; do nothing here
+;;          ((nth 2 entry) (funcall it value)) ;; there's a deserializer
+;;          (t (set symbol value))))))) ;; just set symbol to value
+
+(defun wg-restore-buffer-major-mode (major-mode-symbol)
+  "Conditionally retore MAJOR-MODE-SYMBOL in `current-buffer'."
+  (when (and (fboundp major-mode-symbol)
+             (not (eq major-mode-symbol major-mode)))
+    (funcall major-mode-symbol)))
 
 (defun wg-restore-buffer-local-variables (buf)
   "Restore BUF's buffer local variables in `current-buffer'."
