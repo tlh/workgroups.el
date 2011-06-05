@@ -176,28 +176,6 @@ minibuffer is active."
 
 ;; workgroup restoration customization
 
-;; ;; FIXME: add `major-mode'
-;; ;; TODO: possibly add `buffer-file-coding-system', `text-scale-mode-amount'
-;; (defcustom wg-buffer-local-variables-alist
-;;   `((left-fringe-width)
-;;     (right-fringe-width)
-;;     (fringes-outside-margins)
-;;     (left-margin-width)
-;;     (right-margin-width)
-;;     (vertical-scroll-bar))
-;;   "Alist mapping buffer-local-variable symbols to serdes functions.
-;; The `car' of each entry should be a buffer-local variable symbol.
-;; `cadr' on the entry should yield either nil or a serializer
-;; function of no arguments returning a serialization of the value
-;; of the variable.  If nil, the raw value of the variable is used.
-;; `caddr' on the entry should yield either nil or a deserializer
-;; function taking the value from above and doing whatever is
-;; necessary to properly restore the value of the variable. For
-;; example, in the case of `major-mode' it should funcall the value
-;; rather than just assigning it to `major-mode'."
-;;   :type 'alist
-;;   :group 'workgroups)
-
 ;; TODO: possibly add `buffer-file-coding-system', `text-scale-mode-amount'
 (defcustom wg-buffer-local-variables-alist
   `((major-mode nil wg-restore-buffer-major-mode)
@@ -848,13 +826,6 @@ use by buffer list filtration hooks.")
 (defvar wg-morph-max-steps 200
   "Maximum `wg-morph' iterations before forcing exit.")
 
-(defvar wg-morph-no-error t
-  "Non-nil means ignore errors during `wg-morph'.
-The error message is sent to *messages* instead.  This was added
-when `wg-morph' was unstable, so that the screen wouldn't be left
-in an inconsistent state.  It's unnecessary now, as `wg-morph' is
-stable, but is left here for the time being.")
-
 (defvar wg-window-tree-selected-window nil
   "Used during wconfig restoration to hold the selected window.")
 
@@ -1098,15 +1069,20 @@ length is even, the first elt is left nearer the front."
   "Return the Nth element of LIST, modded by the length of list."
   (nth (mod n (length list)) list))
 
-(defun wg-insert-elt (elt list &optional pos)
-  "Insert ELT into LIST at POS or the end."
-  (let* ((len (length list)) (pos (or pos len)))
-    (when (wg-within pos 0 len t)
-      (append (wg-take list pos) (cons elt (nthcdr pos list))))))
+(defun wg-insert-after (elt list index)
+  "Insert ELT into LIST after INDEX."
+  (let ((new-list (copy-list list)))
+    (push elt (cdr (nthcdr index new-list)))
+    new-list))
+
+(defun wg-insert-before (elt list index)
+  "Insert ELT into LIST before INDEX."
+  (if (zerop index) (cons elt list)
+    (wg-insert-after elt list (1- index))))
 
 (defun wg-move-elt (elt list pos)
   "Move ELT to position POS in LIST."
-  (wg-insert-elt elt (remove elt list) pos))
+  (wg-insert-before elt (remove elt list) pos))
 
 (defun wg-cyclic-offset-elt (elt list n)
   "Cyclically offset ELT's position in LIST by N."
@@ -1227,7 +1203,7 @@ N defaults to 1, and FRAME defaults to `selected-frame'."
 (defun wg-get-buffer (buffer-or-name)
   "Return BUFFER-OR-NAME's buffer, or error."
   (or (get-buffer buffer-or-name)
-      (error "%S does not identify a bufferis not a buffer" buffer-or-name)))
+      (error "%S does not identify a buffer" buffer-or-name)))
 
 (defun wg-buffer-name (buffer-or-name)
   "Return BUFFER-OR-NAME's `buffer-name', or error."
@@ -1463,19 +1439,19 @@ Similar to `org-id-int-to-b36'."
       (setq wg-current-workgroup-set (wg-make-workgroup-set))))
 
 (defmacro wg-modified ()
-  "setf'ably expands to `wg-current-workgroup-set's modified slot."
+  "setf'able `wg-current-workgroup-set' modified slot accessor."
   `(wg-workgroup-set-modified (wg-current-workgroup-set)))
 
 (defmacro wg-tracked-buffers ()
-  "setf'ably expands to `wg-current-workgroup-set's tracked-buffers slot."
+  "setf'able `wg-current-workgroup-set' tracked-buffers slot accessor."
   `(wg-workgroup-set-tracked-buffers (wg-current-workgroup-set)))
 
 (defmacro wg-visited-file-name ()
-  "setf'ably expands to `wg-current-workgroup-set's file-name slot."
+  "setf'able `wg-current-workgroup-set' file-name slot accessor."
   `(wg-workgroup-set-file-name (wg-current-workgroup-set)))
 
 (defmacro wg-workgroup-list ()
-  "setf'ably expands to `wg-current-workgroup-set's modified slot."
+  "setf'able `wg-current-workgroup-set' modified slot accessor."
   `(wg-workgroup-set-workgroup-list (wg-current-workgroup-set)))
 
 (defun wg-workgroup-list-or-error (&optional noerror)
@@ -1606,43 +1582,14 @@ EWIN should be an Emacs window object."
   (let ((p (window-point ewin)))
     (if (and wg-restore-point-max (= p (point-max))) :max p)))
 
-;; (defun wg-buffer-to-buf (buffer)
-;;   "Return a serialized buffer from Emacs buffer BUFFER."
-;;   (with-current-buffer buffer
-;;     (wg-make-buf
-;;      :name          (buffer-name)
-;;      :file-name     (buffer-file-name)
-;;      :major-mode    major-mode
-;;      :point         (point)
-;;      :mark          (mark)
-;;      :mark-active   mark-active
-;;      :special-data  (wg-buffer-special-data buffer))))
-
-;; (defun wg-make-buffer-local-variable-alist ()
-;;   "FIXME: docstring this"
-;;   (wg-docar (symbol wg-buffer-local-variables-alist)
-;;     (cons symbol (symbol-value symbol))))
-
 (defun wg-make-buffer-local-variable-alist ()
-  "FIXME: docstring this"
+  "Return an alist of buffer-local variable symbols and their values.
+See `wg-buffer-local-variables-alist' for details."
   (wg-docar (entry wg-buffer-local-variables-alist)
     (wg-dbind (symbol . serdes) entry
       (cons symbol
             (wg-aif (car serdes) (funcall it)
               (symbol-value symbol))))))
-
-;; (defun wg-buffer-to-buf (buffer)
-;;   "Return a serialized buffer from Emacs buffer BUFFER."
-;;   (with-current-buffer buffer
-;;     (wg-make-buf
-;;      :name           (buffer-name)
-;;      :file-name      (buffer-file-name)
-;;      :major-mode     major-mode
-;;      :point          (point)
-;;      :mark           (mark)
-;;      :mark-active    mark-active
-;;      :local-vars     (wg-make-buffer-local-variable-alist)
-;;      :special-data   (wg-buffer-special-data buffer))))
 
 (defun wg-buffer-to-buf (buffer)
   "Return a serialized buffer from Emacs buffer BUFFER."
@@ -1703,23 +1650,6 @@ If BUFOBJ is a buffer or a buffer name, see `wg-buffer-uid-or-track'."
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-
-;; (defun wg-window-to-win (window)
-;;   "Return a serialized window from Emacs window WINDOW."
-;;   (let ((selected (eq window (selected-window))))
-;;     (with-selected-window window
-;;       (wg-make-win
-;;        :edges              (window-edges window)
-;;        :point              (wg-window-point window)
-;;        :start              (window-start window)
-;;        :hscroll            (window-hscroll window)
-;;        :scroll-bars        (window-scroll-bars window)
-;;        :margins            (window-margins window)
-;;        :fringes            (window-fringes window)
-;;        :selected           selected
-;;        :minibuffer-scroll  (eq window minibuffer-scroll-window)
-;;        :dedicated          (window-dedicated-p window)
-;;        :buf-uid            (wg-buffer-uid-or-track (window-buffer window))))))
 
 (defun wg-window-to-win (window)
   "Return a serialized window from Emacs window WINDOW."
@@ -1930,12 +1860,12 @@ WCONFIG's height."
     (/ (float new-width)  (wg-wconfig-width wconfig))
     (/ (float new-height) (wg-wconfig-height wconfig)))))
 
-(defun wg-resize-frame-scale-wtree (wconfig &optional frame)
+(defun wg-resize-frame-scale-wtree (wconfig)
   "Set FRAME's size to WCONFIG's, returning a possibly scaled wtree.
 If the frame size was set correctly, return WCONFIG's wtree
 unchanged.  If it wasn't, return a copy of WCONFIG's wtree scaled
 with `wg-scale-wconfigs-wtree' to fit the frame as it exists."
-  (let ((frame (or frame (selected-frame))))
+  (let ((frame (selected-frame)))
     (wg-with-slots wconfig ((wcwidth wg-wconfig-width)
                             (wcheight wg-wconfig-height))
       (when window-system (set-frame-size frame wcwidth wcheight))
@@ -2127,16 +2057,6 @@ buffer is generated."
     (unless (wg-buf-mark-active buf)
       (deactivate-mark))))
 
-;; (defun wg-restore-buffer-local-variables (buf)
-;;   "Restore BUF's buffer local variables in `current-buffer'."
-;;   (dolist (pair (wg-buf-local-vars buf))
-;;     (wg-dbind (symbol . value) pair
-;;       (let ((entry (assq symbol wg-buffer-local-variables-alist)))
-;;         (wg-acond
-;;          ((not entry) nil) ;; do nothing here
-;;          ((nth 2 entry) (funcall it value)) ;; there's a deserializer
-;;          (t (set symbol value))))))) ;; just set symbol to value
-
 (defun wg-restore-buffer-major-mode (major-mode-symbol)
   "Conditionally retore MAJOR-MODE-SYMBOL in `current-buffer'."
   (when (and (fboundp major-mode-symbol)
@@ -2149,9 +2069,9 @@ buffer is generated."
     (wg-dbind (symbol . value) pair
       (let ((entry (assq symbol wg-buffer-local-variables-alist)))
         (wg-acond
-         ((not entry) nil) ;; do nothing here
-         ((nth 2 entry) (funcall it value)) ;; there's a deserializer
-         (t (set symbol value))))))) ;; just set symbol to value
+         ((not entry) nil)
+         ((nth 2 entry) (funcall it value))
+         (t (set symbol value)))))))
 
 (defun wg-restore-default-buffer ()
   "Switch to `wg-default-buffer'."
@@ -2276,23 +2196,29 @@ If BUF's file doesn't exist, call `wg-restore-default-buffer'"
       (inner wtree)
       (wg-awhen wg-window-tree-selected-window (select-window it)))))
 
+(defun wg-restore-frame-position-from-wconfig (wconfig)
+  "Restore `selected-frame's position from WCONFIG."
+  (wg-when-let ((left (wg-wconfig-left wconfig))
+                (top (wg-wconfig-top wconfig)))
+    (set-frame-position (selected-frame) left top)))
+
+(defun wg-restore-scroll-bars-from-wconfig (wconfig)
+  "Restore `selected-frame's scroll-bar settings from WCONFIG."
+  (set-frame-parameter
+   nil 'vertical-scroll-bars (wg-wconfig-vertical-scroll-bars wconfig))
+  (set-frame-parameter
+   nil 'scroll-bar-width (wg-wconfig-scroll-bar-width wconfig)))
+
 (defun wg-restore-wconfig (wconfig)
   "Restore WCONFIG in `selected-frame'."
   (wg-barf-on-active-minibuffer)
-  (let ((frame (selected-frame)))
-    (wg-with-slots wconfig
-        ((left wg-wconfig-left)
-         (top wg-wconfig-top)
-         (sbars wg-wconfig-vertical-scroll-bars)
-         (sbwid wg-wconfig-scroll-bar-width))
-      (when (and wg-restore-frame-position left top)
-        (set-frame-position frame left top))
-      (let ((wtree (wg-resize-frame-scale-wtree wconfig frame)))
-        (wg-restore-window-tree
-         (if (not (wg-morph-p)) wtree (wg-morph wtree))))
-      (when wg-restore-scroll-bars
-        (set-frame-parameter frame 'vertical-scroll-bars sbars)
-        (set-frame-parameter frame 'scroll-bar-width sbwid)))))
+  (when wg-restore-frame-position
+    (wg-restore-frame-position-from-wconfig wconfig))
+  (let ((wtree (wg-resize-frame-scale-wtree wconfig)))
+    (wg-restore-window-tree
+     (if (not (wg-morph-p)) wtree (wg-morph wtree))))
+  (when wg-restore-scroll-bars
+    (wg-restore-scroll-bars-from-wconfig wconfig)))
 
 
 
@@ -2340,35 +2266,35 @@ into a wtree, so it's the same length as wlist2."
                           :edges wg-null-edges
                           :wlist (nthcdr (1- l2) wl1))))))))
 
-(defun wg-morph-win->win (w1 w2 &optional swap)
+(defun wg-morph-win-to-win (w1 w2 &optional swap)
   "Return a copy of W1 with its edges stepped once toward W2.
 When SWAP is non-nil, return a copy of W2 instead."
   (wg-set-edges (wg-copy-win (if swap w2 w1)) (wg-morph-step-edges w1 w2)))
 
-(defun wg-morph-win->wtree (win wtree)
+(defun wg-morph-win-to-wtree (win wtree)
   "Return a new wtree with WIN's edges and WTREE's last two windows."
   (wg-make-wtree
    :dir (wg-wtree-dir wtree)
    :edges (wg-morph-step-edges win wtree)
    :wlist (let ((wg-morph-hsteps 2) (wg-morph-vsteps 2))
             (wg-docar (w (wg-leave (wg-wtree-wlist wtree) 2))
-              (wg-morph-win->win (wg-minified-copy-of-last-win w) w)))))
+              (wg-morph-win-to-win (wg-minified-copy-of-last-win w) w)))))
 
-(defun wg-morph-wtree->win (wtree win &optional noswap)
+(defun wg-morph-wtree-to-win (wtree win &optional noswap)
   "Grow the first window of WTREE and its subtrees one step toward WIN.
 This eventually wipes WTREE's components, leaving only a window.
 Swap WTREE's first actual window for WIN, unless NOSWAP is non-nil."
-  (if (wg-win-p wtree) (wg-morph-win->win wtree win (not noswap))
+  (if (wg-win-p wtree) (wg-morph-win-to-win wtree win (not noswap))
     (wg-make-wtree
      :dir (wg-wtree-dir wtree)
      :edges (wg-morph-step-edges wtree win)
      :wlist (wg-dbind (fwin . wins) (wg-wtree-wlist wtree)
-              (cons (wg-morph-wtree->win fwin win noswap)
+              (cons (wg-morph-wtree-to-win fwin win noswap)
                     (wg-docar (sw wins)
                       (if (wg-win-p sw) sw
-                        (wg-morph-wtree->win sw win t))))))))
+                        (wg-morph-wtree-to-win sw win t))))))))
 
-(defun wg-morph-wtree->wtree (wt1 wt2)
+(defun wg-morph-wtree-to-wtree (wt1 wt2)
   "Return a new wtree morphed one step toward WT2 from WT1.
 Mutually recursive with `wg-morph-dispatch' to traverse the
 structures of WT1 and WT2 looking for discrepancies."
@@ -2386,13 +2312,13 @@ structures of WT1 and WT2 looking for discrepancies."
   "Return a wtree morphed one step toward W2 from W1.
 Dispatches on each possible combination of types."
   (cond ((and (wg-win-p w1) (wg-win-p w2))
-         (wg-morph-win->win w1 w2 t))
+         (wg-morph-win-to-win w1 w2 t))
         ((and (wg-wtree-p w1) (wg-wtree-p w2))
-         (wg-morph-wtree->wtree w1 w2))
+         (wg-morph-wtree-to-wtree w1 w2))
         ((and (wg-win-p w1) (wg-wtree-p w2))
-         (wg-morph-win->wtree w1 w2))
+         (wg-morph-win-to-wtree w1 w2))
         ((and (wg-wtree-p w1) (wg-win-p w2))
-         (wg-morph-wtree->win w1 w2))))
+         (wg-morph-wtree-to-win w1 w2))))
 
 (defun wg-morph (to &optional from)
   "Morph from wtree FROM to wtree TO.
@@ -2417,9 +2343,8 @@ Assumes both FROM and TO fit in `selected-frame'."
             (wg-restore-window-tree from)
             (redisplay))
         (error (wg-dbind (sym data) err
-                 (unless (or (and (stringp data)
-                                  (string-match "too small" data))
-                             (not wg-morph-no-error))
+                 (unless (and (stringp data)
+                              (string-match "too small" data))
                    (signal sym data))))))
     to))
 
@@ -3027,13 +2952,14 @@ Also delete all references to it by `wg-workgroup-state-table',
   (setf (wg-modified) t)
   workgroup)
 
-(defun wg-add-workgroup (workgroup &optional pos)
-  "Add WORKGROUP to `wg-workgroup-list'.
+(defun wg-add-workgroup (workgroup &optional index)
+  "Add WORKGROUP to `wg-workgroup-list' at INDEX or the end.
 If a workgroup with the same name exists, overwrite it."
   (wg-awhen (wg-find-workgroup-by :name (wg-workgroup-name workgroup) t)
-    (unless pos (setq pos (position it (wg-workgroup-list-or-error))))
+    (unless index (setq index (position it (wg-workgroup-list-or-error))))
     (wg-delete-workgroup it))
-  (wg-asetf (wg-workgroup-list) (wg-insert-elt workgroup it pos))
+  (wg-asetf (wg-workgroup-list)
+            (wg-insert-before workgroup it (or index (length it))))
   (setf (wg-modified) t)
   workgroup)
 
@@ -3127,13 +3053,22 @@ existing workgroup, offer to create it."
                 (:mode "no workgroups")
                 (:div wg-mode-line-decor-right-brace))))))
 
+;; (defun wg-add-mode-line-display ()
+;;   "Add Workgroups' mode-line format to `mode-line-format'."
+;;   (unless (assq 'wg-mode-line-display-on mode-line-format)
+;;     (let ((format '(wg-mode-line-display-on (:eval (wg-mode-line-string))))
+;;           (pos (1+ (position 'mode-line-position mode-line-format))))
+;;       (set-default 'mode-line-format
+;;                    (wg-insert-elt format mode-line-format pos))
+;;       (force-mode-line-update))))
+
 (defun wg-add-mode-line-display ()
   "Add Workgroups' mode-line format to `mode-line-format'."
   (unless (assq 'wg-mode-line-display-on mode-line-format)
     (let ((format '(wg-mode-line-display-on (:eval (wg-mode-line-string))))
-          (pos (1+ (position 'mode-line-position mode-line-format))))
+          (pos (position 'mode-line-position mode-line-format)))
       (set-default 'mode-line-format
-                   (wg-insert-elt format mode-line-format pos))
+                   (wg-insert-after format mode-line-format pos))
       (force-mode-line-update))))
 
 (defun wg-remove-mode-line-display ()
@@ -3146,9 +3081,8 @@ existing workgroup, offer to create it."
 
 ;;; messaging
 
-;; FIXME: also send messages to a *workgroups log* buffer
-
-;; FIXME: add a `wg-debug-mode' var and a `wg-error' wrapper such that when
+;; TODO: possibly also send messages to a *workgroups log* buffer
+;; TODO: add a `wg-debug-mode' var and a `wg-error' wrapper such that when
 ;; `wg-debug-mode' is on `wg-error' throws the error, but when it's off,
 ;; `wg-error' just logs the error to *workgroups log*
 
@@ -3459,8 +3393,8 @@ Added to `iswitchb-make-buflist-hook'."
     (wg-read-object
      (or prompt (format "Name (default: %S): " default))
      (lambda (new) (and (stringp new)
-                        (not (equal new ""))
-                        (wg-unique-workgroup-name-p new)))
+                   (not (equal new ""))
+                   (wg-unique-workgroup-name-p new)))
      "Please enter a unique, non-empty name"
      nil nil nil nil default)))
 
@@ -4029,6 +3963,7 @@ is nil, read a filename.  Otherwise use `wg-visited-file-name'."
     (setf (wg-visited-file-name) file)
     (wg-update-current-workgroup-working-wconfig)
     (wg-cleanup-bufs-and-uids)
+    ;; FIXME: create new workgroup set with serialized parameters here:
     (wg-write-sexp-to-file (wg-current-workgroup-set) file)
     (wg-mark-everything-unmodified)
     (wg-fontified-message (:cmd "Wrote: ") (:file file))))
@@ -4234,32 +4169,20 @@ command's docstring;  But why, when there's `apropos-command'?"
 
 ;;; wg-minibuffer-mode commands
 
-(defun wg-minibuffer-mode-commands-ok? ()
-  "Meaningfully error when minibuffer commands can't execute properly."
-  (unless (wg-current-workgroup t)
-    (error "%S doesn't work when there's no current workgroup in the frame"
-           this-command))
-  (unless wg-current-buffer-list-filter-id
-    (error "%S called outside of a `wg-with-buffer-list-filters' form."
-           this-command)))
-
 (defun wg-next-buffer-list-filter ()
   "Trigger a switch to the next buffer-list-filter."
   (interactive)
-  (wg-minibuffer-mode-commands-ok?)
   (throw 'wg-action (list 'next (minibuffer-contents))))
 
 (defun wg-previous-buffer-list-filter ()
   "Trigger a switch to the previous buffer-list-filter."
   (interactive)
-  (wg-minibuffer-mode-commands-ok?)
   (throw 'wg-action (list 'prev (minibuffer-contents))))
 
 (defun wg-backward-char-or-next-buffer-list-filter ()
   "Call `backward-char' unless `point' is right after the prompt,
 in which case call `wg-next-buffer-list-filter'."
   (interactive)
-  (wg-minibuffer-mode-commands-ok?)
   (if (> (point) (minibuffer-prompt-end)) (backward-char)
     (wg-next-buffer-list-filter)))
 
@@ -4267,14 +4190,12 @@ in which case call `wg-next-buffer-list-filter'."
   "Call `backward-char' unless `point' is right after the prompt,
 in which case call `wg-previous-buffer-list-filter'."
   (interactive)
-  (wg-minibuffer-mode-commands-ok?)
   (if (> (point) (minibuffer-prompt-end)) (backward-char)
     (wg-previous-buffer-list-filter)))
 
 (defun wg-dissociate-first-match ()
   "Dissociate the first match from current workgroup."
   (interactive)
-  (wg-minibuffer-mode-commands-ok?)
   (wg-when-let
       ((mode (wg-read-buffer-mode))
        (buffer (wg-current-match mode))
@@ -4286,7 +4207,6 @@ in which case call `wg-previous-buffer-list-filter'."
 (defun wg-associate-first-match ()
   "Associate the first match with or update it in the current workgroup."
   (interactive)
-  (wg-minibuffer-mode-commands-ok?)
   (wg-when-let
       ((mode (wg-read-buffer-mode))
        (buffer (wg-current-match mode))
@@ -4298,7 +4218,6 @@ in which case call `wg-previous-buffer-list-filter'."
 (defun wg-minibuffer-mode-purge-weakly-associated-buffers ()
   "Purge weakly associated buffers and update the current matches."
   (interactive)
-  (wg-minibuffer-mode-commands-ok?)
   (wg-workgroup-purge-weakly-associated-buffers (wg-current-workgroup))
   (wg-set-current-matches
    (let ((unpurged (wg-filtered-buffer-list t)) new-matches)
@@ -4593,20 +4512,10 @@ as Workgroups' command remappings."
     (add-to-list 'minor-mode-map-alist
                  wg-minibuffer-mode-minor-mode-map-entry)))
 
-;; (defun wg-turn-on-minibuffer-mode ()
-;;   "`minibuffer-setup-hook' to turn on `wg-minibuffer-mode'."
-;;   (when wg-current-buffer-list-filter-id
-;;     (wg-minibuffer-mode 1)))
-
 (defun wg-turn-on-minibuffer-mode ()
   "`minibuffer-setup-hook' to turn on `wg-minibuffer-mode'."
-  (when wg-buffer-list-filtration-on
+  (when wg-current-buffer-list-filter-id
     (wg-minibuffer-mode 1)))
-
-;; (defun wg-turn-off-minibuffer-mode ()
-;;   "`minibuffer-exit-hook' to turn off `wg-minibuffer-mode'."
-;;   (when wg-current-buffer-list-filter-id
-;;     (wg-minibuffer-mode -1)))
 
 (defun wg-turn-off-minibuffer-mode ()
   "`minibuffer-exit-hook' to turn off `wg-minibuffer-mode'."
