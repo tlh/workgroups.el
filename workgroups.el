@@ -1,16 +1,11 @@
 ;;; workgroups.el --- Workgroups For Windows (for Emacs)
 ;;
-;; Workgroups is an Emacs session manager providing window-configuration
-;; persistence, switching, undo/redo, killing/yanking, animated morphing,
-;; per-workgroup buffer-lists, and more.
-
-;; Copyright (C) 2010 tlh <thunkout@gmail.com>
-
-;; File:     workgroups.el
-;; Author:   tlh <thunkout@gmail.com>
-;; Created:  2010-07-22
-;; Version   0.2.0
+;; Copyright (C) 2010, 2011 tlh
+;;
+;; Author: tlh <thunkout at gmail dot com>
 ;; Keywords: session management window-configuration persistence
+;; Homepage: https://github.com/tlh/workgroups.el
+;; Version   1.0.0
 
 ;; This program is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -29,27 +24,30 @@
 
 ;;; Commentary:
 ;;
-;; See the file README.md in this directory
+;; Workgroups is an Emacs session manager providing window-configuration
+;; persistence, switching, undo/redo, killing/yanking, animated morphing,
+;; per-workgroup buffer-lists, and more.
 ;;
-;;; Installation:
 ;;
-;;; Usage:
+;; Installation and Usage
+;; ----------------------
+;; See the file README.md in this directory, or at
 ;;
-
-;;; Symbol naming conventions:
+;;   https://github.com/tlh/workgroups.el
 ;;
-;; - bufobj always refers to a Workgroups buffer (wg-buf) or an Emacs buffer
-;; - W always refers to a Workgroups window (wg-win) or window tree (wg-wtree).
-;; - SW always refers to a sub-window or sub-window-tree of a wtree.
-;; - WL always refers to the window list of a wtree.
-;; - LN, TN, RN and BN always refer to the LEFT, TOP, RIGHT and BOTTOM
+;;
+;; Symbol naming conventions
+;; -------------------------
+;; * bufobj always refers to a Workgroups buffer (wg-buf) or an Emacs buffer
+;; * W always refers to a Workgroups window (wg-win) or window tree (wg-wtree).
+;; * SW always refers to a sub-window or sub-window-tree of a wtree.
+;; * WL always refers to the window list of a wtree.
+;; * LN, TN, RN and BN always refer to the LEFT, TOP, RIGHT and BOTTOM
 ;;   edges of an edge list, where N is a differentiating integer.
-;; - LS, HS, LB and HB always refer to the LOW-SIDE, HIGH-SIDE, LOW-BOUND
+;; * LS, HS, LB and HB always refer to the LOW-SIDE, HIGH-SIDE, LOW-BOUND
 ;;   and HIGH-BOUND of a bounds list.  See `wg-with-bounds'.
 ;;
-
-
-
+;;
 ;;; Code:
 
 (require 'cl)
@@ -889,6 +887,21 @@ use by buffer list filtration hooks.")
 
 ;;; workgroups utils
 
+(defun wg-read-object (prompt test warning &optional initial-contents keymap
+                              read hist default-value inherit-input-method)
+  "PROMPT for an object that satisfies TEST, WARNING if necessary.
+ARGS are `read-from-minibuffer's args, after PROMPT."
+  (flet ((read () (read-from-minibuffer
+                   prompt initial-contents keymap read hist
+                   default-value inherit-input-method)))
+    (let ((obj (read)))
+      (when (and (equal obj "") default-value) (setq obj default-value))
+      (while (not (funcall test obj))
+        (message warning)
+        (sit-for wg-minibuffer-message-timeout)
+        (setq obj (read)))
+      obj)))
+
 (defvar wg-readable-types
   '(integer float cons symbol vector string char-table bool-vector)
   "List of types with readable printed representations.")
@@ -912,7 +925,7 @@ FACEKEY must be a key in `wg-face-abbrevs'."
       string)))
 
 (defmacro wg-fontify (&rest specs)
-  "A small fontification DSL.  FIXME: longer docstring"
+  "A small fontification DSL.  TODO: WRITEME"
   (declare (indent defun))
   `(concat
     ,@(wg-docar (spec specs)
@@ -924,33 +937,13 @@ FACEKEY must be a key in `wg-face-abbrevs'."
 
 (defun wg-barf-on-active-minibuffer ()
   "Throw an error when the minibuffer is active."
-  (when (active-minibuffer-window)
+  (unless (zerop (minibuffer-depth))
     (error "Workgroup operations aren't permitted while the \
 minibuffer is active.")))
 
 
 
 ;;; uid construction
-
-(defun wg-int-to-b36-one-digit (i)
-  "Return a character in 0..9 or A..Z from I, and integer 0<=I<32.
-Similar to `org-id-int-to-b36-one-digit'."
-  (cond ((not (wg-within i 0 36))
-         (error "%s out of range" i))
-        ((< i 10) (+ ?0 i))
-        ((< i 36) (+ ?A i -10))))
-
-(defun wg-int-to-b36 (i &optional length)
-  "Return a base 36 string from I.
-Similar to `org-id-int-to-b36'."
-  (let ((base 36) b36)
-    (flet ((add-digit () (push (wg-int-to-b36-one-digit (mod i base)) b36)
-                      (setq i (/ i base))))
-      (add-digit)
-      (while (> i 0) (add-digit))
-      (setq b36 (map 'string 'identity b36))
-      (if (not length) b36
-        (concat (make-string (max 0 (- length (length b36))) ?0) b36)))))
 
 (defun wg-time-to-b36 (&optional time)
   "Convert `current-time' into a b36 string."
@@ -2083,30 +2076,24 @@ Return VALUE."
 (defun wg-workgroup-strongly-associate-bufobj (workgroup bufobj)
   "Strongly associate BUFOBJ with WORKGROUP."
   (let* ((uid (wg-bufobj-uid-or-track bufobj))
-         (rem (wg-removef-p uid (wg-workgroup-weak-buf-uids workgroup)
-                            :test 'equal))
-         (add (wg-pushnew-p uid (wg-workgroup-strong-buf-uids workgroup)
-                            :test 'equal)))
+         (rem (wg-removef-p uid (wg-workgroup-weak-buf-uids workgroup)))
+         (add (wg-pushnew-p uid (wg-workgroup-strong-buf-uids workgroup))))
     (when (or rem add) (wg-flag-workgroup-modified workgroup))
     add))
 
 (defun wg-workgroup-weakly-associate-bufobj (workgroup bufobj)
   "Weakly associate BUFOBJ with WORKGROUP."
   (let* ((uid (wg-bufobj-uid-or-track bufobj))
-         (rem (wg-removef-p uid (wg-workgroup-strong-buf-uids workgroup)
-                            :test 'equal))
-         (add (wg-pushnew-p uid (wg-workgroup-weak-buf-uids workgroup)
-                            :test 'equal)))
+         (rem (wg-removef-p uid (wg-workgroup-strong-buf-uids workgroup)))
+         (add (wg-pushnew-p uid (wg-workgroup-weak-buf-uids workgroup))))
     (when (or rem add) (wg-flag-workgroup-modified workgroup))
     add))
 
 (defun wg-workgroup-dissociate-bufobj (workgroup bufobj)
   "Dissociate BUFOBJ from WORKGROUP."
   (let* ((uid (wg-bufobj-uid-or-track bufobj))
-         (rem1 (wg-removef-p uid (wg-workgroup-strong-buf-uids workgroup)
-                             :test 'equal))
-         (rem2 (wg-removef-p uid (wg-workgroup-weak-buf-uids workgroup)
-                             :test 'equal)))
+         (rem1 (wg-removef-p uid (wg-workgroup-strong-buf-uids workgroup)))
+         (rem2 (wg-removef-p uid (wg-workgroup-weak-buf-uids workgroup))))
     (wg-awhen (or rem1 rem2)
       (wg-flag-workgroup-modified workgroup)
       it)))
@@ -3683,7 +3670,7 @@ wconfigs in the current frame."
 ;;
 ;; TODO: Add window splitting, deletion and locking commands
 ;;
-;; FIXME: These are half-hearted.  Clean them up, and allow specification of the
+;; TODO: These are half-hearted.  Clean them up, and allow specification of the
 ;; window-tree depth at which to operate.
 
 (defun wg-backward-transpose-window (workgroup offset)

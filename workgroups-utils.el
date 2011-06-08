@@ -1,12 +1,11 @@
-;;; workgroups-utils.el --- utilities used by Workgroups
-
-;; Copyright (C) 2010 tlh <thunkout@gmail.com>
-
-;; File:     workgroups-utils.el
-;; Author:   tlh <thunkout@gmail.com>
-;; Created:  2010-07-22
-;; Version   0.2.0
-;; Keywords: utilities
+;;; workgroups-utils.el --- Utilities used by Workgroups
+;;
+;; Copyright (C) 2010, 2011 tlh
+;;
+;; Author: tlh <thunkout at gmail dot com>
+;; Keywords: session management window-configuration persistence
+;; Homepage: https://github.com/tlh/workgroups.el
+;; Version   1.0.0
 
 ;; This program is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -25,63 +24,39 @@
 
 ;;; Commentary:
 ;;
-;; Just a bunch of general purpose-ish utilities used by Workgroups.
+;; A bunch of general purpose-ish utilities used by Workgroups.
 ;;
-;;; Installation:
-;;
-;;; Usage:
-;;
-
-
-
 ;;; Code:
+
 
 (eval-and-compile
   (require 'cl))
 
 
+;; utils used in macros
 
 (defmacro wg-with-gensyms (syms &rest body)
   "Bind all symbols in SYMS to `gensym's, and eval BODY."
   (declare (indent 1))
   `(let (,@(mapcar (lambda (sym) `(,sym (gensym))) syms)) ,@body))
 
-(defmacro wg-when-boundp (symbols &rest body)
-  "When all SYMBOLS are bound, `eval' body."
-  (declare (indent 1))
-  `(when (and ,@(mapcar (lambda (sym) `(boundp ',sym)) symbols))
-     ,@body))
-
-(defun wg-partition (list n &optional step)
-  "Return list of N-length sublists of LIST, offset by STEP.
-Iterative to prevent stack overflow."
-  (let (acc)
-    (while list
-      (push (wg-take list n) acc)
-      (setq list (nthcdr (or step n) list)))
-    (nreverse acc)))
-
 (defmacro wg-dbind (args expr &rest body)
   "Abbreviation of `destructuring-bind'."
   (declare (indent 2))
   `(destructuring-bind ,args ,expr ,@body))
 
-(defmacro wg-docar (spec &rest body)
-  "do-style wrapper for `mapcar'."
-  (declare (indent 1))
-  `(mapcar (lambda (,(car spec)) ,@body) ,(cadr spec)))
+(defun wg-partition (list &optional n step)
+  "Return list of N-length sublists of LIST, offset by STEP.
+N defaults to 2, and STEP defaults to N.
+Iterative to prevent stack overflow."
+  (let* ((n (or n 2)) (step (or step n)) acc)
+    (while list
+      (push (wg-take list n) acc)
+      (setq list (nthcdr step list)))
+    (nreverse acc)))
 
-(defmacro wg-dohash (spec &rest body)
-  "do-style wrapper for `maphash'."
-  (declare (indent 1))
-  (wg-dbind (key val table &optional return) spec
-    `(progn (maphash (lambda (,key ,val) ,@body) ,table) ,return)))
 
-(defmacro wg-doconcat (spec &rest body)
-  "do-style wrapper for `mapconcat'."
-  (declare (indent 1))
-  (wg-dbind (elt seq &optional sep) spec
-    `(mapconcat (lambda (,elt) ,@body) ,seq (or ,sep ""))))
+;; bindings
 
 (defmacro wg-when-let (binds &rest body)
   "Like `let*', but only eval BODY when all BINDS are non-nil."
@@ -93,10 +68,36 @@ Iterative to prevent stack overflow."
            ,(if (not binds) `(progn ,@body)
               `(wg-when-let ,binds ,@body)))))))
 
-(defmacro wg-until (test &rest body)
-  "`while' not."
+(defmacro wg-when-boundp (symbols &rest body)
+  "When all SYMBOLS are bound, `eval' body."
   (declare (indent 1))
-  `(while (not ,test) ,@body))
+  `(when (and ,@(mapcar (lambda (sym) `(boundp ',sym)) symbols))
+     ,@body))
+
+
+;; do-style wrappers
+
+(defmacro wg-docar (spec &rest body)
+  "do-style wrapper for `mapcar'."
+  (declare (indent 1))
+  `(mapcar (lambda (,(car spec)) ,@body) ,(cadr spec)))
+
+(defmacro wg-dohash (spec &rest body)
+  "do-style wrapper for `maphash'.
+
+\(fn (KEY VALUE TABLE [RESULT]) BODY...)"
+  (declare (indent 1))
+  (wg-dbind (key val table &optional result) spec
+    `(progn (maphash (lambda (,key ,val) ,@body) ,table) ,result)))
+
+(defmacro wg-doconcat (spec &rest body)
+  "do-style wrapper for `mapconcat'."
+  (declare (indent 1))
+  (wg-dbind (elt seq &optional sep) spec
+    `(mapconcat (lambda (,elt) ,@body) ,seq (or ,sep ""))))
+
+
+;; anaphora
 
 (defmacro wg-aif (test then &rest else)
   "Anaphoric `if'."
@@ -123,30 +124,39 @@ Iterative to prevent stack overflow."
 
 (defmacro wg-asetf (&rest places-and-values)
   "Anaphoric `setf'."
-  `(progn ,@(wg-docar (pv (wg-partition places-and-values 2))
-              `(let ((it ,(car pv))) (setf ,@pv)))))
+  `(progn ,@(mapcar (lambda (pv) `(let ((it ,(car pv))) (setf ,@pv)))
+                    (wg-partition places-and-values 2))))
 
-(defmacro wg-removef-p (object place &rest keys)
-  "If OBJECT is a `member*' of PLACE, remove it and return t.
-Otherwise return nil.  KEYS is passed to both `member*' and `remove*'."
-  (wg-with-gensyms (obj)
-    `(let ((,obj ,object))
-       (when (member* ,obj ,place ,@keys)
-         (setf ,place (remove* ,obj ,place ,@keys))
-         t))))
 
-(defmacro wg-pushnew-p (object place &rest keys)
-  "If OBJECT is not a `member*' of PLACE, push it and return t.
-Otherwise return nil.  KEYS is passed to both `member*' and `pushnew'."
-  (wg-with-gensyms (obj)
-    `(let ((,obj ,object))
-       (unless (member* ,obj ,place ,@keys)
-         (pushnew ,obj ,place ,@keys)
-         t))))
 
-(defun wg-toggle (symbol)
-  "Toggle SYMBOL's truthiness."
-  (set symbol (not (symbol-value symbol))))
+;; other control structures
+
+(defmacro wg-until (test &rest body)
+  "`while' not."
+  (declare (indent 1))
+  `(while (not ,test) ,@body))
+
+(defmacro wg-destructuring-dolist (spec &rest body)
+  "Loop over a list.
+Evaluate BODY, destructuring LIST into SPEC, then evaluate RESULT
+to get a return value, defaulting to nil.  The only hitch is that
+spec must end in dotted style, collecting the rest of the list
+into a var, like so: (a (b c) . rest)
+
+\(fn (SPEC LIST [RESULT]) BODY...)"
+  (declare (indent 1))
+  (wg-dbind (loopspec list &optional result) spec
+    (let ((rest (cdr (last loopspec))))
+      (wg-with-gensyms (list-sym)
+        `(let ((,list-sym ,list))
+           (while ,list-sym
+             (wg-dbind ,loopspec ,list-sym
+               ,@body
+               (setq ,list-sym ,rest)))
+           ,result)))))
+
+
+;; numbers
 
 (defun wg-step-to (n m step)
   "Increment or decrement N toward M by STEP.
@@ -160,11 +170,46 @@ Return M when the difference between N and M is less than STEP."
 HI-INCLUSIVE non-nil means the HI bound is inclusive."
   (and (>= num lo) (if hi-inclusive (<= num hi) (< num hi))))
 
-(defun wg-filter (pred seq)
-  "Return a list of elements in SEQ on which PRED returns non-nil."
-  (let (acc)
-    (mapc (lambda (elt) (and (funcall pred elt) (push elt acc))) seq)
-    (nreverse acc)))
+(defun wg-int-to-b36-one-digit (i)
+  "Return a character in 0..9 or A..Z from I, and integer 0<=I<32.
+Similar to `org-id-int-to-b36-one-digit'."
+  (cond ((not (wg-within i 0 36))
+         (error "%s out of range" i))
+        ((< i 10) (+ ?0 i))
+        ((< i 36) (+ ?A i -10))))
+
+(defun wg-int-to-b36 (i &optional length)
+  "Return a base 36 string from I.
+Similar to `org-id-int-to-b36'."
+  (let ((base 36) b36)
+    (flet ((add-digit () (push (wg-int-to-b36-one-digit (mod i base)) b36)
+                      (setq i (/ i base))))
+      (add-digit)
+      (while (> i 0) (add-digit))
+      (setq b36 (map 'string 'identity b36))
+      (if (not length) b36
+        (concat (make-string (max 0 (- length (length b36))) ?0) b36)))))
+
+
+;; lists
+
+(defmacro wg-removef-p (object place)
+  "If OBJECT is a `member' of PLACE, remove it from PLACE and return t.
+Otherwise return nil."
+  (wg-with-gensyms (obj)
+    `(let ((,obj ,object))
+       (when (member ,obj ,place)
+         (setf ,place (remove ,obj ,place))
+         t))))
+
+(defmacro wg-pushnew-p (object place)
+  "If OBJECT is not a `member' of PLACE, push it to PLACE and return t.
+Otherwise return nil."
+  (wg-with-gensyms (obj)
+    `(let ((,obj ,object))
+       (unless (member ,obj ,place)
+         (push ,obj ,place)
+         t))))
 
 (defun wg-last1 (list)
   "Return the last element of LIST."
@@ -207,10 +252,6 @@ HI-INCLUSIVE non-nil means the HI bound is inclusive."
 length is even, the first elt is left nearer the front."
   (wg-rotate-list list (- (/ (1- (length list)) 2))))
 
-(defun wg-cyclic-nth (list n)
-  "Return the Nth element of LIST, modded by the length of list."
-  (nth (mod n (length list)) list))
-
 (defun wg-insert-after (elt list index)
   "Insert ELT into LIST after INDEX."
   (let ((new-list (copy-list list)))
@@ -226,6 +267,10 @@ length is even, the first elt is left nearer the front."
   "Move ELT before INDEX in LIST.
 KEYS is passed to `remove*'."
   (wg-insert-before elt (apply 'remove* elt list keys) index))
+
+(defun wg-cyclic-nth (list n)
+  "Return the Nth element of LIST, modded by the length of list."
+  (nth (mod n (length list)) list))
 
 (defun wg-cyclic-offset-elt (elt list n)
   "Cyclically offset ELT's position in LIST by N."
@@ -246,10 +291,16 @@ Return nil when ELT1 and ELT2 aren't both present."
                 (p2 (position elt2 list)))
     (wg-move-elt elt1 (wg-move-elt elt2 list p1) p2)))
 
-(defmacro wg-make-alist (&rest kvps)
+
+;; alists
+
+(defun wg-make-alist (&rest kvps)
   "Return a new alist from KVPS."
-  `(list ,@(wg-docar (pair (wg-partition kvps 2))
-             `(cons ,@pair))))
+  (let (alist)
+    (while kvps
+      (push (cons (car kvps) (cadr kvps)) alist)
+      (setq kvps (cddr kvps)))
+    (nreverse alist)))
 
 (defun wg-aget (alist key &optional default)
   "Return the value of KEY in ALIST. Uses `assq'.
@@ -258,7 +309,7 @@ If PARAM is not found, return DEFAULT which defaults to nil."
 
 (defun wg-acopy (alist)
   "Return a copy of ALIST's toplevel list structure."
-  (wg-docar (kvp alist) (cons (car kvp) (cdr kvp))))
+  (mapcar (lambda (kvp) (cons (car kvp) (cdr kvp))) alist))
 
 (defun wg-aput (alist key value)
   "Return a new alist from ALIST with KEY's value set to VALUE."
@@ -286,6 +337,9 @@ variable, and the cadr as the key."
                     (wg-aget ,asym ',(if c (cadr bind) bind))))))
        ,@body)))
 
+
+;; hash-tables
+
 (defun wg-fill-hash-table (table &rest key-value-pairs)
   "Fill TABLE with KEY-VALUE-PAIRS and return TABLE."
   (while key-value-pairs
@@ -293,12 +347,60 @@ variable, and the cadr as the key."
     (setq key-value-pairs (cddr key-value-pairs)))
   table)
 
-(defun wg-fill-keymap (keymap &rest binds)
-  "Return KEYMAP after defining in it all keybindings in BINDS."
-  (while binds
-    (define-key keymap (car binds) (cadr binds))
-    (setq binds (cddr binds)))
-  keymap)
+
+;; symbols and strings
+
+(defun wg-toggle (symbol)
+  "Toggle SYMBOL's truthiness."
+  (set symbol (not (symbol-value symbol))))
+
+(defun wg-symcat (&rest symbols-and-strings)
+  "Return a new interned symbol by concatenating SYMBOLS-AND-STRINGS."
+  (intern (mapconcat (lambda (obj) (if (symbolp obj) (symbol-name obj) obj))
+                     symbols-and-strings "")))
+
+(defun wg-make-string (times string &optional separator)
+  "Like `make-string', but includes a separator."
+  (mapconcat 'identity (make-list times string) (or separator "")))
+
+
+;; buffers
+
+(defun wg-get-buffer (buffer-or-name)
+  "Return BUFFER-OR-NAME's buffer, or error."
+  (or (get-buffer buffer-or-name)
+      (error "%S does not identify a buffer" buffer-or-name)))
+
+(defun wg-buffer-name (buffer-or-name)
+  "Return BUFFER-OR-NAME's `buffer-name', or error."
+  (buffer-name (wg-get-buffer buffer-or-name)))
+
+(defun wg-buffer-file-name (buffer-or-name)
+  "Return BUFFER-OR-NAME's `buffer-file-name', or error."
+  (buffer-file-name (wg-get-buffer buffer-or-name)))
+
+(defun wg-buffer-major-mode (buffer-or-name)
+  "Return BUFFER's major-mode."
+  (with-current-buffer buffer-or-name major-mode))
+
+(defmacro wg-buffer-local-setq (buffer var value)
+  "`setq' VAR to VALUE while BUFFER is current.
+Note that this won't make VAR buffer-local if it isn't already."
+  `(with-current-buffer ,buffer (setq ,var ,value)))
+
+(defun wg-interesting-buffers ()
+  "Return a list of only the interesting buffers in `buffer-list'."
+  (remove-if (lambda (bname) (string-match "^ " bname))
+             (buffer-list) :key 'buffer-name))
+
+(defun wg-get-first-buffer-matching-regexp (regexp &optional buffer-list)
+  "Return the first buffer in BUFFER-LIST with a name matching REGEXP.
+BUFFER-LIST should contain buffer objects and/or buffer names."
+  (find regexp (or buffer-list (buffer-list))
+        :test 'string-match :key 'wg-buffer-name))
+
+
+;; files
 
 (defun wg-write-sexp-to-file (sexp file)
   "Write the printable representation of SEXP to FILE."
@@ -314,25 +416,13 @@ variable, and the cadr as the key."
     (goto-char (point-min))
     (read (current-buffer))))
 
-(defun wg-read-object (prompt test warning &optional initial-contents keymap
-                              read hist default-value inherit-input-method)
-  "PROMPT for an object that satisfies TEST, WARNING if necessary.
-ARGS are `read-from-minibuffer's args, after PROMPT."
-  (flet ((read () (read-from-minibuffer
-                   prompt initial-contents keymap read hist
-                   default-value inherit-input-method)))
-    (let ((obj (read)))
-      (when (and (equal obj "") default-value) (setq obj default-value))
-      (while (not (funcall test obj))
-        (message warning)
-        (sit-for wg-minibuffer-message-timeout)
-        (setq obj (read)))
-      obj)))
-
 (defun wg-file-under-root-path-p (root-path file-path)
   "Return t when FILE-PATH is under ROOT-PATH, nil otherwise."
   (string-match (concat "^" (regexp-quote (expand-file-name root-path)))
                 (expand-file-name file-path)))
+
+
+;; frames
 
 (defun wg-cyclic-nth-from-frame (&optional n frame)
   "Return the frame N places away from FRAME in `frame-list' cyclically.
@@ -340,53 +430,8 @@ N defaults to 1, and FRAME defaults to `selected-frame'."
   (wg-cyclic-nth-from-elt
    (or frame (selected-frame)) (frame-list) (or n 1)))
 
-(defun wg-symcat (&rest symbols-and-strings)
-  "Return a new interned symbol by concatenating SYMBOLS-AND-STRINGS."
-  (intern (mapconcat (lambda (obj) (if (symbolp obj) (symbol-name obj) obj))
-                     symbols-and-strings "")))
 
-(defun wg-make-string (times string &optional separator)
-  "Like `make-string', but includes a separator."
-  (mapconcat 'identity (make-list times string) (or separator "")))
-
-(defun wg-get-buffer (buffer-or-name)
-  "Return BUFFER-OR-NAME's buffer, or error."
-  (or (get-buffer buffer-or-name)
-      (error "%S does not identify a buffer" buffer-or-name)))
-
-(defun wg-buffer-name (buffer-or-name)
-  "Return BUFFER-OR-NAME's `buffer-name', or error."
-  (buffer-name (wg-get-buffer buffer-or-name)))
-
-(defun wg-buffer-file-name (buffer-or-name)
-  "Return BUFFER-OR-NAME's `buffer-file-name', or error."
-  (buffer-file-name (wg-get-buffer buffer-or-name)))
-
-(defun wg-interesting-buffers ()
-  "Return a list of only the interesting buffers in `buffer-list'."
-  (remove-if (lambda (bname) (string-match "^ " bname))
-             (buffer-list) :key 'buffer-name))
-
-(defun wg-add-or-remove-hooks (remove &rest pairs)
-  "Add FUNCTION to or remove it from HOOK, depending on REMOVE."
-  (dolist (pair (wg-partition pairs 2))
-    (funcall (if remove 'remove-hook 'add-hook)
-             (car pair) (cadr pair))))
-
-(defun wg-get-first-buffer-matching-regexp (regexp &optional buffer-list)
-  "Return the first buffer in BUFFER-LIST with a name matching REGEXP.
-BUFFER-LIST should contain buffer objects and/or buffer names."
-  (find regexp (or buffer-list (buffer-list))
-        :test 'string-match :key 'wg-buffer-name))
-
-(defun wg-buffer-major-mode (buffer-or-name)
-  "Return BUFFER's major-mode."
-  (with-current-buffer buffer-or-name major-mode))
-
-(defmacro wg-buffer-local-setq (buffer var value)
-  "`setq' VAR to VALUE while BUFFER is current.
-Note that this won't make VAR buffer-local if it isn't already."
-  `(with-current-buffer ,buffer (setq ,var ,value)))
+;; namespace-prefixed defstruct
 
 (defmacro wg-defstruct (prefix name-form &rest slot-defs)
   "`defstruct' wrapper that namespace-prefixes all generated functions.
@@ -422,6 +467,22 @@ the cadr as the accessor function."
             ,@(wg-docar (slot slot-bindings)
                 `(,(car slot) (,(cadr slot) ,objsym))))
        ,@body)))
+
+
+;; misc
+
+(defun wg-fill-keymap (keymap &rest binds)
+  "Return KEYMAP after defining in it all keybindings in BINDS."
+  (while binds
+    (define-key keymap (car binds) (cadr binds))
+    (setq binds (cddr binds)))
+  keymap)
+
+(defun wg-add-or-remove-hooks (remove &rest pairs)
+  "Add FUNCTION to or remove it from HOOK, depending on REMOVE."
+  (dolist (pair (wg-partition pairs 2))
+    (funcall (if remove 'remove-hook 'add-hook)
+             (car pair) (cadr pair))))
 
 
 
