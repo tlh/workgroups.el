@@ -68,9 +68,9 @@
   "Alist mapping type keys to object deserialization functions.")
 
 (defvar wg-pickel-link-deserializers
-  `((c . wg-pickel-relink-cons)
-    (v . wg-pickel-relink-vector)
-    (h . wg-pickel-relink-hash-table))
+  `((c . wg-pickel-cons-link-deserializer)
+    (v . wg-pickel-vector-link-deserializer)
+    (h . wg-pickel-hash-table-link-deserializer))
   "Alist mapping type keys to link deserialization functions.")
 
 
@@ -80,6 +80,25 @@
 (defun wg-pickel-p (obj)
   "Return t when OBJ is a pickel, nil otherwise."
   (and (consp obj) (eq (car obj) wg-pickel-identifier)))
+
+(defun wg-pickel-object-serializer (obj)
+  "Return the object serializer for the `type-of' OBJ."
+  (or (wg-aget wg-pickel-object-serializers (type-of obj))
+      (error "Invalid type: %S" (type-of obj))))
+
+(defun wg-pickel-link-serializer (obj)
+  "Return the link serializer for the `type-of' OBJ."
+  (wg-aget wg-pickel-link-serializers (type-of obj)))
+
+(defun wg-pickel-object-deserializer (key)
+  "Return the object deserializer for type key KEY, or error."
+  (or (wg-aget wg-pickel-object-deserializers key)
+      (error "Invalid object deserializer key: %S" key)))
+
+(defun wg-pickel-link-deserializer (key)
+  "Return the link deserializer for type key KEY, or error."
+  (or (wg-aget wg-pickel-link-deserializers key)
+      (error "Invalid link deserializer key: %S" key)))
 
 
 
@@ -141,10 +160,49 @@
   "Return a list of serializations of the objects in BINDS."
   (let (result)
     (wg-dohash (obj id binds result)
-      (let ((ser (wg-aget wg-pickel-object-serializers (type-of obj))))
-        (unless ser (error "Invalid type: %S" (type-of obj)))
-        (push (funcall ser obj) result)
-        (push id result)))))
+      (setq result
+            (nconc (list id (funcall (wg-pickel-object-serializer obj) obj))
+                   result)))))
+
+
+
+;;; link serialization
+
+(defun wg-pickel-cons-link-serializer (cons binds)
+  "Return the serialization of CONS's links in BINDS."
+  (list 'c
+        (gethash cons binds)
+        (gethash (car cons) binds)
+        (gethash (cdr cons) binds)))
+
+(defun wg-pickel-vector-link-serializer (vector binds)
+  "Return the serialization of VECTOR's links in BINDS."
+  (let (result)
+    (dotimes (i (length vector) result)
+      (setq result
+            (nconc (list 'v
+                         (gethash vector binds)
+                         i
+                         (gethash (aref vector i) binds))
+                   result)))))
+
+(defun wg-pickel-hash-table-link-serializer (table binds)
+  "Return the serialization of TABLE's links in BINDS."
+  (let (result)
+    (wg-dohash (key value table result)
+      (setq result
+            (nconc (list 'h
+                         (gethash key binds)
+                         (gethash value binds)
+                         (gethash table binds))
+                   result)))))
+
+(defun wg-pickel-serialize-links (binds)
+  "Return a list of serializations of the links between objects in BINDS."
+  (let (result)
+    (wg-dohash (obj id binds result)
+      (wg-awhen (wg-pickel-link-serializer obj)
+        (setq result (nconc (funcall it obj binds) result))))))
 
 
 
@@ -174,62 +232,24 @@
       (puthash uid
                (if (atom obj) obj
                  (wg-dbind (key . data) obj
-                   (wg-aif (wg-aget wg-pickel-object-deserializers key)
-                       (apply it data)
-                     (error "Invalid object deserializer key: %S" key))))
+                   (apply (wg-pickel-object-deserializer key) data)))
                binds))))
-
-
-
-;;; link serialization
-
-(defun wg-pickel-cons-link-serializer (cons binds)
-  "Return the serialization of CONS's links in BINDS."
-  (list 'c
-        (gethash cons binds)
-        (gethash (car cons) binds)
-        (gethash (cdr cons) binds)))
-
-(defun wg-pickel-vector-link-serializer (vector binds)
-  "Return the serialization of VECTOR's links in BINDS."
-  (let (result)
-    (dotimes (i (length vector) result)
-      (push (gethash (aref vector i) binds) result)
-      (push i result)
-      (push (gethash vector binds) result)
-      (push 'v result))))
-
-(defun wg-pickel-hash-table-link-serializer (table binds)
-  "Return the serialization of TABLE's links in BINDS."
-  (let (result)
-    (wg-dohash (key value table result)
-      (push (gethash table binds) result)
-      (push (gethash value binds) result)
-      (push (gethash key binds) result)
-      (push 'h result))))
-
-(defun wg-pickel-serialize-links (binds)
-  "Return a list of serializations of the links between objects in BINDS."
-  (let (result)
-    (wg-dohash (obj id binds result)
-      (wg-awhen (wg-aget wg-pickel-link-serializers (type-of obj))
-        (setq result (nconc (funcall it obj binds) result))))))
 
 
 
 ;;; link deserialization
 
-(defun wg-pickel-relink-cons (cons-id car-id cdr-id binds)
+(defun wg-pickel-cons-link-deserializer (cons-id car-id cdr-id binds)
   "Relink a cons cell with its car and cdr in BINDS."
   (let ((cons (gethash cons-id binds)))
     (setcar cons (gethash car-id binds))
     (setcdr cons (gethash cdr-id binds))))
 
-(defun wg-pickel-relink-vector (vector-id index value-id binds)
+(defun wg-pickel-vector-link-deserializer (vector-id index value-id binds)
   "Relink a vector with its elements in BINDS."
   (aset (gethash vector-id binds) index (gethash value-id binds)))
 
-(defun wg-pickel-relink-hash-table (key-id value-id table-id binds)
+(defun wg-pickel-hash-table-link-deserializer (key-id value-id table-id binds)
   "Relink a hash-table with its keys and values in BINDS."
   (puthash (gethash key-id binds)
            (gethash value-id binds)
@@ -237,18 +257,15 @@
 
 (defun wg-pickel-deserialize-links (serial-links binds)
   "Return BINDS after relinking all its objects according to SERIAL-LINKS."
-  (wg-destructuring-dolist
-      ((key arg1 arg2 arg3 . rest) serial-links binds)
-    (wg-aif (wg-aget wg-pickel-link-deserializers key)
-        (funcall it arg1 arg2 arg3 binds)
-      (error "Invalid link function key: %S" key))))
+  (wg-destructuring-dolist ((key arg1 arg2 arg3 . rest) serial-links binds)
+    (funcall (wg-pickel-link-deserializer key) arg1 arg2 arg3 binds)))
 
 
 
 ;;; pickeling
 
 (defun wg-pickel (obj)
-  "Serialize OBJ and return its serialization."
+  "Return the serialization of OBJ."
   (let ((binds (wg-pickel-generate-bindings obj)))
     (list wg-pickel-identifier
           (wg-pickel-serialize-objects binds)
@@ -268,7 +285,7 @@
 ;;; unpickeling
 
 (defun wg-unpickel (pickel)
-  "Deserialize PICKEL and return its deserialization."
+  "Return the deserialization of PICKEL."
   (unless (wg-pickel-p pickel)
     (error "Attempt to unpickel a non-pickel."))
   (wg-dbind (id serial-objects serial-links result) pickel
