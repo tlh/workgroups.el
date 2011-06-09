@@ -620,27 +620,27 @@ current workgroup"))
   :type 'string
   :group 'workgroups)
 
-(defcustom wg-mode-line-decor-workgroup-set-modified
-  #("*" 0 1 (help-echo "The workgroup set is modified"))
-  "Indicates that the workgroup set is modified."
+(defcustom wg-mode-line-decor-session-modified
+  #("*" 0 1 (help-echo "The session is modified"))
+  "Indicates that the session is modified."
   :type 'string
   :group 'workgroups)
 
-(defcustom wg-mode-line-decor-workgroup-set-unmodified
-  #("-" 0 1 (help-echo "The workgroup set is unmodified"))
-  "Indicates that the workgroup set is unmodified."
+(defcustom wg-mode-line-decor-session-unmodified
+  #("-" 0 1 (help-echo "The session is unmodified"))
+  "Indicates that the session is unmodified."
   :type 'string
   :group 'workgroups)
 
 (defcustom wg-mode-line-decor-workgroup-modified
   #("*" 0 1 (help-echo "The current workgroup is modified"))
-  "Indicates that the current workgroup set is modified."
+  "Indicates that the current workgroup is modified."
   :type 'string
   :group 'workgroups)
 
 (defcustom wg-mode-line-decor-workgroup-unmodified
   #("-" 0 1 (help-echo "The current workgroup is unmodified"))
-  "Indicates that the current workgroup set is unmodified."
+  "Indicates that the current workgroup is unmodified."
   :type 'string
   :group 'workgroups)
 
@@ -704,8 +704,8 @@ current workgroup"))
 (defvar workgroups-mode-map nil
   "Workgroups Mode's keymap")
 
-(defvar wg-current-workgroup-set nil
-  "Current workgroup-set object.")
+(defvar wg-current-session nil
+  "Current session object.")
 
 (defvar wg-workgroups-mode-minor-mode-map-entry nil
   "Workgroups' minor-mode-map entry.")
@@ -1012,7 +1012,7 @@ minibuffer is active.")))
   (strong-buf-uids)
   (weak-buf-uids))
 
-(wg-defstruct wg workgroup-set
+(wg-defstruct wg session
   (uid (wg-generate-uid))
   (name)
   (modified)
@@ -1024,7 +1024,7 @@ minibuffer is active.")))
 
 
 
-;;; workgroup-set ops
+;;; session ops
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -1032,35 +1032,35 @@ minibuffer is active.")))
 ;; confused with other uses of "set", and seems to imply that the workgroup-list
 ;; isn't ordered.
 ;;
-;; FIXME: factor out the similarities between workgroup-set-parameters and
+;; FIXME: factor out the similarities between session-parameters and
 ;; workgroup-parameters
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-(defun wg-current-workgroup-set ()
-  "Return `wg-current-workgroup-set', setting it first if necessary."
-  (or wg-current-workgroup-set
-      (setq wg-current-workgroup-set (wg-make-workgroup-set))))
+(defun wg-current-session ()
+  "Return `wg-current-session', setting it first if necessary."
+  (or wg-current-session
+      (setq wg-current-session (wg-make-session))))
 
 (defmacro wg-modified ()
-  "setf'able `wg-current-workgroup-set' modified slot accessor."
-  `(wg-workgroup-set-modified (wg-current-workgroup-set)))
+  "setf'able `wg-current-session' modified slot accessor."
+  `(wg-session-modified (wg-current-session)))
 
 (defmacro wg-tracked-buffers ()
-  "setf'able `wg-current-workgroup-set' tracked-buffers slot accessor."
-  `(wg-workgroup-set-tracked-buffers (wg-current-workgroup-set)))
+  "setf'able `wg-current-session' tracked-buffers slot accessor."
+  `(wg-session-tracked-buffers (wg-current-session)))
 
 (defmacro wg-visited-file-name ()
-  "setf'able `wg-current-workgroup-set' file-name slot accessor."
-  `(wg-workgroup-set-file-name (wg-current-workgroup-set)))
+  "setf'able `wg-current-session' file-name slot accessor."
+  `(wg-session-file-name (wg-current-session)))
 
 (defmacro wg-workgroup-list ()
-  "setf'able `wg-current-workgroup-set' modified slot accessor."
-  `(wg-workgroup-set-workgroup-list (wg-current-workgroup-set)))
+  "setf'able `wg-current-session' modified slot accessor."
+  `(wg-session-workgroup-list (wg-current-session)))
 
 (defun wg-workgroup-list-or-error (&optional noerror)
-  "Return the value of `wg-current-workgroup-set's :workgroup-list slot."
+  "Return the value of `wg-current-session's :workgroup-list slot."
   (or (wg-workgroup-list)
       (unless noerror
         (error "No workgroups are defined."))))
@@ -1070,7 +1070,7 @@ minibuffer is active.")))
   (or (wg-modified) (some 'wg-workgroup-modified (wg-workgroup-list))))
 
 (defun wg-mark-everything-unmodified ()
-  "Mark the workgroup-set and all workgroups as unmodified."
+  "Mark the session and all workgroups as unmodified."
   (setf (wg-modified) nil)
   (mapc (lambda (wg) (setf (wg-workgroup-modified wg) nil))
         (wg-workgroup-list)))
@@ -2049,23 +2049,23 @@ WORKGROUP."
       (wg-asetf (wg-workgroup-parameters copy) (wg-unpickel it))
       copy)))
 
-(defun wg-pickel-all-workgroup-set-parameters (workgroup-set)
-  "Return a copy of WORKGROUP-SET after pickeling its
+(defun wg-pickel-all-session-parameters (session)
+  "Return a copy of SESSION after pickeling its
 parameters and the parameters of all its workgroups."
-  (let ((copy (wg-copy-workgroup-set workgroup-set)))
-    (when (wg-workgroup-set-parameters copy)
-      (wg-asetf (wg-workgroup-set-parameters copy) (wg-pickel it)))
-    (wg-asetf (wg-workgroup-set-workgroup-list copy)
+  (let ((copy (wg-copy-session session)))
+    (when (wg-session-parameters copy)
+      (wg-asetf (wg-session-parameters copy) (wg-pickel it)))
+    (wg-asetf (wg-session-workgroup-list copy)
               (mapcar 'wg-pickel-workgroup-parameters it))
     copy))
 
-(defun wg-unpickel-all-workgroup-set-parameters (workgroup-set)
-  "Return a copy of WORKGROUP-SET after unpickeling its
+(defun wg-unpickel-all-session-parameters (session)
+  "Return a copy of SESSION after unpickeling its
 parameters and the parameters of all its workgroups."
-  (let ((copy (wg-copy-workgroup-set workgroup-set)))
-    (when (wg-workgroup-set-parameters copy)
-      (wg-asetf (wg-workgroup-set-parameters copy) (wg-unpickel it)))
-    (wg-asetf (wg-workgroup-set-workgroup-list copy)
+  (let ((copy (wg-copy-session session)))
+    (when (wg-session-parameters copy)
+      (wg-asetf (wg-session-parameters copy) (wg-unpickel it)))
+    (wg-asetf (wg-session-workgroup-list copy)
               (mapcar 'wg-deserialize-workgroup-parameters it))
     copy))
 
@@ -2086,14 +2086,14 @@ This needs to be a macro to allow specification of a setf'able place."
        (setf ,place (wg-aput ,place ,p ,v))
        ,v)))
 
-;; FIXME: move this near workgroup-set stuff
-(defun wg-set-workgroup-set-parameter (workgroup-set parameter value)
-  "Set WORKGROUP-SET's value of PARAMETER to VALUE.
-WORKGROUP-SET nil means use the current workgroup-set.
+;; FIXME: move this near session stuff
+(defun wg-set-session-parameter (session parameter value)
+  "Set SESSION's value of PARAMETER to VALUE.
+SESSION nil means use the current session.
 Return value."
-  (let ((set (or workgroup-set (wg-current-workgroup-set))))
-    (wg-set-parameter (wg-workgroup-set-parameters set) parameter value)
-    (setf (wg-workgroup-set-modified set) t)
+  (let ((set (or session (wg-current-session))))
+    (wg-set-parameter (wg-session-parameters set) parameter value)
+    (setf (wg-session-modified set) t)
     value))
 
 (defun wg-set-workgroup-parameter (workgroup parameter value)
@@ -2551,7 +2551,7 @@ that no longer refer to a buf in `wg-tracked-buffers'."
     (wg-wconfig-buf-uids (wg-workgroup-most-recent-working-wconfig workgroup))
     (wg-workgroup-associated-buf-uids workgroup))))
 
-(defun wg-workgroup-set-all-extant-buf-uids ()
+(defun wg-session-all-extant-buf-uids ()
   "Return the union of all workgroups' `wg-workgroup-all-buf-uids'."
   (delete-duplicates (mapcan 'wg-workgroup-all-buf-uids (wg-workgroup-list))))
 
@@ -2562,7 +2562,7 @@ that no longer refer to a buf in `wg-tracked-buffers'."
 
 (defun wg-all-extant-buf-uids ()
   "Return the union of all workgroups' `wg-workgroup-all-buf-uids'."
-  (union (wg-workgroup-set-all-extant-buf-uids) (wg-buffer-uids)))
+  (union (wg-session-all-extant-buf-uids) (wg-buffer-uids)))
 
 (defun wg-remove-stale-tracked-bufs ()
   "Remove all bufs from `wg-tracked-buffers' with uids not
@@ -2705,8 +2705,8 @@ existing workgroup, offer to create it."
                 (:mode (wg-mode-line-buffer-association-indicator wg))
                 (:div wg-mode-line-decor-divider)
                 (:mode (if (wg-modified)
-                           wg-mode-line-decor-workgroup-set-modified
-                         wg-mode-line-decor-workgroup-set-unmodified))
+                           wg-mode-line-decor-session-modified
+                         wg-mode-line-decor-session-unmodified))
                 (:mode (if (wg-workgroup-modified wg)
                            wg-mode-line-decor-workgroup-modified
                          wg-mode-line-decor-workgroup-unmodified))
@@ -3602,7 +3602,7 @@ Reset frames, buffers, and some global vars."
     (error "Canceled"))
   (mapc 'wg-reset-frame (frame-list))
   (mapc 'wg-reset-buffer (buffer-list))
-  (setq wg-current-workgroup-set nil
+  (setq wg-current-session nil
         wg-wconfig-kill-ring nil)
   (wg-fontified-message
     (:cmd "Reset: ")
@@ -3626,8 +3626,8 @@ is nil, read a filename.  Otherwise use `wg-visited-file-name'."
     (wg-update-current-workgroup-working-wconfig)
     (wg-cleanup-bufs-and-uids)
     (wg-write-sexp-to-file
-     (wg-pickel-all-workgroup-set-parameters
-      (wg-current-workgroup-set)) file)
+     (wg-pickel-all-session-parameters
+      (wg-current-session)) file)
     (wg-mark-everything-unmodified)
     (wg-fontified-message (:cmd "Wrote: ") (:file file))))
 
@@ -3656,11 +3656,11 @@ is nil, read a filename.  Otherwise use `wg-visited-file-name'."
   (if (not (file-exists-p filename))
       (wg-find-new-workgroups-file filename)
     (let ((sexp (wg-read-sexp-from-file filename)))
-      (unless (wg-workgroup-set-p sexp)
+      (unless (wg-session-p sexp)
         (error "%S is not a Workgroups file." filename))
       (wg-reset t)
-      (setq wg-current-workgroup-set
-            (wg-unpickel-all-workgroup-set-parameters sexp)))
+      (setq wg-current-session
+            (wg-unpickel-all-session-parameters sexp)))
     (setf (wg-visited-file-name) filename)
     (mapc 'wg-buffer-uid-or-track (buffer-list))
     (wg-awhen (and wg-switch-to-first-workgroup-on-find-workgroups-file
