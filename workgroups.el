@@ -2031,6 +2031,44 @@ If OBJ is nil, return the current workgroup, or error unless NOERROR."
 
 ;;; object parameters
 
+(defun wg-pickel-workgroup-parameters (workgroup)
+  "If WORKGROUP's parameters are non-nil, return a copy of
+WORKGROUP after pickeling its parameters. Otherwise return
+WORKGROUP."
+  (if (not (wg-workgroup-parameters workgroup)) workgroup
+    (let ((copy (wg-copy-workgroup workgroup)))
+      (wg-asetf (wg-workgroup-parameters copy) (wg-pickel it))
+      copy)))
+
+(defun wg-unpickel-workgroup-parameters (workgroup)
+  "If WORKGROUP's parameters are non-nil, return a copy of
+WORKGROUP after unpickeling its parameters. Otherwise return
+WORKGROUP."
+  (if (not (wg-workgroup-parameters workgroup)) workgroup
+    (let ((copy (wg-copy-workgroup workgroup)))
+      (wg-asetf (wg-workgroup-parameters copy) (wg-unpickel it))
+      copy)))
+
+(defun wg-pickel-all-workgroup-set-parameters (workgroup-set)
+  "Return a copy of WORKGROUP-SET after pickeling its
+parameters and the parameters of all its workgroups."
+  (let ((copy (wg-copy-workgroup-set workgroup-set)))
+    (when (wg-workgroup-set-parameters copy)
+      (wg-asetf (wg-workgroup-set-parameters copy) (wg-pickel it)))
+    (wg-asetf (wg-workgroup-set-workgroup-list copy)
+              (mapcar 'wg-pickel-workgroup-parameters it))
+    copy))
+
+(defun wg-unpickel-all-workgroup-set-parameters (workgroup-set)
+  "Return a copy of WORKGROUP-SET after unpickeling its
+parameters and the parameters of all its workgroups."
+  (let ((copy (wg-copy-workgroup-set workgroup-set)))
+    (when (wg-workgroup-set-parameters copy)
+      (wg-asetf (wg-workgroup-set-parameters copy) (wg-unpickel it)))
+    (wg-asetf (wg-workgroup-set-workgroup-list copy)
+              (mapcar 'wg-deserialize-workgroup-parameters it))
+    copy))
+
 (defun wg-workgroup-parameter (workgroup parameter &optional default)
   "Return WORKGROUP's value for PARAMETER.
 If PARAMETER is not found, return DEFAULT which defaults to nil.
@@ -2038,13 +2076,33 @@ WORKGROUP should be accepted by `wg-get-workgroup'."
   (wg-aget (wg-workgroup-parameters (wg-get-workgroup workgroup))
            parameter default))
 
+(defmacro wg-set-parameter (place parameter value)
+  "Set PARAMETER to VALUE at PLACE.
+This needs to be a macro to allow specification of a setf'able place."
+  (wg-with-gensyms (p v)
+    `(let ((,p ,parameter) (,v ,value))
+       (wg-pickelable-or-error ,p)
+       (wg-pickelable-or-error ,v)
+       (setf ,place (wg-aput ,place ,p ,v))
+       ,v)))
+
+;; FIXME: move this near workgroup-set stuff
+(defun wg-set-workgroup-set-parameter (workgroup-set parameter value)
+  "Set WORKGROUP-SET's value of PARAMETER to VALUE.
+WORKGROUP-SET nil means use the current workgroup-set.
+Return value."
+  (let ((set (or workgroup-set (wg-current-workgroup-set))))
+    (wg-set-parameter (wg-workgroup-set-parameters set) parameter value)
+    (setf (wg-workgroup-set-modified set) t)
+    value))
+
 (defun wg-set-workgroup-parameter (workgroup parameter value)
   "Set WORKGROUP's value of PARAMETER to VALUE.
 WORKGROUP should be a value accepted by `wg-get-workgroup'.
 Return VALUE."
   (let ((workgroup (wg-get-workgroup workgroup)))
+    (wg-set-parameter (wg-workgroup-parameters workgroup) parameter value)
     (wg-flag-workgroup-modified workgroup)
-    (wg-asetf (wg-workgroup-parameters workgroup) (wg-aput it parameter value))
     value))
 
 (defun wg-remove-workgroup-parameter (workgroup parameter)
@@ -3554,7 +3612,6 @@ Reset frames, buffers, and some global vars."
 
 ;;; file commands
 
-;; FIXME: Use pickel for workgroup and workgroup-set parameter serdes
 (defun wg-save-workgroups (file &optional force)
   "Save workgroups to FILE.
 Called interactively with a prefix arg, or if `wg-visited-file-name'
@@ -3568,8 +3625,9 @@ is nil, read a filename.  Otherwise use `wg-visited-file-name'."
     (setf (wg-visited-file-name) file)
     (wg-update-current-workgroup-working-wconfig)
     (wg-cleanup-bufs-and-uids)
-    ;; FIXME: create new workgroup set with serialized parameters here:
-    (wg-write-sexp-to-file (wg-current-workgroup-set) file)
+    (wg-write-sexp-to-file
+     (wg-pickel-all-workgroup-set-parameters
+      (wg-current-workgroup-set)) file)
     (wg-mark-everything-unmodified)
     (wg-fontified-message (:cmd "Wrote: ") (:file file))))
 
@@ -3601,7 +3659,8 @@ is nil, read a filename.  Otherwise use `wg-visited-file-name'."
       (unless (wg-workgroup-set-p sexp)
         (error "%S is not a Workgroups file." filename))
       (wg-reset t)
-      (setq wg-current-workgroup-set sexp))
+      (setq wg-current-workgroup-set
+            (wg-unpickel-all-workgroup-set-parameters sexp)))
     (setf (wg-visited-file-name) filename)
     (mapc 'wg-buffer-uid-or-track (buffer-list))
     (wg-awhen (and wg-switch-to-first-workgroup-on-find-workgroups-file

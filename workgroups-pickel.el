@@ -40,7 +40,7 @@
 (defvar wg-pickel-identifier '~pickel!~
   "Symbol identifying a stream as a pickel.")
 
-(defvar wg-pickel-types
+(defvar wg-pickel-pickelable-types
   '(integer float symbol string cons vector hash-table)
   "Types pickel can serialize.")
 
@@ -75,11 +75,44 @@
 
 
 
-;;; utils
+;;; predicates and errors
+
+(put 'wg-pickel-invalid-type-error
+     'error-conditions
+     '(error wg-pickel-errors wg-pickel-invalid-type-error))
+
+(put 'wg-pickel-invalid-type-error
+     'error-message
+     "Attemp to pickel unpickelable type")
+
+(defun wg-pickelable-or-error (obj)
+  "Error when OBJ isn't pickelable."
+  (unless (memq (type-of obj) wg-pickel-pickelable-types)
+    (signal 'wg-pickel-invalid-type-error
+            (format "Can't pickel objects of type: %S" (type-of obj))))
+  (typecase obj
+    (cons
+     (wg-pickelable-or-error (car obj))
+     (wg-pickelable-or-error (cdr obj)))
+    (vector
+     (map nil 'wg-pickelable-or-error obj))
+    (hash-table
+     (wg-dohash (key value obj)
+       (wg-pickelable-or-error key)
+       (wg-pickelable-or-error value)))))
+
+(defun wg-pickelable-p (obj)
+  (condition-case err
+      (progn (wg-pickelable-or-error obj) t)
+    (wg-pickel-invalid-type-error nil)))
 
 (defun wg-pickel-p (obj)
   "Return t when OBJ is a pickel, nil otherwise."
   (and (consp obj) (eq (car obj) wg-pickel-identifier)))
+
+
+
+;; var accessors
 
 (defun wg-pickel-object-serializer (obj)
   "Return the object serializer for the `type-of' OBJ."
@@ -106,8 +139,6 @@
 
 (defun wg-pickel-generate-bindings-helper (obj binds)
   "See `wg-pickel-generate-bindings'."
-  (unless (memq (type-of obj) wg-pickel-types)
-    (error "Can't pickel type: %s" (type-of obj)))
   (unless (gethash obj binds)
     (puthash obj (incf i) binds)
     (case (type-of obj)
@@ -266,6 +297,7 @@
 
 (defun wg-pickel (obj)
   "Return the serialization of OBJ."
+  (wg-pickelable-or-error obj)
   (let ((binds (wg-pickel-generate-bindings obj)))
     (list wg-pickel-identifier
           (wg-pickel-serialize-objects binds)
