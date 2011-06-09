@@ -52,6 +52,7 @@
 
 (require 'cl)
 (require 'workgroups-utils)
+(require 'workgroups-pickel)
 
 (eval-when-compile ;; bytecomp warnings begone!
   (require 'ido nil t)
@@ -941,6 +942,16 @@ FACEKEY must be a key in `wg-face-abbrevs'."
     (error "Workgroup operations aren't permitted while the \
 minibuffer is active.")))
 
+(defmacro wg-set-parameter (place parameter value)
+  "Set PARAMETER to VALUE at PLACE.
+This needs to be a macro to allow specification of a setf'able place."
+  (wg-with-gensyms (p v)
+    `(let ((,p ,parameter) (,v ,value))
+       (wg-pickelable-or-error ,p)
+       (wg-pickelable-or-error ,v)
+       (setf ,place (wg-aput ,place ,p ,v))
+       ,v)))
+
 
 
 ;;; uid construction
@@ -1026,34 +1037,14 @@ minibuffer is active.")))
 
 ;;; session ops
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-;; FIXME: call these something other than "workgroup-sets" -- It's too easily
-;; confused with other uses of "set", and seems to imply that the workgroup-list
-;; isn't ordered.
-;;
-;; FIXME: factor out the similarities between session-parameters and
-;; workgroup-parameters
-;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-
 (defun wg-current-session ()
   "Return `wg-current-session', setting it first if necessary."
   (or wg-current-session
       (setq wg-current-session (wg-make-session))))
 
-(defmacro wg-modified ()
-  "setf'able `wg-current-session' modified slot accessor."
-  `(wg-session-modified (wg-current-session)))
-
 (defmacro wg-tracked-buffers ()
   "setf'able `wg-current-session' tracked-buffers slot accessor."
   `(wg-session-tracked-buffers (wg-current-session)))
-
-(defmacro wg-visited-file-name ()
-  "setf'able `wg-current-session' file-name slot accessor."
-  `(wg-session-file-name (wg-current-session)))
 
 (defmacro wg-workgroup-list ()
   "setf'able `wg-current-session' modified slot accessor."
@@ -1066,19 +1057,45 @@ minibuffer is active.")))
         (error "No workgroups are defined."))))
 
 (defun wg-modified-p ()
-  "Return t when `wg-modified' or any workgroup modified parameter all is non-nil."
-  (or (wg-modified) (some 'wg-workgroup-modified (wg-workgroup-list))))
+  "Return t when the current session or any of its workgroups are modified."
+  (or (wg-session-modified (wg-current-session))
+      (some 'wg-workgroup-modified (wg-workgroup-list))))
 
 (defun wg-mark-everything-unmodified ()
   "Mark the session and all workgroups as unmodified."
-  (setf (wg-modified) nil)
-  (mapc (lambda (wg) (setf (wg-workgroup-modified wg) nil))
-        (wg-workgroup-list)))
+  (setf (wg-session-modified (wg-current-session)) nil)
+  (dolist (workgroup (wg-workgroup-list))
+    (setf (wg-workgroup-modified workgroup) nil)))
 
 (defun wg-workgroup-names (&optional noerror)
   "Return a list of workgroup names."
   (mapcar 'wg-workgroup-name (wg-workgroup-list-or-error noerror)))
 
+
+
+;;; session parameters
+
+(defun wg-session-parameter (session parameter &optional default)
+  "Return SESSION's value for PARAMETER.
+If PARAMETER is not found, return DEFAULT which defaults to nil.
+SESSION nil defaults to the current session."
+  (wg-aget (wg-session-parameters (or session (wg-current-session)))
+           parameter default))
+
+(defun wg-set-session-parameter (session parameter value)
+  "Set SESSION's value of PARAMETER to VALUE.
+SESSION nil means use the current session.
+Return value."
+  (let ((session (or session (wg-current-session))))
+    (wg-set-parameter (wg-session-parameters session) parameter value)
+    (setf (wg-session-modified session) t)
+    value))
+
+(defun wg-remove-session-parameter (session parameter)
+  "Remove parameter PARAMETER from SESSION's parameters."
+  (let ((session (or session (wg-current-session))))
+    (wg-asetf (wg-session-parameters session) (wg-aremove it parameter))
+    (setf (wg-session-modified session) t)))
 
 
 
@@ -1121,8 +1138,8 @@ It's stored in BUF's local-vars list, since it's a local variable."
     (wg-buf (wg-buf-major-mode bufobj))
     (string (wg-buffer-major-mode bufobj))))
 
-;; `wg-equal-bufobjs' and `wg-find-bufobj' may need to be made
-;; a lot smarter, but we'll try this for now
+;; TODO: `wg-equal-bufobjs' and `wg-find-bufobj' may need to be made a lot
+;; smarter, but we'll try this for now
 (defun wg-equal-bufobjs (bufobj1 bufobj2)
   "Return t if BUFOBJ1 is \"equal\" to BUFOBJ2."
   (let ((fname1 (wg-bufobj-file-name bufobj1))
@@ -1958,10 +1975,10 @@ Assumes both FROM and TO fit in `selected-frame'."
 ;;; workgroup utils
 
 (defun wg-flag-workgroup-modified (workgroup)
-  "Set WORKGROUP's modified flag, as well as `wg-modified'."
+  "Set WORKGROUP's and the current session's modified flags."
   (when wg-flag-modified
     (setf (wg-workgroup-modified workgroup) t)
-    (setf (wg-modified) t)))
+    (setf (wg-sessionmodified (wg-current-session)) t)))
 
 (defun wg-find-workgroup-by (slotkey value &optional noerror)
   "Return the workgroup on which ACCESSOR returns VALUE or error."
@@ -2029,45 +2046,7 @@ If OBJ is nil, return the current workgroup, or error unless NOERROR."
 
 
 
-;;; object parameters
-
-(defun wg-pickel-workgroup-parameters (workgroup)
-  "If WORKGROUP's parameters are non-nil, return a copy of
-WORKGROUP after pickeling its parameters. Otherwise return
-WORKGROUP."
-  (if (not (wg-workgroup-parameters workgroup)) workgroup
-    (let ((copy (wg-copy-workgroup workgroup)))
-      (wg-asetf (wg-workgroup-parameters copy) (wg-pickel it))
-      copy)))
-
-(defun wg-unpickel-workgroup-parameters (workgroup)
-  "If WORKGROUP's parameters are non-nil, return a copy of
-WORKGROUP after unpickeling its parameters. Otherwise return
-WORKGROUP."
-  (if (not (wg-workgroup-parameters workgroup)) workgroup
-    (let ((copy (wg-copy-workgroup workgroup)))
-      (wg-asetf (wg-workgroup-parameters copy) (wg-unpickel it))
-      copy)))
-
-(defun wg-pickel-all-session-parameters (session)
-  "Return a copy of SESSION after pickeling its
-parameters and the parameters of all its workgroups."
-  (let ((copy (wg-copy-session session)))
-    (when (wg-session-parameters copy)
-      (wg-asetf (wg-session-parameters copy) (wg-pickel it)))
-    (wg-asetf (wg-session-workgroup-list copy)
-              (mapcar 'wg-pickel-workgroup-parameters it))
-    copy))
-
-(defun wg-unpickel-all-session-parameters (session)
-  "Return a copy of SESSION after unpickeling its
-parameters and the parameters of all its workgroups."
-  (let ((copy (wg-copy-session session)))
-    (when (wg-session-parameters copy)
-      (wg-asetf (wg-session-parameters copy) (wg-unpickel it)))
-    (wg-asetf (wg-session-workgroup-list copy)
-              (mapcar 'wg-deserialize-workgroup-parameters it))
-    copy))
+;;; workgroup parameters
 
 (defun wg-workgroup-parameter (workgroup parameter &optional default)
   "Return WORKGROUP's value for PARAMETER.
@@ -2075,26 +2054,6 @@ If PARAMETER is not found, return DEFAULT which defaults to nil.
 WORKGROUP should be accepted by `wg-get-workgroup'."
   (wg-aget (wg-workgroup-parameters (wg-get-workgroup workgroup))
            parameter default))
-
-(defmacro wg-set-parameter (place parameter value)
-  "Set PARAMETER to VALUE at PLACE.
-This needs to be a macro to allow specification of a setf'able place."
-  (wg-with-gensyms (p v)
-    `(let ((,p ,parameter) (,v ,value))
-       (wg-pickelable-or-error ,p)
-       (wg-pickelable-or-error ,v)
-       (setf ,place (wg-aput ,place ,p ,v))
-       ,v)))
-
-;; FIXME: move this near session stuff
-(defun wg-set-session-parameter (session parameter value)
-  "Set SESSION's value of PARAMETER to VALUE.
-SESSION nil means use the current session.
-Return value."
-  (let ((set (or session (wg-current-session))))
-    (wg-set-parameter (wg-session-parameters set) parameter value)
-    (setf (wg-session-modified set) t)
-    value))
 
 (defun wg-set-workgroup-parameter (workgroup parameter value)
   "Set WORKGROUP's value of PARAMETER to VALUE.
@@ -2106,7 +2065,7 @@ Return VALUE."
     value))
 
 (defun wg-remove-workgroup-parameter (workgroup parameter)
-  "Remove parameter PARAMETER from WORKGROUP destructively."
+  "Remove PARAMETER from WORKGROUP's parameters."
   (let ((workgroup (wg-get-workgroup workgroup)))
     (wg-flag-workgroup-modified workgroup)
     (wg-asetf (wg-workgroup-parameters workgroup) (wg-aremove it parameter))))
@@ -2612,7 +2571,7 @@ Also delete all references to it by `wg-workgroup-state-table',
     (when (wg-previous-workgroup-p workgroup t frame)
       (wg-set-previous-workgroup nil frame)))
   (setf (wg-workgroup-list) (remove workgroup (wg-workgroup-list-or-error)))
-  (setf (wg-modified) t)
+  (setf (wg-session-modified (wg-current-session)) t)
   workgroup)
 
 (defun wg-add-workgroup (workgroup &optional index)
@@ -2623,7 +2582,7 @@ If a workgroup with the same name exists, overwrite it."
     (wg-delete-workgroup it))
   (wg-asetf (wg-workgroup-list)
             (wg-insert-before workgroup it (or index (length it))))
-  (setf (wg-modified) t)
+  (setf (wg-session-modified (wg-current-session)) t)
   workgroup)
 
 (defun wg-check-and-add-workgroup (workgroup)
@@ -2666,7 +2625,7 @@ existing workgroup, offer to create it."
     (unless (member workgroup workgroup-list)
       (error "Workgroup isn't present in `wg-workgroup-list'."))
     (setf (wg-workgroup-list) (wg-cyclic-offset-elt workgroup workgroup-list n)
-          (wg-modified) t)))
+          (wg-session-modified (wg-current-session)) t)))
 
 (defun wg-swap-workgroups-in-workgroup-list (workgroup1 workgroup2)
   "Swap the positions of WORKGROUP1 and WORKGROUP2 in `wg-workgroup-list'."
@@ -2677,7 +2636,7 @@ existing workgroup, offer to create it."
                  (memq workgroup2 workgroup-list))
       (error "Both workgroups aren't present in `wg-workgroup-list'."))
     (setf (wg-workgroup-list) (wg-util-swap workgroup1 workgroup2 workgroup-list)
-          (wg-modified) t)))
+          (wg-session-modified (wg-current-session)) t)))
 
 (defun wg-cyclic-nth-from-workgroup (workgroup &optional n)
   "Return the workgroup N places from WORKGROUP in `wg-workgroup-list'."
@@ -2704,7 +2663,7 @@ existing workgroup, offer to create it."
                 (:div wg-mode-line-decor-divider)
                 (:mode (wg-mode-line-buffer-association-indicator wg))
                 (:div wg-mode-line-decor-divider)
-                (:mode (if (wg-modified)
+                (:mode (if (wg-session-modified (wg-current-session))
                            wg-mode-line-decor-session-modified
                          wg-mode-line-decor-session-unmodified))
                 (:mode (if (wg-workgroup-modified wg)
@@ -3016,6 +2975,48 @@ Added to `iswitchb-make-buflist-hook'."
 
 
 
+;;; parameter pickeling
+
+(defun wg-pickel-workgroup-parameters (workgroup)
+  "If WORKGROUP's parameters are non-nil, return a copy of
+WORKGROUP after pickeling its parameters. Otherwise return
+WORKGROUP."
+  (if (not (wg-workgroup-parameters workgroup)) workgroup
+    (let ((copy (wg-copy-workgroup workgroup)))
+      (wg-asetf (wg-workgroup-parameters copy) (wg-pickel it))
+      copy)))
+
+(defun wg-unpickel-workgroup-parameters (workgroup)
+  "If WORKGROUP's parameters are non-nil, return a copy of
+WORKGROUP after unpickeling its parameters. Otherwise return
+WORKGROUP."
+  (if (not (wg-workgroup-parameters workgroup)) workgroup
+    (let ((copy (wg-copy-workgroup workgroup)))
+      (wg-asetf (wg-workgroup-parameters copy) (wg-unpickel it))
+      copy)))
+
+(defun wg-pickel-all-session-parameters (session)
+  "Return a copy of SESSION after pickeling its
+parameters and the parameters of all its workgroups."
+  (let ((copy (wg-copy-session session)))
+    (when (wg-session-parameters copy)
+      (wg-asetf (wg-session-parameters copy) (wg-pickel it)))
+    (wg-asetf (wg-session-workgroup-list copy)
+              (mapcar 'wg-pickel-workgroup-parameters it))
+    copy))
+
+(defun wg-unpickel-all-session-parameters (session)
+  "Return a copy of SESSION after unpickeling its
+parameters and the parameters of all its workgroups."
+  (let ((copy (wg-copy-session session)))
+    (when (wg-session-parameters copy)
+      (wg-asetf (wg-session-parameters copy) (wg-unpickel it)))
+    (wg-asetf (wg-session-workgroup-list copy)
+              (mapcar 'wg-unpickel-workgroup-parameters it))
+    copy))
+
+
+
 ;;; minibuffer reading
 
 (defun wg-read-buffer (prompt &optional default require-match)
@@ -3056,8 +3057,8 @@ Added to `iswitchb-make-buflist-hook'."
     (wg-read-object
      (or prompt (format "Name (default: %S): " default))
      (lambda (new) (and (stringp new)
-                        (not (equal new ""))
-                        (wg-unique-workgroup-name-p new)))
+                   (not (equal new ""))
+                   (wg-unique-workgroup-name-p new)))
      "Please enter a unique, non-empty name"
      nil nil nil nil default)))
 
@@ -3614,15 +3615,15 @@ Reset frames, buffers, and some global vars."
 
 (defun wg-save-workgroups (file &optional force)
   "Save workgroups to FILE.
-Called interactively with a prefix arg, or if `wg-visited-file-name'
-is nil, read a filename.  Otherwise use `wg-visited-file-name'."
-  (interactive
-   (list (if (or current-prefix-arg (not (wg-visited-file-name)))
-             (read-file-name "File to save in: ")
-           (wg-visited-file-name))))
+Called interactively with a prefix arg, or if the current session
+filename is nil, read a filename.  Otherwise use the current
+session filename."
+  (interactive (list (let ((f (wg-session-file-name (wg-current-session))))
+                       (if (and f (not current-prefix-arg)) f
+                         (read-file-name "File to save in: ")))))
   (if (and (not force) (not (wg-modified-p)))
       (wg-message "(No workgroups need to be saved)")
-    (setf (wg-visited-file-name) file)
+    (setf (wg-session-file-name (wg-current-session)) file)
     (wg-update-current-workgroup-working-wconfig)
     (wg-cleanup-bufs-and-uids)
     (wg-write-sexp-to-file
@@ -3632,20 +3633,20 @@ is nil, read a filename.  Otherwise use `wg-visited-file-name'."
     (wg-fontified-message (:cmd "Wrote: ") (:file file))))
 
 (defun wg-query-for-save ()
-  "Query for save when `wg-modified' is non-nil."
+  "Query for save when `wg-modified-p'."
   (or (not (wg-modified-p))
       (not (y-or-n-p "Save modified workgroups? "))
       (call-interactively 'wg-save-workgroups)
       t))
 
 (defun wg-find-new-workgroups-file (filename)
-  "Reset Workgroups and set `wg-visited-file-name' to FILENAME."
+  "Reset Workgroups, and set the current session filename to FILENAME."
   (interactive "FNew workgroups file: ")
   (when (file-exists-p filename)
     (error "%S already exists" filename))
   (when (wg-query-for-save)
     (wg-reset t)
-    (setf (wg-visited-file-name) filename)
+    (setf (wg-session-file-name (wg-current-session)) filename)
     (wg-fontified-message
       (:cmd "Visited new workgroups file: ")
       (:file (format "%S" filename)))))
@@ -3661,7 +3662,7 @@ is nil, read a filename.  Otherwise use `wg-visited-file-name'."
       (wg-reset t)
       (setq wg-current-session
             (wg-unpickel-all-session-parameters sexp)))
-    (setf (wg-visited-file-name) filename)
+    (setf (wg-session-file-name (wg-current-session)) filename)
     (mapc 'wg-buffer-uid-or-track (buffer-list))
     (wg-awhen (and wg-switch-to-first-workgroup-on-find-workgroups-file
                    (wg-workgroup-list))
