@@ -58,6 +58,15 @@ Iterative to prevent stack overflow."
 
 ;; bindings
 
+(defmacro wg-if-let (cond-form then &rest else)
+  "Bind VAR to the return value of COND.  If VAR is non-nil, do THEN.
+Else do ELSE...
+
+\(fn ((VAR COND) THEN ELSE...)"
+  (declare (indent 2))
+  `(let (,cond-form)
+     (if ,(car cond-form) ,then ,@else)))
+
 (defmacro wg-when-let (binds &rest body)
   "Like `let*', but only eval BODY when all BINDS are non-nil."
   (declare (indent 1))
@@ -78,7 +87,9 @@ Iterative to prevent stack overflow."
 ;; do-style wrappers
 
 (defmacro wg-docar (spec &rest body)
-  "do-style wrapper for `mapcar'."
+  "do-style wrapper for `mapcar'.
+
+\(fn (VAR LIST) BODY...)"
   (declare (indent 1))
   `(mapcar (lambda (,(car spec)) ,@body) ,(cadr spec)))
 
@@ -91,7 +102,9 @@ Iterative to prevent stack overflow."
     `(progn (maphash (lambda (,key ,val) ,@body) ,table) ,result)))
 
 (defmacro wg-doconcat (spec &rest body)
-  "do-style wrapper for `mapconcat'."
+  "do-style wrapper for `mapconcat'.
+
+\(fn (VAR SEQ [SEPARATOR]) BODY...)"
   (declare (indent 1))
   (wg-dbind (elt seq &optional sep) spec
     `(mapconcat (lambda (,elt) ,@body) ,seq (or ,sep ""))))
@@ -228,7 +241,7 @@ Otherwise return nil."
   (nth (- (length list) n 1) list))
 
 (defun wg-take-until-fail (pred list)
-  "Take elements from LISP up to the first element on which PRED fails."
+  "Take elements from LIST up to the first element on which PRED fails."
   (let (taken)
     (catch 'result
       (dolist (elt list (nreverse taken))

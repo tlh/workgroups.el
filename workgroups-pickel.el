@@ -75,20 +75,20 @@
 
 
 
-;;; predicates and errors
+;;; errors and predicates
 
-(put 'wg-pickel-invalid-type-error
+(put 'wg-pickel-unpickelable-type-error
      'error-conditions
-     '(error wg-pickel-errors wg-pickel-invalid-type-error))
+     '(error wg-pickel-errors wg-pickel-unpickelable-type-error))
 
-(put 'wg-pickel-invalid-type-error
+(put 'wg-pickel-unpickelable-type-error
      'error-message
      "Attemp to pickel unpickelable type")
 
 (defun wg-pickelable-or-error (obj)
   "Error when OBJ isn't pickelable."
   (unless (memq (type-of obj) wg-pickel-pickelable-types)
-    (signal 'wg-pickel-invalid-type-error
+    (signal 'wg-pickel-unpickelable-type-error
             (format "Can't pickel objects of type: %S" (type-of obj))))
   (typecase obj
     (cons
@@ -104,7 +104,7 @@
 (defun wg-pickelable-p (obj)
   (condition-case err
       (progn (wg-pickelable-or-error obj) t)
-    (wg-pickel-invalid-type-error nil)))
+    (wg-pickel-unpickelable-type-error nil)))
 
 (defun wg-pickel-p (obj)
   "Return t when OBJ is a pickel, nil otherwise."
@@ -112,7 +112,7 @@
 
 
 
-;; var accessors
+;; accessor functions
 
 (defun wg-pickel-object-serializer (obj)
   "Return the object serializer for the `type-of' OBJ."
@@ -135,29 +135,29 @@
 
 
 
-;;; bindings generation
+;;; bindings
 
-(defun wg-pickel-generate-bindings-helper (obj binds)
-  "See `wg-pickel-generate-bindings'."
-  (unless (gethash obj binds)
-    (puthash obj (incf i) binds)
-    (case (type-of obj)
-      (cons
-       (wg-pickel-generate-bindings-helper (car obj) binds)
-       (wg-pickel-generate-bindings-helper (cdr obj) binds))
-      (vector
-       (dotimes (j (length obj))
-         (wg-pickel-generate-bindings-helper (aref obj j) binds)))
-      (hash-table
-       (wg-dohash (key val obj)
-         (wg-pickel-generate-bindings-helper key binds)
-         (wg-pickel-generate-bindings-helper val binds))))))
-
-(defun wg-pickel-generate-bindings (obj)
-  "Return a table binding unique subobjects of OBJ to uids."
-  (let ((binds (make-hash-table :test 'eq)) (i -1))
-    (wg-pickel-generate-bindings-helper obj binds)
-    binds))
+(defun wg-pickel-make-bindings-table (obj)
+  "Return a table binding unique subobjects of OBJ to ids."
+  (let ((binds (make-hash-table :test 'eq))
+        (id -1))
+    (flet ((inner
+            (obj)
+            (unless (gethash obj binds)
+              (puthash obj (incf id) binds)
+              (case (type-of obj)
+                (cons
+                 (inner (car obj))
+                 (inner (cdr obj)))
+                (vector
+                 (dotimes (idx (length obj))
+                   (inner (aref obj idx))))
+                (hash-table
+                 (wg-dohash (key val obj)
+                   (inner key)
+                   (inner val)))))))
+      (inner obj)
+      binds)))
 
 
 
@@ -259,8 +259,8 @@
 (defun wg-pickel-deserialize-objects (serial-objects)
   "Return a hash-table of objects deserialized from SERIAL-OBJECTS."
   (let ((binds (make-hash-table)))
-    (wg-destructuring-dolist ((uid obj . rest) serial-objects binds)
-      (puthash uid
+    (wg-destructuring-dolist ((id obj . rest) serial-objects binds)
+      (puthash id
                (if (atom obj) obj
                  (wg-dbind (key . data) obj
                    (apply (wg-pickel-object-deserializer key) data)))
@@ -298,7 +298,7 @@
 (defun wg-pickel (obj)
   "Return the serialization of OBJ."
   (wg-pickelable-or-error obj)
-  (let ((binds (wg-pickel-generate-bindings obj)))
+  (let ((binds (wg-pickel-make-bindings-table obj)))
     (list wg-pickel-identifier
           (wg-pickel-serialize-objects binds)
           (wg-pickel-serialize-links binds)
