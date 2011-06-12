@@ -1050,6 +1050,7 @@ Return the buffer if it was found, nil otherwise."
     (let ((window-min-width  wg-window-min-width)
           (window-min-height wg-window-min-height))
       (delete-other-windows)
+      (set-window-dedicated-p nil nil)
       (setq wg-selected-window nil)
       (inner wtree)
       (wg-awhen wg-selected-window (select-window it)))))
@@ -2061,119 +2062,119 @@ The string is passed through a format arg to escape %'s."
 (defvar wg-map
   (wg-fill-keymap (make-sparse-keymap)
 
-    ;; workgroup creation
+                  ;; workgroup creation
 
-    "C-c"        'wg-create-workgroup
-    "c"          'wg-create-workgroup
-    "C"          'wg-clone-workgroup
-
-
-    ;; killing and yanking
-
-    "C-k"        'wg-kill-workgroup
-    "k"          'wg-kill-workgroup
-    "M-W"        'wg-kill-ring-save-base-config
-    "M-w"        'wg-kill-ring-save-working-config
-    "C-y"        'wg-yank-config
-    "y"          'wg-yank-config
-    "M-k"        'wg-kill-workgroup-and-buffers
-    "K"          'wg-delete-other-workgroups
+                  "C-c"        'wg-create-workgroup
+                  "c"          'wg-create-workgroup
+                  "C"          'wg-clone-workgroup
 
 
-    ;; updating and reverting
+                  ;; killing and yanking
 
-    "C-u"        'wg-update-workgroup
-    "u"          'wg-update-workgroup
-    "C-S-u"      'wg-update-all-workgroups
-    "U"          'wg-update-all-workgroups
-    "C-r"        'wg-revert-workgroup
-    "r"          'wg-revert-workgroup
-    "C-S-r"      'wg-revert-all-workgroups
-    "R"          'wg-revert-all-workgroups
-
-
-    ;; workgroup switching
-
-    "C-'"        'wg-switch-to-workgroup
-    "'"          'wg-switch-to-workgroup
-    "C-v"        'wg-switch-to-workgroup
-    "v"          'wg-switch-to-workgroup
-    "C-j"        'wg-switch-to-index
-    "j"          'wg-switch-to-index
-    "0"          'wg-switch-to-index-0
-    "1"          'wg-switch-to-index-1
-    "2"          'wg-switch-to-index-2
-    "3"          'wg-switch-to-index-3
-    "4"          'wg-switch-to-index-4
-    "5"          'wg-switch-to-index-5
-    "6"          'wg-switch-to-index-6
-    "7"          'wg-switch-to-index-7
-    "8"          'wg-switch-to-index-8
-    "9"          'wg-switch-to-index-9
-    "C-p"        'wg-switch-left
-    "p"          'wg-switch-left
-    "C-n"        'wg-switch-right
-    "n"          'wg-switch-right
-    "M-p"        'wg-switch-left-other-frame
-    "M-n"        'wg-switch-right-other-frame
-    "C-a"        'wg-switch-to-previous-workgroup
-    "a"          'wg-switch-to-previous-workgroup
+                  "C-k"        'wg-kill-workgroup
+                  "k"          'wg-kill-workgroup
+                  "M-W"        'wg-kill-ring-save-base-config
+                  "M-w"        'wg-kill-ring-save-working-config
+                  "C-y"        'wg-yank-config
+                  "y"          'wg-yank-config
+                  "M-k"        'wg-kill-workgroup-and-buffers
+                  "K"          'wg-delete-other-workgroups
 
 
-    ;; workgroup movement
+                  ;; updating and reverting
 
-    "C-x"        'wg-swap-workgroups
-    "C-,"        'wg-offset-left
-    "C-."        'wg-offset-right
-
-
-    ;; file and buffer
-
-    "C-s"        'wg-save
-    "C-l"        'wg-load
-    "S"          'wg-update-all-workgroups-and-save
-    "C-f"        'wg-find-file
-    "S-C-f"      'wg-find-file-read-only
-    "C-b"        'wg-get-by-buffer
-    "b"          'wg-get-by-buffer
-    "d"          'wg-dired
+                  "C-u"        'wg-update-workgroup
+                  "u"          'wg-update-workgroup
+                  "C-S-u"      'wg-update-all-workgroups
+                  "U"          'wg-update-all-workgroups
+                  "C-r"        'wg-revert-workgroup
+                  "r"          'wg-revert-workgroup
+                  "C-S-r"      'wg-revert-all-workgroups
+                  "R"          'wg-revert-all-workgroups
 
 
-    ;; window moving and frame reversal
+                  ;; workgroup switching
 
-    "<"          'wg-move-window-backward
-    ">"          'wg-move-window-forward
-    "|"          'wg-reverse-frame-horizontally
-    "-"          'wg-reverse-frame-vertically
-    "+"          'wg-reverse-frame-horizontally-and-vertically
+                  "C-'"        'wg-switch-to-workgroup
+                  "'"          'wg-switch-to-workgroup
+                  "C-v"        'wg-switch-to-workgroup
+                  "v"          'wg-switch-to-workgroup
+                  "C-j"        'wg-switch-to-index
+                  "j"          'wg-switch-to-index
+                  "0"          'wg-switch-to-index-0
+                  "1"          'wg-switch-to-index-1
+                  "2"          'wg-switch-to-index-2
+                  "3"          'wg-switch-to-index-3
+                  "4"          'wg-switch-to-index-4
+                  "5"          'wg-switch-to-index-5
+                  "6"          'wg-switch-to-index-6
+                  "7"          'wg-switch-to-index-7
+                  "8"          'wg-switch-to-index-8
+                  "9"          'wg-switch-to-index-9
+                  "C-p"        'wg-switch-left
+                  "p"          'wg-switch-left
+                  "C-n"        'wg-switch-right
+                  "n"          'wg-switch-right
+                  "M-p"        'wg-switch-left-other-frame
+                  "M-n"        'wg-switch-right-other-frame
+                  "C-a"        'wg-switch-to-previous-workgroup
+                  "a"          'wg-switch-to-previous-workgroup
 
 
-    ;; toggling
+                  ;; workgroup movement
 
-    "C-i"        'wg-toggle-mode-line
-    "C-w"        'wg-toggle-morph
-
-
-    ;; echoing
-
-    "S-C-e"      'wg-echo-current-workgroup
-    "E"          'wg-echo-current-workgroup
-    "C-e"        'wg-echo-all-workgroups
-    "e"          'wg-echo-all-workgroups
-    "C-t"        'wg-echo-time
-    "t"          'wg-echo-time
-    "V"          'wg-echo-version
-    "C-m"        'wg-echo-last-message
-    "m"          'wg-echo-last-message
+                  "C-x"        'wg-swap-workgroups
+                  "C-,"        'wg-offset-left
+                  "C-."        'wg-offset-right
 
 
-    ;; misc
+                  ;; file and buffer
 
-    "A"          'wg-rename-workgroup
-    "!"          'wg-reset
-    "?"          'wg-help
+                  "C-s"        'wg-save
+                  "C-l"        'wg-load
+                  "S"          'wg-update-all-workgroups-and-save
+                  "C-f"        'wg-find-file
+                  "S-C-f"      'wg-find-file-read-only
+                  "C-b"        'wg-get-by-buffer
+                  "b"          'wg-get-by-buffer
+                  "d"          'wg-dired
 
-    )
+
+                  ;; window moving and frame reversal
+
+                  "<"          'wg-move-window-backward
+                  ">"          'wg-move-window-forward
+                  "|"          'wg-reverse-frame-horizontally
+                  "-"          'wg-reverse-frame-vertically
+                  "+"          'wg-reverse-frame-horizontally-and-vertically
+
+
+                  ;; toggling
+
+                  "C-i"        'wg-toggle-mode-line
+                  "C-w"        'wg-toggle-morph
+
+
+                  ;; echoing
+
+                  "S-C-e"      'wg-echo-current-workgroup
+                  "E"          'wg-echo-current-workgroup
+                  "C-e"        'wg-echo-all-workgroups
+                  "e"          'wg-echo-all-workgroups
+                  "C-t"        'wg-echo-time
+                  "t"          'wg-echo-time
+                  "V"          'wg-echo-version
+                  "C-m"        'wg-echo-last-message
+                  "m"          'wg-echo-last-message
+
+
+                  ;; misc
+
+                  "A"          'wg-rename-workgroup
+                  "!"          'wg-reset
+                  "?"          'wg-help
+
+                  )
   "Workgroups' keymap.")
 
 
