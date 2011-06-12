@@ -983,6 +983,17 @@ This needs to be a macro to allow specification of a setf'able place."
 
 ;;; structure types
 
+;; (wg-defstruct wg buf
+;;   (uid (wg-generate-uid))
+;;   (name)
+;;   (file-name)
+;;   (point)
+;;   (mark)
+;;   (mark-active)
+;;   (local-vars)
+;;   (special-data)
+;;   (expired))
+
 (wg-defstruct wg buf
   (uid (wg-generate-uid))
   (name)
@@ -992,7 +1003,7 @@ This needs to be a macro to allow specification of a setf'able place."
   (mark-active)
   (local-vars)
   (special-data)
-  (expired))
+  (stale))
 
 (wg-defstruct wg win
   (uid)
@@ -1731,6 +1742,10 @@ If BUF's file doesn't exist, call `wg-restore-default-buffer'"
            (message "Attempt to restore nonexistent file: %S" file-name)
            (wg-restore-default-buffer)))))
 
+;; FIXME: setting window-dedicated-p causes incorrect wconfig restoration
+;; (set-window-dedicated-p nil t)
+;; (set-window-dedicated-p nil nil)
+
 (defun wg-restore-special-buffer (buf)
   "Restore a buffer with DESERIALIZER-FN."
   (wg-when-let ((special-data (wg-buf-special-data buf)))
@@ -1743,13 +1758,24 @@ If BUF's file doesn't exist, call `wg-restore-default-buffer'"
     (wg-set-buffer-uid-or-error (wg-buf-uid buf))
     (current-buffer)))
 
+;; (defun wg-restore-buffer (buf)
+;;   "Restore BUF and return it."
+;;   (let (wg-buffer-auto-association-on)
+;;     (or (wg-restore-existing-buffer buf)
+;;         (wg-restore-special-buffer buf)
+;;         (wg-restore-file-buffer buf)
+;;         (progn (wg-restore-default-buffer) nil))))
+
 (defun wg-restore-buffer (buf)
   "Restore BUF and return it."
   (let (wg-buffer-auto-association-on)
     (or (wg-restore-existing-buffer buf)
         (wg-restore-special-buffer buf)
         (wg-restore-file-buffer buf)
-        (progn (wg-restore-default-buffer) nil))))
+        (progn
+          (setf (wg-buf-stale buf) t)
+          (wg-restore-default-buffer)
+          nil))))
 
 (defun wg-restore-window-positions (win &optional window)
   "Restore various positions in WINDOW from their values in WIN."
@@ -1812,6 +1838,13 @@ If BUF's file doesn't exist, call `wg-restore-default-buffer'"
     (when wg-restore-dedicated
       (set-window-dedicated-p selected (wg-win-dedicated win)))))
 
+(defun wg-reset-window-tree ()
+  "Delete all but one window in `selected-frame', and reset
+various parameters of that window in preparation for restoring
+a wtree."
+  (delete-other-windows)
+  (set-window-dedicated-p nil nil))
+
 (defun wg-restore-window-tree (wtree)
   "Restore WTREE in `selected-frame'."
   (flet ((inner
@@ -1829,7 +1862,7 @@ If BUF's file doesn't exist, call `wg-restore-default-buffer'"
     (let ((window-min-width wg-window-min-width)
           (window-min-height wg-window-min-height)
           (wg-window-tree-selected-window nil))
-      (delete-other-windows)
+      (wg-reset-window-tree)
       (inner wtree)
       (wg-awhen wg-window-tree-selected-window (select-window it)))))
 
