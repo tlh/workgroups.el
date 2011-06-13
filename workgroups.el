@@ -1225,22 +1225,23 @@ EWIN should be an Emacs window object."
   (let ((p (window-point ewin)))
     (if (and wg-restore-point-max (= p (point-max))) :max p)))
 
-(defun wg-make-buffer-local-variable-alist ()
+(defun wg-serialize-buffer-local-variables ()
   "Return an alist of buffer-local variable symbols and their values.
 See `wg-buffer-local-variables-alist' for details."
   (wg-docar (entry wg-buffer-local-variables-alist)
     (wg-dbind (var ser des) entry
-      (cons var (if ser (funcall ser) (symbol-value var))))))
+      (when (local-variable-p var)
+        (cons var (if ser (funcall ser) (symbol-value var)))))))
 
 (defun wg-buffer-to-buf (buffer)
-  "Return a serialized buffer from Emacs buffer BUFFER."
+  "Return the serialization (a wg-buf) of Emacs buffer BUFFER."
   (with-current-buffer buffer
     (wg-make-buf
      :name           (buffer-name)
      :file-name      (buffer-file-name)
      :point          (point)
      :mark           (mark)
-     :local-vars     (wg-make-buffer-local-variable-alist)
+     :local-vars     (wg-serialize-buffer-local-variables)
      :special-data   (wg-buffer-special-data buffer))))
 
 (defun wg-add-buffer-to-buf-list (buffer)
@@ -1291,7 +1292,7 @@ If BUFOBJ is a buffer or a buffer name, see `wg-buffer-uid-or-add'."
 
 
 (defun wg-window-to-win (window)
-  "Return a serialized window from Emacs window WINDOW."
+  "Return the serialization (a wg-win) of Emacs window WINDOW."
   (let ((selected (eq window (selected-window))))
     (with-selected-window window
       (wg-make-win
@@ -1305,7 +1306,7 @@ If BUFOBJ is a buffer or a buffer name, see `wg-buffer-uid-or-add'."
        :buf-uid            (wg-buffer-uid-or-add (window-buffer window))))))
 
 (defun wg-window-tree-to-wtree (window-tree)
-  "Return a serialized window-tree from Emacs window tree WINDOW-TREE."
+  "Return the serialization (a wg-wtree) of Emacs window tree WINDOW-TREE."
   (wg-barf-on-active-minibuffer)
   (flet ((inner (w) (if (windowp w) (wg-window-to-win w)
                       (wg-dbind (dir edges . wins) w
@@ -1319,7 +1320,8 @@ If BUFOBJ is a buffer or a buffer name, see `wg-buffer-uid-or-add'."
       (inner w))))
 
 (defun wg-frame-to-wconfig (&optional frame)
-  "Return a serialized window-configuration from FRAME or `selected-frame'."
+  "Return the serialization (a wg-wconfig) of Emacs frame FRAME.
+FRAME nil defaults to `selected-frame'."
   (let ((frame (or frame (selected-frame))))
     (wg-make-wconfig
      :left                  (frame-parameter frame 'left)
@@ -1754,24 +1756,18 @@ If BUF's file doesn't exist, call `wg-restore-default-buffer'"
     (wg-set-buffer-uid-or-error (wg-buf-uid buf))
     (current-buffer)))
 
-;; (defun wg-restore-buffer (buf)
-;;   "Restore BUF and return it."
-;;   (let (wg-buffer-auto-association-on)
-;;     (or (wg-restore-existing-buffer buf)
-;;         (wg-restore-special-buffer buf)
-;;         (wg-restore-file-buffer buf)
-;;         (progn (wg-restore-default-buffer) nil))))
-
 (defun wg-restore-buffer (buf)
   "Restore BUF and return it."
-  (let (wg-buffer-auto-association-on)
-    (or (wg-restore-existing-buffer buf)
-        (wg-restore-special-buffer buf)
-        (wg-restore-file-buffer buf)
-        (progn
-          (setf (wg-buf-stale buf) t)
-          (wg-restore-default-buffer)
-          nil))))
+  (let* ((wg-buffer-auto-association-on nil)
+         (buffer (or (wg-restore-existing-buffer buf)
+                     (wg-restore-special-buffer buf)
+                     (wg-restore-file-buffer buf)
+                     (progn
+                       (setf (wg-buf-stale buf) t)
+                       (wg-restore-default-buffer)
+                       nil))))
+    (setf (wg-buf-stale buf) (if buffer nil t))
+    buffer))
 
 (defun wg-restore-window-positions (win &optional window)
   "Restore various positions in WINDOW from their values in WIN."
@@ -1814,24 +1810,6 @@ If BUF's file doesn't exist, call `wg-restore-default-buffer'"
 ;;         (if wg-restore-margins (wg-win-margins win)
 ;;           '(nil . nil))
 ;;       (set-window-margins selected left-width right-width))
-;;     (when wg-restore-dedicated
-;;       (set-window-dedicated-p selected (wg-win-dedicated win)))))
-
-;; (defun wg-restore-window (win)
-;;   "Restore WIN in `selected-window'."
-;;   (let ((selected (selected-window)))
-;;     (wg-if-let (buf (wg-find-buf-by-uid (wg-win-buf-uid win)))
-;;         (when (wg-restore-buffer buf)
-;;           (wg-restore-window-positions win selected)
-;;           ;; FIXME: figure out whether to nix this:
-;;           ;; (wg-restore-buffer-mark buf)
-;;           )
-;;       (wg-restore-default-buffer))
-;;     (when (wg-win-selected win)
-;;       (setq wg-window-tree-selected-window selected))
-;;     (when (and wg-restore-minibuffer-scroll-window
-;;                (wg-win-minibuffer-scroll win))
-;;       (setq minibuffer-scroll-window selected))
 ;;     (when wg-restore-dedicated
 ;;       (set-window-dedicated-p selected (wg-win-dedicated win)))))
 
