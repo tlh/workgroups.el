@@ -358,7 +358,7 @@ when its filter is active.
 
 The function form should be either a function-symbol or a lambda, and
 should take two arguments: a workgroup and a list of live Emacs
-buffers.  The function should return a new list of buffers,
+buffers.  The function should return a new list of live buffers,
 typically by filtering its second argument in some way.
 
 Default buffer-list-filters include:
@@ -1738,13 +1738,9 @@ If BUF's file doesn't exist, call `wg-restore-default-buffer'"
            (wg-set-buffer-uid-or-error (wg-buf-uid buf))
            (wg-restore-buffer-local-variables buf)
            (current-buffer))
-          (t ;; maybe eventually flag BUF for gc here:
+          (t
            (message "Attempt to restore nonexistent file: %S" file-name)
-           (wg-restore-default-buffer)))))
-
-;; FIXME: setting window-dedicated-p causes incorrect wconfig restoration
-;; (set-window-dedicated-p nil t)
-;; (set-window-dedicated-p nil nil)
+           nil))))
 
 (defun wg-restore-special-buffer (buf)
   "Restore a buffer with DESERIALIZER-FN."
@@ -2132,6 +2128,13 @@ Return VALUE."
   (delete nil (mapcar 'wg-find-tracked-buf-by-uid
                       (wg-workgroup-associated-buf-uids workgroup))))
 
+(defun wg-workgroup-associated-buffers (workgroup &optional initial names)
+  "Return a list of WORKGROUP's live associated buffers."
+  (let ((assoc-bufs (wg-workgroup-associated-bufs workgroup)))
+    (remove-if-not
+     (lambda (buffer) (wg-find-buffer-in-buf-list buffer assoc-bufs))
+     (or initial (buffer-list)))))
+
 (defun wg-workgroup-bufobj-association-type (workgroup bufobj)
   "Return BUFOBJ's association-type in WORKGROUP, or nil if unassociated."
   (let ((uid (wg-bufobj-uid-or-track bufobj)))
@@ -2179,18 +2182,22 @@ If it's unassociated with the workgroup, mark it as strongly associated."
     (weak (wg-workgroup-dissociate-bufobj workgroup bufobj) nil)
     (otherwise (wg-workgroup-strongly-associate-bufobj workgroup bufobj) 'strong)))
 
-(defun wg-workgroup-live-buffers (workgroup &optional initial names)
-  "Return a list of WORKGROUP's live associated buffers."
-  (let ((assoc-bufs (wg-workgroup-associated-bufs workgroup)))
-    (remove-if-not
-     (lambda (buffer) (wg-find-buffer-in-buf-list buffer assoc-bufs))
-     (or initial (buffer-list)))))
-
-(defun wg-workgroup-purge-weakly-associated-buffers (workgroup)
+(defun wg-workgroup-dissociate-weakly-associated-buffers (workgroup)
   "Dissociate from WORKGROUP all weakly associated buffers."
   (when (wg-workgroup-weak-buf-uids workgroup)
     (wg-flag-workgroup-modified workgroup)
     (setf (wg-workgroup-weak-buf-uids workgroup) nil)))
+
+(defun wg-workgroup-dissociate-strongly-associated-buffers (workgroup)
+  "Dissociate from WORKGROUP all strongly associated buffers."
+  (when (wg-workgroup-strong-buf-uids workgroup)
+    (wg-flag-workgroup-modified workgroup)
+    (setf (wg-workgroup-strong-buf-uids workgroup) nil)))
+
+(defun wg-workgroup-dissociate-all-buffers (workgroup)
+  "Dissociate from WORKGROUP all its associated buffers."
+  (wg-workgroup-dissociate-weakly-associated-buffers workgroup)
+  (wg-workgroup-dissociate-strongly-associated-buffers workgroup))
 
 (defun wg-auto-dissociate-buffer-hook ()
   "`kill-buffer-hook' that automatically dissociates buffers from workgroups."
@@ -2238,8 +2245,7 @@ INITIAL non-nil should be an initial buffer-list to filter.  It defaults to
                                'constructor)
                               (wg-get-workgroup workgroup)
                               (or initial (wg-interesting-buffers)))))
-    (if names (mapcar 'wg-buffer-name buffer-list)
-      (mapcar 'wg-get-buffer buffer-list))))
+    (if names (mapcar 'wg-buffer-name buffer-list) buffer-list)))
 
 
 ;; buffer-list filters
@@ -2250,13 +2256,12 @@ INITIAL non-nil should be an initial buffer-list to filter.  It defaults to
 
 (defun wg-buffer-list-filter-associated (workgroup initial)
   "Return only those buffers associated with WORKGROUP."
-  (wg-workgroup-live-buffers workgroup initial))
+  (wg-workgroup-associated-buffers workgroup initial))
 
 (defun wg-buffer-list-filter-unassociated (workgroup initial)
   "Return only those buffer unassociated with WORKGROUP."
-  (let ((buffers (wg-workgroup-live-buffers workgroup initial)))
-    (remove-if (lambda (b) (wg-find-buffer-in-buffer-list b buffers))
-               initial)))
+  (let ((buffers (wg-workgroup-associated-buffers workgroup initial)))
+    (remove-if (lambda (buffer) (member buffer buffers)) initial)))
 
 
 ;; buffer-list filtration utils
@@ -2264,12 +2269,12 @@ INITIAL non-nil should be an initial buffer-list to filter.  It defaults to
 (defun wg-filter-buffer-list-by-regexp (regexp buffer-list)
   "Return only those buffers in BUFFER-LIST with names matching REGEXP."
   (remove-if-not (lambda (bname) (string-match regexp bname))
-                 buffer-list :key 'wg-buffer-name))
+                 buffer-list :key 'buffer-name))
 
 (defun wg-filter-buffer-list-by-root-dir (root-dir buffer-list)
   "Return only those buffers in BUFFER-LIST visiting files undo ROOT-DIR."
   (remove-if-not (lambda (f) (when f (wg-file-under-root-path-p root-dir f)))
-                 buffer-list :key 'wg-buffer-file-name))
+                 buffer-list :key 'buffer-file-name))
 
 (defun wg-filter-buffer-list-by-major-mode (major-mode buffer-list)
   "Return only those buffers in BUFFER-LIST in major-mode MAJOR-MODE."
@@ -2539,13 +2544,18 @@ that no longer refer to a buf in `wg-tracked-buffers'."
   "Return WCONFIG's wtree's `wg-wtree-buf-uids'."
   (wg-wtree-unique-buf-uids (wg-wconfig-wtree wconfig)))
 
-;; FIXME: write a `wg-verify-session-uid-consistency' that checks for dups in
-;; assoc-buf lists, and tracked-bufs list; other tests, etc.
-
 (defun wg-string-list-union (list1 list2)
   "Return the `union' of LIST1 and LIST2, using `string=' as the test.
 This only exists to simplify reductions."
   (union list1 list2 :test 'string=))
+
+(defun wg-all-base-wconfig-buf-uids ()
+  (reduce 'wg-string-list-union
+          (wg-workgroup-list)
+          :key (lambda (wg) (wg-wconfig-buf-uids (wg-workgroup-base-wconfig wg)))))
+
+;; FIXME: write a `wg-verify-session-uid-consistency' that checks for dups in
+;; assoc-buf lists, and tracked-bufs list; other tests, etc.
 
 (defun wg-workgroup-all-buf-uids (workgroup)
   "Return the union of WORKGROUP's base `wg-wconfig-buf-uids',
@@ -2559,10 +2569,18 @@ This only exists to simplify reductions."
                 (wg-workgroup-associated-buf-uids
                  workgroup))))
 
+;; (defun wg-session-all-extant-buf-uids ()
+;;   "Return the union of all workgroups' `wg-workgroup-all-buf-uids'."
+;;   (reduce 'wg-string-list-union
+;;           (mapcar 'wg-workgroup-all-buf-uids (wg-workgroup-list))))
+
 (defun wg-session-all-extant-buf-uids ()
   "Return the union of all workgroups' `wg-workgroup-all-buf-uids'."
   (reduce 'wg-string-list-union
-          (mapcar 'wg-workgroup-all-buf-uids (wg-workgroup-list))))
+          (wg-workgroup-list)
+          :key 'wg-workgroup-all-buf-uids))
+
+;; (= (length (wg-session-all-extant-buf-uids)) (length (remove-duplicates (wg-session-all-extant-buf-uids) :test 'string=)))
 
 (defun wg-buffer-uids ()
   "Return a list of the uids of all buffers in which
@@ -2573,13 +2591,46 @@ This only exists to simplify reductions."
   "Return the union of all workgroups' `wg-workgroup-all-buf-uids'."
   (union (wg-session-all-extant-buf-uids) (wg-buffer-uids)))
 
+;; (defun wg-remove-stale-tracked-bufs ()
+;;   "Remove all bufs from `wg-tracked-buffers' with uids not
+;; present in `wg-all-extant-buf-uids'."
+;;   (let ((uids (wg-all-extant-buf-uids)))
+;;     (wg-asetf (wg-tracked-buffers)
+;;               (remove-if-not (lambda (uid) (member uid uids))
+;;                              it :key 'wg-buf-uid))))
+
+
+;; FIXME: gc tracked-bufs that are flagged as stale, unless they're referred to
+;; by any workgroup's base wconfig
+;;
+;; FIXME: make sure this works, and clean it up
+;;
 (defun wg-remove-stale-tracked-bufs ()
   "Remove all bufs from `wg-tracked-buffers' with uids not
 present in `wg-all-extant-buf-uids'."
-  (let ((uids (wg-all-extant-buf-uids)))
+  (let ((all-uids (wg-all-extant-buf-uids))
+        (base-uids (wg-all-base-wconfig-buf-uids)))
     (wg-asetf (wg-tracked-buffers)
-              (remove-if-not (lambda (uid) (member uid uids))
-                             it :key 'wg-buf-uid))))
+              (remove-if (lambda (buf)
+                           (let ((uid (wg-buf-uid buf)))
+                             (or (and (wg-buf-stale buf)
+                                      (not (member uid base-uids)))
+                                 (not (member uid all-uids)))))
+                         it))))
+
+;; (defun wg-remove-stale-tracked-bufs ()
+;;   "Remove all bufs from `wg-tracked-buffers' with uids not
+;; present in `wg-all-extant-buf-uids'."
+;;   (let ((all-uids (wg-all-extant-buf-uids))
+;;         (base-uids (wg-all-base-wconfig-buf-uids)))
+;;     (wg-asetf (wg-tracked-buffers)
+;;               (let (result)
+;;                 (dolist (buf it result)
+;;                   (unless (let ((uid (wg-buf-uid buf)))
+;;                             (or (and (wg-buf-stale buf)
+;;                                      (not (member uid base-uids)))
+;;                                 (not (member uid all-uids))))
+;;                     (push buf result)))))))
 
 (defun wg-cleanup-bufs-and-uids ()
   "Update all tracked bufs, remove stale associated buf uids, and
@@ -3603,14 +3654,14 @@ See `wg-workgroup-cycle-bufobj-association-type' for details."
               (otherwise " unassociated with ")))
       (:cur (wg-workgroup-name workgroup)))))
 
-(defun wg-purge-weakly-associated-buffers (workgroup)
+(defun wg-dissociate-weakly-associated-buffers (workgroup)
   "Dissociate from the current workgroup all weakly associated buffers."
   (interactive (list nil))
   (let ((workgroup (wg-get-workgroup workgroup)))
-    (wg-workgroup-purge-weakly-associated-buffers workgroup)
+    (wg-workgroup-dissociate-weakly-associated-buffers workgroup)
     (wg-fontified-message
       (:cmd "Remaining buffers: ")
-      (wg-buffer-list-display (wg-workgroup-live-buffers workgroup)))))
+      (wg-buffer-list-display (wg-workgroup-associated-buffers workgroup)))))
 
 
 
@@ -3928,16 +3979,14 @@ in which case call `wg-previous-buffer-list-filter'."
     (wg-set-current-matches
      (wg-rotate-list (wg-filtered-buffer-list t) pos) mode)))
 
-(defun wg-minibuffer-mode-purge-weakly-associated-buffers ()
-  "Purge weakly associated buffers and update the current matches."
+(defun wg-minibuffer-mode-dissociate-weakly-associated-buffers ()
+  "Dissociate weakly associated buffers and update the current matches."
   (interactive)
-  (wg-workgroup-purge-weakly-associated-buffers (wg-current-workgroup))
+  (wg-workgroup-dissociate-weakly-associated-buffers (wg-current-workgroup))
   (wg-set-current-matches
-   (let ((unpurged (wg-filtered-buffer-list t)) new-matches)
-     (dolist (match (wg-current-matches) (nreverse new-matches))
-       (when (member match unpurged)
-         (push match new-matches))))))
-
+   (let ((remaining (wg-filtered-buffer-list t)))
+     (remove-if-not (lambda (match) (member match remaining))
+                    (wg-current-matches)))))
 
 
 ;;; advice
@@ -4076,7 +4125,7 @@ Frame defaults to `selected-frame'.  See `wg-buffer-auto-association'."
    (kbd "-")          'wg-dissociate-buffer-from-workgroup
    (kbd "=")          'wg-cycle-buffer-association-type
    (kbd "*")          'wg-restore-workgroup-associated-buffers
-   (kbd "_")          'wg-purge-weakly-associated-buffers
+   (kbd "_")          'wg-dissociate-weakly-associated-buffers
    (kbd "M-b")        'wg-toggle-buffer-list-filtration
    (kbd "(")          'wg-next-buffer
    (kbd ")")          'wg-previous-buffer
@@ -4191,7 +4240,7 @@ as Workgroups' command remappings."
    (kbd "C-c C-a")   'wg-associate-first-match
    (kbd "C-c d")     'wg-dissociate-first-match
    (kbd "C-c C-d")   'wg-dissociate-first-match
-   (kbd "C-c _")     'wg-minibuffer-mode-purge-weak-associated-buffers
+   (kbd "C-c _")     'wg-minibuffer-mode-dissociate-weakly-associated-buffers
    )
   "`wg-minibuffer-mode's keymap.")
 
