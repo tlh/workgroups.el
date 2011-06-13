@@ -184,7 +184,8 @@ minibuffer is active."
 
 ;; TODO: possibly add `buffer-file-coding-system', `text-scale-mode-amount'
 (defcustom wg-buffer-local-variables-alist
-  `((major-mode nil wg-restore-buffer-major-mode)
+  `((major-mode nil wg-deserialize-buffer-major-mode)
+    (mark-ring wg-serialize-buffer-mark-ring wg-deserialize-buffer-mark-ring)
     (left-fringe-width nil nil)
     (right-fringe-width nil nil)
     (fringes-outside-margins nil nil)
@@ -981,7 +982,7 @@ This needs to be a macro to allow specification of a setf'able place."
 
 (defun wg-generate-uid (&optional prefix)
   "Return a new uid, optionally prefixed by PREFIX."
-  (concat (when prefix (concat prefix "-"))
+  (concat prefix
           (wg-time-to-b36)
           "-"
           (wg-int-to-b36 string-chars-consed)))
@@ -990,26 +991,17 @@ This needs to be a macro to allow specification of a setf'able place."
 
 ;;; structure types
 
-;; (wg-defstruct wg buf
-;;   (uid (wg-generate-uid))
-;;   (name)
-;;   (file-name)
-;;   (point)
-;;   (mark)
-;;   (mark-active)
-;;   (local-vars)
-;;   (special-data)
-;;   (expired))
-
 (wg-defstruct wg buf
   (uid (wg-generate-uid))
   (name)
   (file-name)
   (point)
   (mark)
-  (mark-active)
   (local-vars)
   (special-data)
+  ;; TODO: add `nostale' or `evergreen' setting for bufs that should never be
+  ;; gc'd.  Then we can have permanent customizations of buffers without
+  ;; cluttering files with file-local vars and whatnot
   (stale))
 
 (wg-defstruct wg win
@@ -1233,31 +1225,12 @@ EWIN should be an Emacs window object."
   (let ((p (window-point ewin)))
     (if (and wg-restore-point-max (= p (point-max))) :max p)))
 
-;; (defun wg-make-buffer-local-variable-alist ()
-;;   "Return an alist of buffer-local variable symbols and their values.
-;; See `wg-buffer-local-variables-alist' for details."
-;;   (wg-docar (entry wg-buffer-local-variables-alist)
-;;     (wg-dbind (symbol . serdes) entry
-;;       (cons symbol
-;;             (wg-aif (car serdes) (funcall it)
-;;               (symbol-value symbol))))))
-
 (defun wg-make-buffer-local-variable-alist ()
   "Return an alist of buffer-local variable symbols and their values.
 See `wg-buffer-local-variables-alist' for details."
   (wg-docar (entry wg-buffer-local-variables-alist)
     (wg-dbind (var ser des) entry
       (cons var (if ser (funcall ser) (symbol-value var))))))
-
-;; (defun wg-make-buffer-local-variable-alist ()
-;;   "Return an alist of buffer-local variable symbols and their values.
-;; See `wg-buffer-local-variables-alist' for details."
-;;   (let (result)
-;;     (wg-destructuring-dolist (((var ser des) . rest) wg-buffer-local-variables-alist (nreverse rest)
-;;     (wg-dbind (symbol . serdes) entry
-;;       (cons symbol
-;;             (wg-aif (car serdes) (funcall it)
-;;               (symbol-value symbol))))))
 
 (defun wg-buffer-to-buf (buffer)
   "Return a serialized buffer from Emacs buffer BUFFER."
@@ -1267,23 +1240,8 @@ See `wg-buffer-local-variables-alist' for details."
      :file-name      (buffer-file-name)
      :point          (point)
      :mark           (mark)
-     :mark-active    mark-active
      :local-vars     (wg-make-buffer-local-variable-alist)
      :special-data   (wg-buffer-special-data buffer))))
-
-;; (defun wg-add-buffer-to-buf-list (buffer)
-;;   "Make a buf from BUFFER, and add it to `wg-buf-list' if necessary.
-;; If there isn't already a buf corresponding to BUFFER in
-;; `wg-buf-list', make one and add it.  Return BUFFER's uid
-;; in either case."
-;;   (with-current-buffer buffer
-;;     (setq wg-buffer-uid
-;;           (wg-aif (wg-find-buffer-in-buf-list buffer (wg-buf-list))
-;;               (wg-buf-uid it)
-;;             (let* ((buf (wg-buffer-to-buf buffer))
-;;                    (uid (wg-buf-uid buf)))
-;;               (push buf (wg-buf-list))
-;;               uid)))))
 
 (defun wg-add-buffer-to-buf-list (buffer)
   "Make a buf from BUFFER, and add it to `wg-buf-list' if necessary.
@@ -1728,29 +1686,35 @@ buffer is generated."
 
 
 
+;;; buffer-local variable serdes
 
-;;; wconfig restoration
+(defun wg-serialize-buffer-mark-ring ()
+  "Return a new list of the positions of the marks in `mark-ring'."
+  (mapcar 'marker-position mark-ring))
 
-(defun wg-restore-buffer-mark (buf)
-  "Set mark and `mark-active' from BUF."
-  (if (not wg-restore-mark) (deactivate-mark)
-    (set-mark (wg-buf-mark buf))
-    (unless (wg-buf-mark-active buf)
-      (deactivate-mark))))
+(defun wg-deserialize-buffer-mark-ring (positions)
+  "Set `mark-ring' to a new list of markers created from POSITIONS."
+  (setq mark-ring
+        (mapcar (lambda (pos) (set-marker (make-marker) pos))
+                positions)))
 
-(defun wg-restore-buffer-major-mode (major-mode-symbol)
+(defun wg-deserialize-buffer-major-mode (major-mode-symbol)
   "Conditionally retore MAJOR-MODE-SYMBOL in `current-buffer'."
-  (when (and (fboundp major-mode-symbol)
-             (not (eq major-mode-symbol major-mode)))
-    (funcall major-mode-symbol)))
+  (and (fboundp major-mode-symbol)
+       (not (eq major-mode-symbol major-mode))
+       (funcall major-mode-symbol)))
 
-(defun wg-restore-buffer-local-variables (buf)
+(defun wg-deserialize-buffer-local-variables (buf)
   "Restore BUF's buffer local variables in `current-buffer'."
   (wg-destructuring-dolist (((var . val) . rest) (wg-buf-local-vars buf))
     (wg-awhen (assq var wg-buffer-local-variables-alist)
       (wg-dbind (var ser des) it
         (if des (funcall des val)
           (set var val))))))
+
+
+
+;;; wconfig restoration
 
 (defun wg-restore-default-buffer ()
   "Switch to `wg-default-buffer'."
@@ -1771,7 +1735,8 @@ If BUF's file doesn't exist, call `wg-restore-default-buffer'"
            (find-file file-name)
            (rename-buffer (wg-buf-name buf) t)
            (wg-set-buffer-uid-or-error (wg-buf-uid buf))
-           (wg-restore-buffer-local-variables buf)
+           (when wg-restore-mark (set-mark (wg-buf-mark buf)))
+           (wg-deserialize-buffer-local-variables buf)
            (current-buffer))
           (t
            (message "Attempt to restore nonexistent file: %S" file-name)
@@ -1852,14 +1817,30 @@ If BUF's file doesn't exist, call `wg-restore-default-buffer'"
 ;;     (when wg-restore-dedicated
 ;;       (set-window-dedicated-p selected (wg-win-dedicated win)))))
 
+;; (defun wg-restore-window (win)
+;;   "Restore WIN in `selected-window'."
+;;   (let ((selected (selected-window)))
+;;     (wg-if-let (buf (wg-find-buf-by-uid (wg-win-buf-uid win)))
+;;         (when (wg-restore-buffer buf)
+;;           (wg-restore-window-positions win selected)
+;;           ;; FIXME: figure out whether to nix this:
+;;           ;; (wg-restore-buffer-mark buf)
+;;           )
+;;       (wg-restore-default-buffer))
+;;     (when (wg-win-selected win)
+;;       (setq wg-window-tree-selected-window selected))
+;;     (when (and wg-restore-minibuffer-scroll-window
+;;                (wg-win-minibuffer-scroll win))
+;;       (setq minibuffer-scroll-window selected))
+;;     (when wg-restore-dedicated
+;;       (set-window-dedicated-p selected (wg-win-dedicated win)))))
+
 (defun wg-restore-window (win)
   "Restore WIN in `selected-window'."
   (let ((selected (selected-window)))
     (wg-if-let (buf (wg-find-buf-by-uid (wg-win-buf-uid win)))
         (when (wg-restore-buffer buf)
-          (wg-restore-window-positions win selected)
-          ;; FIXME: figure out whether to nix this:
-          (wg-restore-buffer-mark buf))
+          (wg-restore-window-positions win selected))
       (wg-restore-default-buffer))
     (when (wg-win-selected win)
       (setq wg-window-tree-selected-window selected))
@@ -2604,18 +2585,11 @@ This only exists to simplify reductions."
                 (wg-workgroup-associated-buf-uids
                  workgroup))))
 
-;; (defun wg-session-all-extant-buf-uids ()
-;;   "Return the union of all workgroups' `wg-workgroup-all-buf-uids'."
-;;   (reduce 'wg-string-list-union
-;;           (mapcar 'wg-workgroup-all-buf-uids (wg-workgroup-list))))
-
 (defun wg-session-all-extant-buf-uids ()
   "Return the union of all workgroups' `wg-workgroup-all-buf-uids'."
   (reduce 'wg-string-list-union
           (wg-workgroup-list)
           :key 'wg-workgroup-all-buf-uids))
-
-;; (= (length (wg-session-all-extant-buf-uids)) (length (remove-duplicates (wg-session-all-extant-buf-uids) :test 'string=)))
 
 (defun wg-buffer-uids ()
   "Return a list of the uids of all buffers in which
@@ -2626,20 +2600,7 @@ This only exists to simplify reductions."
   "Return the union of all workgroups' `wg-workgroup-all-buf-uids'."
   (union (wg-session-all-extant-buf-uids) (wg-buffer-uids)))
 
-;; (defun wg-remove-stale-bufs ()
-;;   "Remove all bufs from `wg-buf-list' with uids not
-;; present in `wg-all-extant-buf-uids'."
-;;   (let ((uids (wg-all-extant-buf-uids)))
-;;     (wg-asetf (wg-buf-list)
-;;               (remove-if-not (lambda (uid) (member uid uids))
-;;                              it :key 'wg-buf-uid))))
-
-
-;; FIXME: gc bufs in `wg-buf-list' that are flagged as stale, unless they're
-;; referred to by any workgroup's base wconfig
-;;
 ;; FIXME: make sure this works, and clean it up
-;;
 (defun wg-remove-stale-bufs ()
   "Remove all bufs from `wg-buf-list' with uids not
 present in `wg-all-extant-buf-uids'."
@@ -2652,20 +2613,6 @@ present in `wg-all-extant-buf-uids'."
                                       (not (member uid base-uids)))
                                  (not (member uid all-uids)))))
                          it))))
-
-;; (defun wg-remove-stale-bufs ()
-;;   "Remove all bufs from `wg-buf-list' with uids not
-;; present in `wg-all-extant-buf-uids'."
-;;   (let ((all-uids (wg-all-extant-buf-uids))
-;;         (base-uids (wg-all-base-wconfig-buf-uids)))
-;;     (wg-asetf (wg-buf-list)
-;;               (let (result)
-;;                 (dolist (buf it result)
-;;                   (unless (let ((uid (wg-buf-uid buf)))
-;;                             (or (and (wg-buf-stale buf)
-;;                                      (not (member uid base-uids)))
-;;                                 (not (member uid all-uids))))
-;;                     (push buf result)))))))
 
 (defun wg-cleanup-bufs-and-uids ()
   "Update `wg-buf-list', remove stale associated buf uids, and
