@@ -3701,11 +3701,6 @@ Think of it as `write-file' for Workgroups sessions."
 
 (defun wg-save-session ()
   "Save the current Workgroups session to its visited file if modified.
-
-Called interactively with a prefix arg, or if the current session
-filename is nil, read a filename.  Otherwise use the current
-session filename.
-
 Think of it as `save-buffer' for Workgroups sessions."
   (interactive)
   (let ((filename (wg-session-file-name (wg-current-session))))
@@ -3723,37 +3718,31 @@ Think of it as `save-buffer' for Workgroups sessions."
       (call-interactively 'wg-save-session)
       t))
 
-(defun wg-find-new-session-file (filename)
-  "Reset Workgroups, and set the current session filename to FILENAME."
-  (interactive "FNew session file: ")
-  (when (file-exists-p filename)
-    (error "%S already exists" filename))
-  (when (wg-query-for-save)
-    (wg-reset t)
-    (setf (wg-session-file-name (wg-current-session)) filename)
-    (wg-fontified-message
-      (:cmd "Visited new session file: ")
-      (:file (format "%S" filename)))))
-
 (defun wg-find-session-file (filename)
   "Load workgroups from FILENAME."
   (interactive "FSession file: ")
-  (if (not (file-exists-p filename))
-      (wg-find-new-session-file filename)
-    (let ((sexp (wg-read-sexp-from-file filename)))
-      (unless (wg-session-p sexp)
-        (error "%S is not a Workgroups session file." filename))
-      (wg-reset t)
-      (setq wg-current-session
-            (wg-unpickel-all-session-parameters sexp)))
-    (setf (wg-session-file-name (wg-current-session)) filename)
-    (mapc 'wg-buffer-uid-or-add (buffer-list))
-    (wg-awhen (and wg-switch-to-first-workgroup-on-find-session-file
-                   (wg-workgroup-list))
-      (wg-switch-to-workgroup (car it)))
-    (wg-fontified-message
-      (:cmd "Loaded: ")
-      (:file filename))))
+  (cond ((file-exists-p filename)
+         (let ((sexp (wg-read-sexp-from-file filename)))
+           (unless (wg-session-p sexp)
+             (error "%S is not a Workgroups session file." filename))
+           (wg-reset t)
+           (setq wg-current-session
+                 (wg-unpickel-all-session-parameters sexp)))
+         (setf (wg-session-file-name (wg-current-session)) filename)
+         ;; FIXME: get rid of this:
+         (mapc 'wg-buffer-uid-or-add (buffer-list))
+         (wg-awhen (and wg-switch-to-first-workgroup-on-find-session-file
+                        (wg-workgroup-list))
+           (wg-switch-to-workgroup (car it)))
+         (wg-fontified-message
+           (:cmd "Loaded: ")
+           (:file filename)))
+        (t
+         (when (wg-query-for-save)
+           (wg-reset t)
+           (setf (wg-session-file-name (wg-current-session)) filename)
+           (wg-fontified-message
+             (:cmd "(New Workgroups session file)"))))))
 
 (defun wg-find-file-in-new-workgroup (filename)
   "Create a new blank workgroup and find file FILENAME in it."
@@ -4125,11 +4114,10 @@ Frame defaults to `selected-frame'.  See `wg-buffer-auto-association'."
 
    (kbd "C-s")        'wg-save-session
    (kbd "C-w")        'wg-write-session-file
-   (kbd "C-l")        'wg-find-session-file
-   (kbd "M-l")        'wg-find-new-session-file
+   (kbd "C-f")        'wg-find-session-file
    (kbd "S")          'wg-update-all-workgroups-and-save-session
-   (kbd "C-f")        'wg-find-file-in-new-workgroup
-   (kbd "S-C-f")      'wg-find-file-read-only-in-new-workgroup
+   (kbd "F")          'wg-find-file-in-new-workgroup
+   (kbd "M-F")        'wg-find-file-read-only-in-new-workgroup
    (kbd "C-b")        'wg-switch-to-buffer
    (kbd "b")          'wg-switch-to-buffer
    (kbd "d")          'wg-dired
