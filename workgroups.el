@@ -160,10 +160,10 @@ Possible values:
 
 ;; minibuffer customization
 
-(defcustom wg-no-confirm-on-create-workgroup nil
-  "Non-nil means don't request confirmation before creating a new
-workgroup when `wg-get-or-create-workgroup' is called with a
-string that doesn't name an existing workgroup."
+(defcustom wg-confirm-on-get-workgroup-create nil
+  "Non-nil means request confirmation before creating a new
+workgroup when `wg-get-workgroup-create' is called with a string
+that doesn't name an existing workgroup."
   :type 'boolean
   :group 'workgroups)
 
@@ -999,10 +999,7 @@ This needs to be a macro to allow specification of a setf'able place."
   (mark)
   (local-vars)
   (special-data)
-  ;; TODO: add `nostale' or `evergreen' setting for bufs that should never be
-  ;; gc'd.  Then we can have permanent customizations of buffers without
-  ;; cluttering files with file-local vars and whatnot
-  (stale))
+  (gc))
 
 (wg-defstruct wg win
   (uid)
@@ -1159,8 +1156,7 @@ It's stored in BUF's local-vars list, since it's a local variable."
     (wg-buf (wg-buf-major-mode bufobj))
     (string (wg-buffer-major-mode bufobj))))
 
-;; TODO: `wg-equal-bufobjs' and `wg-find-bufobj' may need to be made a lot
-;; smarter, but we'll try this for now
+;; `wg-equal-bufobjs' and `wg-find-bufobj' may need to be made a lot smarter
 (defun wg-equal-bufobjs (bufobj1 bufobj2)
   "Return t if BUFOBJ1 is \"equal\" to BUFOBJ2."
   (let ((fname1 (wg-bufobj-file-name bufobj1))
@@ -1267,7 +1263,7 @@ in either case."
   "If BUFOBJ is a wg-buf, return its uid.
 If BUFOBJ is a buffer or a buffer name, see `wg-buffer-uid-or-add'."
   (etypecase bufobj
-    (wg-buf (wg-buf-uid bufobj)) ;; TODO: possibly also add to `wg-buf-list'
+    (wg-buf (wg-buf-uid bufobj)) ;; possibly also add to `wg-buf-list'
     (buffer (wg-buffer-uid-or-add bufobj))
     (string (wg-bufobj-uid-or-add (wg-get-buffer bufobj)))))
 
@@ -1763,10 +1759,10 @@ If BUF's file doesn't exist, call `wg-restore-default-buffer'"
                      (wg-restore-special-buffer buf)
                      (wg-restore-file-buffer buf)
                      (progn
-                       (setf (wg-buf-stale buf) t)
+                       (setf (wg-buf-gc buf) t)
                        (wg-restore-default-buffer)
                        nil))))
-    (setf (wg-buf-stale buf) (if buffer nil t))
+    (setf (wg-buf-gc buf) (if buffer nil t))
     buffer))
 
 (defun wg-restore-window-positions (win &optional window)
@@ -2518,7 +2514,7 @@ BUFFER nil defaults to `current-buffer'."
   "Update all bufs in `wg-buf-list' corresponding to buffers in BUFFER-LIST."
   (mapc 'wg-update-buffer-in-buf-list (or buffer-list (buffer-list))))
 
-(defun wg-workgroup-remove-stale-assoc-buf-uids (workgroup)
+(defun wg-workgroup-gc-buf-uids (workgroup)
   "Remove uids from WORKGROUP's weak and strong buf uid lists
 that no longer refer to a buf in `wg-buf-list'."
   (wg-asetf (wg-workgroup-strong-buf-uids workgroup)
@@ -2540,64 +2536,65 @@ that no longer refer to a buf in `wg-buf-list'."
 
 (defun wg-string-list-union (list1 list2)
   "Return the `union' of LIST1 and LIST2, using `string=' as the test.
-This only exists to simplify reductions."
+This only exists to get rid of duplicate lambdas in a few reductions."
   (union list1 list2 :test 'string=))
 
-(defun wg-all-base-wconfig-buf-uids ()
+(defun wg-workgroup-base-wconfig-buf-uids (workgroup)
+  "Return a new list of all unique buf uids in WORKGROUP's base wconfig."
+  (wg-wconfig-buf-uids (wg-workgroup-base-wconfig workgroup)))
+
+(defun wg-workgroup-most-recent-working-wconfig-buf-uids (workgroup)
+  "Return a new list of all unique buf uids in WORKGROUP's working wconfig."
+  (wg-wconfig-buf-uids (wg-workgroup-most-recent-working-wconfig workgroup)))
+
+(defun wg-workgroup-all-buf-uids (workgroup)
+  "Return a new list of all unique buf uids in WORKGROUP."
   (reduce 'wg-string-list-union
-          (wg-workgroup-list)
-          :key (lambda (wg) (wg-wconfig-buf-uids (wg-workgroup-base-wconfig wg)))))
+          (list (wg-workgroup-base-wconfig-buf-uids workgroup)
+                (wg-workgroup-most-recent-working-wconfig-buf-uids workgroup)
+                (wg-workgroup-associated-buf-uids workgroup))))
 
 ;; FIXME: write a `wg-verify-session-uid-consistency' that checks for dups in
 ;; assoc-buf lists, and `wg-buf-list'; other tests, etc.
 
-(defun wg-workgroup-all-buf-uids (workgroup)
-  "Return the union of WORKGROUP's base `wg-wconfig-buf-uids',
- working `wg-wconfig-buf-uids', and
-`wg-workgroup-associated-buf-uids'."
+(defun wg-all-workgroup-base-wconfig-buf-uids (&optional session)
+  "Return a new list of all unique buf uids in SESSION's `workgroup-list'.
+SESSION nil defaults to `wg-current-session'."
   (reduce 'wg-string-list-union
-          (list (wg-wconfig-buf-uids
-                 (wg-workgroup-base-wconfig workgroup))
-                (wg-wconfig-buf-uids
-                 (wg-workgroup-most-recent-working-wconfig workgroup))
-                (wg-workgroup-associated-buf-uids
-                 workgroup))))
+          (wg-session-workgroup-list (or session (wg-current-session)))
+          :key 'wg-workgroup-base-wconfig-buf-uids))
 
-(defun wg-session-all-extant-buf-uids ()
-  "Return the union of all workgroups' `wg-workgroup-all-buf-uids'."
+(defun wg-session-all-extant-buf-uids (&optional session)
+  "Return a new list of all unique buf uids in SESSION.
+SESSION nil defaults to `wg-current-session'."
   (reduce 'wg-string-list-union
-          (wg-workgroup-list)
+          (wg-session-workgroup-list (or session (wg-current-session)))
           :key 'wg-workgroup-all-buf-uids))
 
-(defun wg-buffer-uids ()
-  "Return a list of the uids of all buffers in which
-`wg-buffer-uid' is locally bound."
-  (delq nil (mapcar 'wg-buffer-uid (buffer-list))))
+(defun wg-buffer-uids (&optional buffer-list)
+  "Return a list of the uids of all buffers in BUFFER-LIST in
+which `wg-buffer-uid' is locally bound.
+BUFFER-LIST nil defaults to `buffer-list'."
+  (delq nil (mapcar 'wg-buffer-uid (or buffer-list (buffer-list)))))
 
-(defun wg-all-extant-buf-uids ()
+(defun wg-all-extant-buf-uids (&optional session buffer-list)
   "Return the union of all workgroups' `wg-workgroup-all-buf-uids'."
-  (union (wg-session-all-extant-buf-uids) (wg-buffer-uids)))
+  (union (wg-session-all-extant-buf-uids session)
+         (wg-buffer-uids buffer-list)))
 
-;; FIXME: make sure this works, and clean it up
-(defun wg-remove-stale-bufs ()
+(defun wg-gc-bufs ()
   "Remove all bufs from `wg-buf-list' with uids not
 present in `wg-all-extant-buf-uids'."
-  (let ((all-uids (wg-all-extant-buf-uids))
-        (base-uids (wg-all-base-wconfig-buf-uids)))
+  (let ((base-wconfig-buf-uids (wg-all-workgroup-base-wconfig-buf-uids))
+        (all-buf-uids (wg-all-extant-buf-uids)))
     (wg-asetf (wg-buf-list)
               (remove-if (lambda (buf)
-                           (let ((uid (wg-buf-uid buf)))
-                             (or (and (wg-buf-stale buf)
-                                      (not (member uid base-uids)))
-                                 (not (member uid all-uids)))))
+                           (let ((uid (wg-buf-uid buf))
+                                 (gc (wg-buf-gc buf)))
+                             (unless (or (eq gc 'never)
+                                         (member uid base-wconfig-buf-uids))
+                               (or gc (not (member uid all-buf-uids))))))
                          it))))
-
-(defun wg-cleanup-bufs-and-uids ()
-  "Update `wg-buf-list', remove stale associated buf uids, and
-remove stale bufs from `wg-buf-list'."
-  (wg-update-buf-list)
-  (mapc 'wg-workgroup-remove-stale-assoc-buf-uids (wg-workgroup-list))
-  (wg-remove-stale-bufs))
 
 
 
@@ -2667,13 +2664,14 @@ Query to overwrite if a workgroup with the same name exists."
     :base-wconfig (if blank (wg-make-blank-wconfig)
                     (wg-frame-to-wconfig)))))
 
-(defun wg-get-or-create-workgroup (workgroup)
-  "Return the workgroup identified by WORKGROUP.
-If WORKGROUP is a string that isn't the name of an
-existing workgroup, offer to create it."
+(defun wg-get-workgroup-create (workgroup)
+  "Return the workgroup specified by WORKGROUP, creating a new one if needed.
+If `wg-get-workgroup' on WORKGROUP returns a workgroup, return it.
+Otherwise, if WORKGROUP is a string, create a new workgroup with
+that name and return it. Otherwise error."
   (or (wg-get-workgroup workgroup t)
       (if (stringp workgroup)
-          (when (or wg-no-confirm-on-create-workgroup
+          (when (or (not wg-confirm-on-get-workgroup-create)
                     (y-or-n-p (format "%S doesn't exist.  Create it? "
                                       workgroup)))
             (wg-make-and-add-workgroup workgroup))
@@ -3104,8 +3102,8 @@ parameters and the parameters of all its workgroups."
     (wg-read-object
      (or prompt (format "Name (default: %S): " default))
      (lambda (new) (and (stringp new)
-                        (not (equal new ""))
-                        (wg-unique-workgroup-name-p new)))
+                   (not (equal new ""))
+                   (wg-unique-workgroup-name-p new)))
      "Please enter a unique, non-empty name"
      nil nil nil nil default)))
 
@@ -3138,7 +3136,7 @@ parameters and the parameters of all its workgroups."
 (defun wg-switch-to-workgroup (workgroup &optional noerror)
   "Switch to WORKGROUP."
   (interactive (list (wg-read-workgroup-name)))
-  (let ((workgroup (wg-get-or-create-workgroup workgroup))
+  (let ((workgroup (wg-get-workgroup-create workgroup))
         (current (wg-current-workgroup t)))
     (when (and (eq workgroup current) (not noerror))
       (error "Already on: %s" (wg-workgroup-name current)))
@@ -3654,10 +3652,11 @@ Currently only sets BUFFER's `wg-buffer-uid' to nil."
 
 (defun wg-reset (&optional force)
   "Reset Workgroups.
-Reset frames, buffers, and some global vars."
+Resets all frame parameters, buffer-local vars, the current
+Workgroups session object, etc."
   (interactive "P")
   (unless (or force wg-no-confirm-on-destructive-operation
-              (y-or-n-p "Are you sure? "))
+              (y-or-n-p "Really reset Workgroups? "))
     (error "Canceled"))
   (mapc 'wg-reset-frame (frame-list))
   (mapc 'wg-reset-buffer (buffer-list))
@@ -3671,24 +3670,51 @@ Reset frames, buffers, and some global vars."
 
 ;;; file commands
 
-(defun wg-save-session (file &optional force)
-  "Save workgroups to FILE.
+(defun wg-run-session-maintenance ()
+  "Perform various maintenance operations on the current session."
+  (wg-update-current-workgroup-working-wconfig)
+  (wg-update-buf-list)
+  (mapc 'wg-workgroup-gc-buf-uids (wg-workgroup-list))
+  (wg-gc-bufs))
+
+(defun wg-write-session-file (filename &optional confirm)
+  "Write the current session into file FILENAME.
+This makes the session visit that file, and marks it as not modified.
+
+If optional second arg CONFIRM is non-nil, this function asks for
+confirmation before overwriting an existing file.  Interactively,
+confirmation is required unless you supply a prefix argument.
+
+Think of it as `write-file' for Workgroups sessions."
+  (interactive (list (read-file-name "FSave session as: ")
+                     (not current-prefix-arg)))
+  (when (and confirm (file-exists-p filename))
+    (unless (y-or-n-p (format "File `%s' exists; overwrite? " filename))
+      (error "Cancelled")))
+  (wg-run-session-maintenance)
+  (setf (wg-session-file-name (wg-current-session)) filename)
+  (wg-write-sexp-to-file
+   (wg-pickel-all-session-parameters
+    (wg-current-session)) filename)
+  (wg-mark-everything-unmodified)
+  (wg-fontified-message (:cmd "Wrote: ") (:file filename)))
+
+(defun wg-save-session ()
+  "Save the current Workgroups session to its visited file if modified.
+
 Called interactively with a prefix arg, or if the current session
 filename is nil, read a filename.  Otherwise use the current
-session filename."
-  (interactive (list (let ((f (wg-session-file-name (wg-current-session))))
-                       (if (and f (not current-prefix-arg)) f
-                         (read-file-name "File to save in: ")))))
-  (if (and (not force) (not (wg-modified-p)))
-      (wg-message "(No workgroups need to be saved)")
-    (setf (wg-session-file-name (wg-current-session)) file)
-    (wg-update-current-workgroup-working-wconfig)
-    (wg-cleanup-bufs-and-uids)
-    (wg-write-sexp-to-file
-     (wg-pickel-all-session-parameters
-      (wg-current-session)) file)
-    (wg-mark-everything-unmodified)
-    (wg-fontified-message (:cmd "Wrote: ") (:file file))))
+session filename.
+
+Think of it as `save-buffer' for Workgroups sessions."
+  (interactive)
+  (let ((filename (wg-session-file-name (wg-current-session))))
+    (cond ((not (wg-modified-p))
+           (wg-message "(This Workgroups session is unmodified)"))
+          (filename
+           (wg-write-session-file filename))
+          (t
+           (call-interactively 'wg-write-session-file)))))
 
 (defun wg-query-for-save ()
   "Query for save when `wg-modified-p'."
@@ -3729,16 +3755,16 @@ session filename."
       (:cmd "Loaded: ")
       (:file filename))))
 
-(defun wg-find-file (filename)
-  "Create a new workgroup and find file FILENAME in it."
-  (interactive "FFind file: ")
-  (wg-create-workgroup (file-name-nondirectory filename))
+(defun wg-find-file-in-new-workgroup (filename)
+  "Create a new blank workgroup and find file FILENAME in it."
+  (interactive "FFind file in new workgroup: ")
+  (wg-create-workgroup (file-name-nondirectory filename) t)
   (find-file filename))
 
-(defun wg-find-file-read-only (filename)
+(defun wg-find-file-read-only-in-new-workgroup (filename)
   "Create a new workgroup and find file FILENAME read-only in it."
-  (interactive "FFind file read only: ")
-  (wg-create-workgroup (file-name-nondirectory filename))
+  (interactive "FFind file read only in new workgroup: ")
+  (wg-create-workgroup (file-name-nondirectory filename) t)
   (find-file-read-only filename))
 
 (defun wg-dired (dirname &optional switches)
@@ -3748,7 +3774,7 @@ session filename."
   (wg-create-workgroup dirname)
   (dired dirname switches))
 
-(defun wg-update-all-workgroups-and-save ()
+(defun wg-update-all-workgroups-and-save-session ()
   "Call `wg-update-all-workgroups', the `wg-save-session'.
 Keep in mind that workgroups will be updated with their working
 wconfigs in the current frame."
@@ -3785,12 +3811,9 @@ wconfigs in the current frame."
 
 ;;; window-tree commands
 ;;
-;; TODO: Add complex window creation commands
-;;
-;; TODO: Add window splitting, deletion and locking commands
-;;
-;; TODO: These are half-hearted.  Clean them up, and allow specification of the
-;; window-tree depth at which to operate.
+;; TODO: These are half-hearted.  Clean them up.  Allow specification of the
+;; window-tree depth at which to operate.  Add complex window creation commands.
+;; Add window splitting, deletion and locking commands.
 
 (defun wg-backward-transpose-window (workgroup offset)
   "Move `selected-window' backward by OFFSET in its wlist."
@@ -4101,11 +4124,12 @@ Frame defaults to `selected-frame'.  See `wg-buffer-auto-association'."
    ;; file and buffer
 
    (kbd "C-s")        'wg-save-session
+   (kbd "C-w")        'wg-write-session-file
    (kbd "C-l")        'wg-find-session-file
    (kbd "M-l")        'wg-find-new-session-file
-   (kbd "S")          'wg-update-all-workgroups-and-save
-   (kbd "C-f")        'wg-find-file
-   (kbd "S-C-f")      'wg-find-file-read-only
+   (kbd "S")          'wg-update-all-workgroups-and-save-session
+   (kbd "C-f")        'wg-find-file-in-new-workgroup
+   (kbd "S-C-f")      'wg-find-file-read-only-in-new-workgroup
    (kbd "C-b")        'wg-switch-to-buffer
    (kbd "b")          'wg-switch-to-buffer
    (kbd "d")          'wg-dired
@@ -4123,7 +4147,7 @@ Frame defaults to `selected-frame'.  See `wg-buffer-auto-association'."
    ;; toggling
 
    (kbd "C-i")        'wg-toggle-mode-line-display
-   (kbd "C-w")        'wg-toggle-morph
+   ;; (kbd "C-w")        'wg-toggle-morph ;; FIXME: find another binding for this
 
 
    ;; echoing
@@ -4320,7 +4344,6 @@ If ARG is anything else, turn on `workgroups-mode'."
     (:cmd "Workgroups Mode: ")
     (:msg (if workgroups-mode "on" "off")))
   workgroups-mode)
-
 
 
 ;;; provide
