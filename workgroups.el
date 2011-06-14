@@ -1704,11 +1704,11 @@ buffer is generated."
 
 (defun wg-deserialize-buffer-local-variables (buf)
   "Restore BUF's buffer local variables in `current-buffer'."
-  (wg-destructuring-dolist (((var . val) . rest) (wg-buf-local-vars buf))
-    (wg-awhen (assq var wg-buffer-local-variables-alist)
-      (wg-dbind (var ser des) it
-        (if des (funcall des val)
-          (set var val))))))
+  (loop for ((var . val) . rest) on (wg-buf-local-vars buf)
+        do (wg-awhen (assq var wg-buffer-local-variables-alist)
+             (wg-dbind (var ser des) it
+               (if des (funcall des val)
+                 (set var val))))))
 
 
 
@@ -1831,26 +1831,24 @@ a wtree."
   (delete-other-windows)
   (set-window-dedicated-p nil nil))
 
+(defun wg-restore-window-tree-helper (w)
+  "Recursion helper for `wg-restore-window-tree'."
+  (if (wg-wtree-p w)
+      (loop with dir = (wg-wtree-dir w)
+            for (win . rest) on (wg-wtree-wlist w)
+            do (when rest (split-window nil (wg-w-size win dir) (not dir)))
+            do (wg-restore-window-tree-helper win))
+    (wg-restore-window w)
+    (other-window 1)))
+
 (defun wg-restore-window-tree (wtree)
   "Restore WTREE in `selected-frame'."
-  (flet ((inner
-          (w)
-          (if (wg-wtree-p w)
-              (wg-with-slots w
-                  ((dir wg-wtree-dir)
-                   (wlist wg-wtree-wlist))
-                (wg-destructuring-dolist ((subwin . rest) wlist)
-                  (when rest
-                    (split-window nil (wg-w-size subwin dir) (not dir)))
-                  (inner subwin)))
-            (wg-restore-window w)
-            (other-window 1))))
-    (let ((window-min-width wg-window-min-width)
-          (window-min-height wg-window-min-height)
-          (wg-window-tree-selected-window nil))
-      (wg-reset-window-tree)
-      (inner wtree)
-      (wg-awhen wg-window-tree-selected-window (select-window it)))))
+  (let ((window-min-width wg-window-min-width)
+        (window-min-height wg-window-min-height)
+        (wg-window-tree-selected-window nil))
+    (wg-reset-window-tree)
+    (wg-restore-window-tree-helper wtree)
+    (wg-awhen wg-window-tree-selected-window (select-window it))))
 
 (defun wg-wconfig-restore-frame-position (wconfig)
   "Restore `selected-frame's position from WCONFIG."
@@ -2515,12 +2513,15 @@ BUFFER nil defaults to `current-buffer'."
   (mapc 'wg-update-buffer-in-buf-list (or buffer-list (buffer-list))))
 
 (defun wg-workgroup-gc-buf-uids (workgroup)
-  "Remove uids from WORKGROUP's weak and strong buf uid lists
-that no longer refer to a buf in `wg-buf-list'."
+  "Remove buf uids from WORKGROUP that have no referent in `wg-buf-list'."
   (wg-asetf (wg-workgroup-strong-buf-uids workgroup)
             (remove-if-not 'wg-find-buf-by-uid it)
             (wg-workgroup-weak-buf-uids workgroup)
             (remove-if-not 'wg-find-buf-by-uid it)))
+
+(defun wg-gc-buf-uids ()
+  "Remove from all workgroups those buf uids that have no referent in `wg-buf-list'."
+  (mapc 'wg-workgroup-gc-buf-uids (wg-workgroup-list)))
 
 (defun wg-wtree-buf-uids (wtree)
   "Return a new list of the buf uids of all wins in wtree."
@@ -2556,6 +2557,24 @@ This only exists to get rid of duplicate lambdas in a few reductions."
 
 ;; FIXME: write a `wg-verify-session-uid-consistency' that checks for dups in
 ;; assoc-buf lists, and `wg-buf-list'; other tests, etc.
+
+;; asdf
+;; (loop for (a b . rest) on '(1 2 3 4 5 6) by 'cddr collect a)
+;; (find 'a '(s d f) :test 'eq :key 'identity)
+;; (wg-duplicates-in '("a" "s" "d" "f" "d" "f") :test 'eq)
+
+(defun wg-find-duplicates-in (list &rest keys)
+  "Return a new list of the duplicate elements in LIST.
+
+Keywords supported: :test :key
+
+\(fn LIST [KEYWORD VALUE]...)"
+  (let ((test (or (plist-get keys :test) 'equal))
+        (key (or (plist-get keys :key) 'identity)))
+    (loop for (elt . rest) on list
+          when (find elt rest :test test :key key)
+          collect elt)))
+
 
 (defun wg-all-workgroup-base-wconfig-buf-uids (&optional session)
   "Return a new list of all unique buf uids in SESSION's `workgroup-list'.
@@ -3050,7 +3069,7 @@ parameters and the parameters of all its workgroups."
               (mapcar 'wg-pickel-workgroup-parameters it))
     copy))
 
-(defun wg-unpickel-all-session-parameters (session)
+(defun wg-unpickel-session-parameters (session)
   "Return a copy of SESSION after unpickeling its
 parameters and the parameters of all its workgroups."
   (let ((copy (wg-copy-session session)))
@@ -3670,12 +3689,12 @@ Workgroups session object, etc."
 
 ;;; file commands
 
-(defun wg-run-session-maintenance ()
-  "Perform various maintenance operations on the current session."
+(defun wg-perform-session-maintenance ()
+  "Perform various maintenance operations on the current Workgroups session."
   (wg-update-current-workgroup-working-wconfig)
-  (wg-update-buf-list)
-  (mapc 'wg-workgroup-gc-buf-uids (wg-workgroup-list))
-  (wg-gc-bufs))
+  (wg-gc-bufs)
+  (wg-gc-buf-uids)
+  (wg-update-buf-list))
 
 (defun wg-write-session-file (filename &optional confirm)
   "Write the current session into file FILENAME.
@@ -3691,7 +3710,7 @@ Think of it as `write-file' for Workgroups sessions."
   (when (and confirm (file-exists-p filename))
     (unless (y-or-n-p (format "File `%s' exists; overwrite? " filename))
       (error "Cancelled")))
-  (wg-run-session-maintenance)
+  (wg-perform-session-maintenance)
   (setf (wg-session-file-name (wg-current-session)) filename)
   (wg-write-sexp-to-file
    (wg-pickel-all-session-parameters
@@ -3719,18 +3738,15 @@ Think of it as `save-buffer' for Workgroups sessions."
       t))
 
 (defun wg-find-session-file (filename)
-  "Load workgroups from FILENAME."
-  (interactive "FSession file: ")
+  "Load a session visiting FILENAME, creating one if none already exists."
+  (interactive "FFind session file: ")
   (cond ((file-exists-p filename)
-         (let ((sexp (wg-read-sexp-from-file filename)))
-           (unless (wg-session-p sexp)
+         (let ((session (wg-read-sexp-from-file filename)))
+           (unless (wg-session-p session)
              (error "%S is not a Workgroups session file." filename))
            (wg-reset t)
-           (setq wg-current-session
-                 (wg-unpickel-all-session-parameters sexp)))
+           (setq wg-current-session (wg-unpickel-session-parameters session)))
          (setf (wg-session-file-name (wg-current-session)) filename)
-         ;; FIXME: get rid of this:
-         (mapc 'wg-buffer-uid-or-add (buffer-list))
          (wg-awhen (and wg-switch-to-first-workgroup-on-find-session-file
                         (wg-workgroup-list))
            (wg-switch-to-workgroup (car it)))
@@ -3756,7 +3772,7 @@ Think of it as `save-buffer' for Workgroups sessions."
   (wg-create-workgroup (file-name-nondirectory filename) t)
   (find-file-read-only filename))
 
-(defun wg-dired (dirname &optional switches)
+(defun wg-dired-in-new-workgroup (dirname &optional switches)
   "Create a workgroup and open DIRNAME in dired with SWITCHES."
   (interactive (list (read-directory-name "Dired (directory): ")
                      current-prefix-arg))
@@ -3800,27 +3816,27 @@ wconfigs in the current frame."
 
 ;;; window-tree commands
 ;;
-;; TODO: These are half-hearted.  Clean them up.  Allow specification of the
-;; window-tree depth at which to operate.  Add complex window creation commands.
-;; Add window splitting, deletion and locking commands.
+;; TODO: These are half-hearted.  Clean them up; allow specification of the
+;; window-tree depth at which to operate; add complex window creation commands;
+;; and add window splitting, deletion and locking commands.
+
+(defun wg-transpose-window-internal (workgroup offset)
+  "Move `selected-window' by OFFSET in its wlist."
+  (wg-restore-wconfig-undoably
+   (wg-wconfig-move-window
+    (wg-workgroup-working-wconfig
+     (wg-get-workgroup workgroup))
+    offset)))
 
 (defun wg-backward-transpose-window (workgroup offset)
   "Move `selected-window' backward by OFFSET in its wlist."
   (interactive (list nil (or current-prefix-arg -1)))
-  (wg-restore-wconfig-undoably
-   (wg-wconfig-move-window
-    (wg-workgroup-working-wconfig
-     (wg-get-workgroup workgroup))
-    offset)))
+  (wg-transpose-window-internal workgroup offset))
 
 (defun wg-transpose-window (workgroup offset)
   "Move `selected-window' forward by OFFSET in its wlist."
   (interactive (list nil (or current-prefix-arg 1)))
-  (wg-restore-wconfig-undoably
-   (wg-wconfig-move-window
-    (wg-workgroup-working-wconfig
-     (wg-get-workgroup workgroup))
-    offset)))
+  (wg-transpose-window-internal workgroup offset))
 
 (defun wg-reverse-frame-horizontally (workgroup)
   "Reverse the order of all horizontally split wtrees."
@@ -4098,7 +4114,6 @@ Frame defaults to `selected-frame'.  See `wg-buffer-auto-association'."
    (kbd "=")          'wg-cycle-buffer-association-type
    (kbd "*")          'wg-restore-workgroup-associated-buffers
    (kbd "_")          'wg-dissociate-weakly-associated-buffers
-   (kbd "M-b")        'wg-toggle-buffer-list-filtration
    (kbd "(")          'wg-next-buffer
    (kbd ")")          'wg-previous-buffer
 
@@ -4118,9 +4133,9 @@ Frame defaults to `selected-frame'.  See `wg-buffer-auto-association'."
    (kbd "S")          'wg-update-all-workgroups-and-save-session
    (kbd "F")          'wg-find-file-in-new-workgroup
    (kbd "M-F")        'wg-find-file-read-only-in-new-workgroup
+   (kbd "d")          'wg-dired-in-new-workgroup
    (kbd "C-b")        'wg-switch-to-buffer
    (kbd "b")          'wg-switch-to-buffer
-   (kbd "d")          'wg-dired
 
 
    ;; window moving and frame reversal
@@ -4134,8 +4149,9 @@ Frame defaults to `selected-frame'.  See `wg-buffer-auto-association'."
 
    ;; toggling
 
-   (kbd "C-i")        'wg-toggle-mode-line-display
-   ;; (kbd "C-w")        'wg-toggle-morph ;; FIXME: find another binding for this
+   (kbd "C-t C-m")    'wg-toggle-mode-line-display
+   (kbd "C-t C-m")    'wg-toggle-morph
+   (kbd "C-t C-b")    'wg-toggle-buffer-list-filtration
 
 
    ;; echoing
@@ -4145,7 +4161,7 @@ Frame defaults to `selected-frame'.  See `wg-buffer-auto-association'."
    (kbd "C-e")        'wg-echo-all-workgroups
    (kbd "e")          'wg-echo-all-workgroups
    (kbd "C-t")        'wg-echo-time
-   (kbd "t")          'wg-echo-time
+   (kbd "T")          'wg-echo-time
    (kbd "V")          'wg-echo-version
    (kbd "C-m")        'wg-echo-last-message
    (kbd "m")          'wg-echo-last-message
