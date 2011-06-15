@@ -33,7 +33,7 @@
   (require 'cl))
 
 
-;; utils used in macros
+;;; utils used in macros
 
 (defmacro wg-with-gensyms (syms &rest body)
   "Bind all symbols in SYMS to `gensym's, and eval BODY."
@@ -56,7 +56,8 @@ Iterative to prevent stack overflow."
     (nreverse acc)))
 
 
-;; bindings
+
+;;; bindings
 
 (defmacro wg-if-let (cond-form then &rest else)
   "Bind VAR to the return value of COND.  If VAR is non-nil, do THEN.
@@ -84,7 +85,8 @@ Else do ELSE...
      ,@body))
 
 
-;; do-style wrappers
+
+;;; do-style wrappers
 
 (defmacro wg-docar (spec &rest body)
   "do-style wrapper for `mapcar'.
@@ -110,7 +112,8 @@ Else do ELSE...
     `(mapconcat (lambda (,elt) ,@body) ,seq (or ,sep ""))))
 
 
-;; anaphora
+
+;;; anaphora
 
 (defmacro wg-aif (test then &rest else)
   "Anaphoric `if'."
@@ -142,7 +145,7 @@ Else do ELSE...
 
 
 
-;; other control structures
+;;; other control structures
 
 (defmacro wg-until (test &rest body)
   "`while' not."
@@ -169,7 +172,8 @@ into a var, like so: (a (b c) . rest)
            ,result)))))
 
 
-;; numbers
+
+;;; numbers
 
 (defun wg-step-to (n m step)
   "Increment or decrement N toward M by STEP.
@@ -204,7 +208,8 @@ Similar to `org-id-int-to-b36'."
         (concat (make-string (max 0 (- length (length b36))) ?0) b36)))))
 
 
-;; lists
+
+;;; lists
 
 (defmacro wg-removef-p (object place)
   "If OBJECT is a `member' of PLACE, remove it from PLACE and return t.
@@ -304,8 +309,21 @@ Return nil when ELT1 and ELT2 aren't both present."
                 (p2 (position elt2 list)))
     (wg-move-elt elt1 (wg-move-elt elt2 list p1) p2)))
 
+(defun wg-dups-p (list &rest keys)
+  "Return non-nil when LIST contains duplicate elements.
 
-;; alists
+Keywords supported: :test :key
+
+\(fn LIST [KEYWORD VALUE]...)"
+  (let ((test (or (plist-get keys :test) 'eq))
+        (key (or (plist-get keys :key) 'identity)))
+    (loop for (elt . rest) on list
+          for elt = (funcall key elt)
+          when (find elt rest :test test :key key) return elt)))
+
+
+
+;;; alists
 
 (defun wg-make-alist (&rest kvps)
   "Return a new alist from KVPS."
@@ -351,7 +369,8 @@ variable, and the cadr as the key."
        ,@body)))
 
 
-;; hash-tables
+
+;;; hash-tables
 
 (defun wg-fill-hash-table (table &rest key-value-pairs)
   "Fill TABLE with KEY-VALUE-PAIRS and return TABLE."
@@ -361,7 +380,8 @@ variable, and the cadr as the key."
   table)
 
 
-;; symbols and strings
+
+;;; symbols and strings
 
 (defun wg-toggle (symbol)
   "Toggle SYMBOL's truthiness."
@@ -377,7 +397,8 @@ variable, and the cadr as the key."
   (mapconcat 'identity (make-list times string) (or separator "")))
 
 
-;; buffers
+
+;;; buffers
 
 (defun wg-get-buffer (buffer-or-name)
   "Return BUFFER-OR-NAME's buffer, or error."
@@ -413,7 +434,8 @@ BUFFER-LIST should contain buffer objects and/or buffer names."
         :test 'string-match :key 'wg-buffer-name))
 
 
-;; files
+
+;;; files
 
 (defun wg-write-sexp-to-file (sexp file)
   "Write the printable representation of SEXP to FILE."
@@ -435,7 +457,8 @@ BUFFER-LIST should contain buffer objects and/or buffer names."
                 (expand-file-name file-path)))
 
 
-;; frames
+
+;;; frames
 
 (defun wg-cyclic-nth-from-frame (&optional n frame)
   "Return the frame N places away from FRAME in `frame-list' cyclically.
@@ -444,7 +467,8 @@ N defaults to 1, and FRAME defaults to `selected-frame'."
    (or frame (selected-frame)) (frame-list) (or n 1)))
 
 
-;; namespace-prefixed defstruct
+
+;;; namespace-prefixed defstruct
 
 (defmacro wg-defstruct (prefix name-form &rest slot-defs)
   "`defstruct' wrapper that namespace-prefixes all generated functions.
@@ -482,7 +506,8 @@ the cadr as the accessor function."
        ,@body)))
 
 
-;; misc
+
+;;; misc
 
 (defun wg-fill-keymap (keymap &rest binds)
   "Return KEYMAP after defining in it all keybindings in BINDS."

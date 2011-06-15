@@ -1551,12 +1551,12 @@ Otherwise, reverse WTREE vertically."
   wconfig)
 
 (defun wg-flatten-wtree (wtree &optional key)
-  "Return a new list of the results of calling KEY on each window in WTREE.
-KEY defaults to `identity'."
-  (let ((key (or key 'identity)))
-    (flet ((inner (w) (if (wg-win-p w) (list (funcall key w))
-                        (mapcan 'inner (wg-wtree-wlist w)))))
-      (inner wtree))))
+  "Return a new list by flattening WTREE.
+KEY non returns returns a list of WTREE's wins.
+KEY non-nil returns a list of the results of calling KEY on each win."
+  (flet ((inner (w) (if (wg-win-p w) (list (if key (funcall key w) w))
+                      (mapcan 'inner (wg-wtree-wlist w)))))
+    (inner wtree)))
 
 (defun wg-win-list (wtree)
   "Construct and return a list of all wg-wins in WTREE."
@@ -1752,17 +1752,19 @@ If BUF's file doesn't exist, call `wg-restore-default-buffer'"
     (wg-set-buffer-uid-or-error (wg-buf-uid buf))
     (current-buffer)))
 
+(defun wg-set-buf-gc-flag (buf value)
+  "Set BUF's gc flag to VALUE unless it's currently set to `never'."
+  (unless (eq 'never (wg-buf-gc buf))
+    (setf (wg-buf-gc buf) value)))
+
 (defun wg-restore-buffer (buf)
   "Restore BUF and return it."
   (let* ((wg-buffer-auto-association-on nil)
          (buffer (or (wg-restore-existing-buffer buf)
                      (wg-restore-special-buffer buf)
                      (wg-restore-file-buffer buf)
-                     (progn
-                       (setf (wg-buf-gc buf) t)
-                       (wg-restore-default-buffer)
-                       nil))))
-    (setf (wg-buf-gc buf) (if buffer nil t))
+                     (progn (wg-restore-default-buffer) nil))))
+    (wg-set-buf-gc-flag buf (if buffer nil t))
     buffer))
 
 (defun wg-restore-window-positions (win &optional window)
@@ -2555,26 +2557,15 @@ This only exists to get rid of duplicate lambdas in a few reductions."
                 (wg-workgroup-most-recent-working-wconfig-buf-uids workgroup)
                 (wg-workgroup-associated-buf-uids workgroup))))
 
-;; FIXME: write a `wg-verify-session-uid-consistency' that checks for dups in
-;; assoc-buf lists, and `wg-buf-list'; other tests, etc.
-
-;; asdf
-;; (loop for (a b . rest) on '(1 2 3 4 5 6) by 'cddr collect a)
-;; (find 'a '(s d f) :test 'eq :key 'identity)
-;; (wg-duplicates-in '("a" "s" "d" "f" "d" "f") :test 'eq)
-
-(defun wg-find-duplicates-in (list &rest keys)
-  "Return a new list of the duplicate elements in LIST.
-
-Keywords supported: :test :key
-
-\(fn LIST [KEYWORD VALUE]...)"
-  (let ((test (or (plist-get keys :test) 'equal))
-        (key (or (plist-get keys :key) 'identity)))
-    (loop for (elt . rest) on list
-          when (find elt rest :test test :key key)
-          collect elt)))
-
+(defun wg-session-uids-consistent-p ()
+  "Return t if there are no duplicate bufs or buf uids in the wrong places,
+nil otherwise."
+  (and (every (lambda (wg)
+                (not (wg-dups-p (wg-workgroup-associated-buf-uids wg)
+                                :test 'string=)))
+              (wg-workgroup-list))
+       (not (wg-dups-p (wg-buf-list) :key 'wg-buf-uid :test 'string=))
+       (not (wg-dups-p (wg-workgroup-list) :key 'wg-workgroup-uid :test 'string=))))
 
 (defun wg-all-workgroup-base-wconfig-buf-uids (&optional session)
   "Return a new list of all unique buf uids in SESSION's `workgroup-list'.
@@ -3121,8 +3112,8 @@ parameters and the parameters of all its workgroups."
     (wg-read-object
      (or prompt (format "Name (default: %S): " default))
      (lambda (new) (and (stringp new)
-                   (not (equal new ""))
-                   (wg-unique-workgroup-name-p new)))
+                        (not (equal new ""))
+                        (wg-unique-workgroup-name-p new)))
      "Please enter a unique, non-empty name"
      nil nil nil nil default)))
 
