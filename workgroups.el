@@ -179,6 +179,23 @@ minibuffer is active."
   :type 'float
   :group 'workgroups)
 
+;; FIXME: Add this:
+;;
+;;   "Unable to restore 'buf1', 'buf2'... Hit C-whatever to retry after manually
+;;   recreating these buffers.
+;;
+;; Only set `wg-workgroup-saved-working-wconfig' on `wg-write-session-file', and
+;; set it with the most recently changed working-wconfig.  Then, since it's not
+;; overwritten on every call to `wg-workgroup-working-wconfig', its restoration
+;; can be retried after manually recreating buffers that couldn't be restored.
+;; So it takes over the 'incorrect restoration' portion of the base wconfig's
+;; duty.  All that leaves to base wconfigs is that they're a saved wconfig the
+;; user felt was important.  So way not allow more of of them?  A workgroup
+;; could store an unlimited number of saved wconfigs.
+;;
+;; Replace base wconfigs with a list of named, stashed wconfigs.
+;;
+;;
 
 ;; workgroup restoration customization
 
@@ -1037,7 +1054,7 @@ This needs to be a macro to allow specification of a setf'able place."
   (modified)
   (parameters)
   (base-wconfig)
-  (most-recent-working-wconfig)
+  (saved-working-wconfig)
   (strong-buf-uids)
   (weak-buf-uids))
 
@@ -2357,7 +2374,7 @@ Binds `wg-current-workgroup', `wg-current-buffer-command' and
          (wg-make-workgroup-state
           :undo-pointer 0
           :undo-list
-          (list (or (wg-workgroup-most-recent-working-wconfig workgroup)
+          (list (or (wg-workgroup-saved-working-wconfig workgroup)
                     (wg-workgroup-base-wconfig workgroup))))
          wt))))
 
@@ -2390,7 +2407,7 @@ current command."
 
 (defun wg-set-workgroup-working-wconfig (workgroup wconfig)
   "Set the working-wconfig of WORKGROUP to WCONFIG."
-  (setf (wg-workgroup-most-recent-working-wconfig workgroup) wconfig)
+  (setf (wg-workgroup-saved-working-wconfig workgroup) wconfig)
   (wg-flag-workgroup-modified workgroup)
   (wg-with-undo workgroup (state undo-pointer undo-list)
     (setcar (nthcdr undo-pointer undo-list) wconfig)))
@@ -2398,7 +2415,7 @@ current command."
 (defun wg-add-wconfig-to-undo-list (workgroup wconfig)
   "Add WCONFIG to WORKGROUP's undo list, truncating its future if necessary."
   (wg-with-undo workgroup (state undo-pointer undo-list)
-    (setf (wg-workgroup-most-recent-working-wconfig workgroup) wconfig)
+    (setf (wg-workgroup-saved-working-wconfig workgroup) wconfig)
     (wg-flag-workgroup-modified workgroup)
     (let ((undo-list (cons wconfig (nthcdr undo-pointer undo-list))))
       (when (and wg-wconfig-undo-list-max
@@ -2546,15 +2563,15 @@ This only exists to get rid of duplicate lambdas in a few reductions."
   "Return a new list of all unique buf uids in WORKGROUP's base wconfig."
   (wg-wconfig-buf-uids (wg-workgroup-base-wconfig workgroup)))
 
-(defun wg-workgroup-most-recent-working-wconfig-buf-uids (workgroup)
+(defun wg-workgroup-saved-working-wconfig-buf-uids (workgroup)
   "Return a new list of all unique buf uids in WORKGROUP's working wconfig."
-  (wg-wconfig-buf-uids (wg-workgroup-most-recent-working-wconfig workgroup)))
+  (wg-wconfig-buf-uids (wg-workgroup-saved-working-wconfig workgroup)))
 
 (defun wg-workgroup-all-buf-uids (workgroup)
   "Return a new list of all unique buf uids in WORKGROUP."
   (reduce 'wg-string-list-union
           (list (wg-workgroup-base-wconfig-buf-uids workgroup)
-                (wg-workgroup-most-recent-working-wconfig-buf-uids workgroup)
+                (wg-workgroup-saved-working-wconfig-buf-uids workgroup)
                 (wg-workgroup-associated-buf-uids workgroup))))
 
 (defun wg-session-uids-consistent-p ()
