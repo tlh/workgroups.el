@@ -179,10 +179,10 @@ minibuffer is active."
   :type 'float
   :group 'workgroups)
 
-;; FIXME: Add this:
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-;;   "Unable to restore 'buf1', 'buf2'... Hit C-whatever to retry after manually
-;;   recreating these buffers.
+;; FIXME:
 ;;
 ;; Only set `wg-workgroup-saved-wconfig' on `wg-write-session-file', and
 ;; set it with the most recently changed working-wconfig.  Then, since it's not
@@ -193,6 +193,27 @@ minibuffer is active."
 ;; user felt was important.  So way not allow more of of them?  A workgroup
 ;; could store an unlimited number of saved wconfigs.
 ;;
+;; TODO:
+;;
+;;   * Creating and cloning workgroups should use `saved-wconfig'
+;;
+;;   * Update `saved-wconfig' on `wg-write-session-file'
+;;
+;;   * Convert `wg-update-workgroup' and `wg-revert-workgroup' to whatever they
+;;     need to become
+;;
+;;   * Remove base wconfig referrences.
+;;
+;;   * Write new commands for restoring stashed wconfigs
+;;
+;;   * Add this message on improper restoration of `saved-wconfig':
+;;
+;;       "Unable to restore 'buf1', 'buf2'... Hit C-whatever to retry after
+;;        manually recreating these buffers."
+;;
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 
 ;; workgroup restoration customization
 
@@ -1045,13 +1066,23 @@ This needs to be a macro to allow specification of a setf'able place."
   (scroll-bar-width)
   (wtree))
 
+;; (wg-defstruct wg workgroup
+;;   (uid (wg-generate-uid))
+;;   (name)
+;;   (modified)
+;;   (parameters)
+;;   (base-wconfig)
+;;   (saved-wconfig)
+;;   (strong-buf-uids)
+;;   (weak-buf-uids))
+
 (wg-defstruct wg workgroup
   (uid (wg-generate-uid))
   (name)
   (modified)
   (parameters)
-  (base-wconfig)
   (saved-wconfig)
+  (stashed-wconfigs)
   (strong-buf-uids)
   (weak-buf-uids))
 
@@ -1747,7 +1778,9 @@ If BUF's file doesn't exist, call `wg-restore-default-buffer'"
            (find-file file-name)
            (rename-buffer (wg-buf-name buf) t)
            (wg-set-buffer-uid-or-error (wg-buf-uid buf))
-           (when wg-restore-mark (set-mark (wg-buf-mark buf)))
+           (when wg-restore-mark
+             (set-mark (wg-buf-mark buf))
+             (deactivate-mark))
            (wg-deserialize-buffer-local-variables buf)
            (current-buffer))
           (t
@@ -2375,29 +2408,16 @@ Binds `wg-current-workgroup', `wg-current-buffer-command' and
 ;;                     (wg-workgroup-base-wconfig workgroup))))
 ;;          wt))))
 
-;; (defun wg-get-workgroup-state (workgroup &optional frame)
-;;   "Return FRAME's WORKGROUP's state table."
-;;   (let ((uid (wg-workgroup-uid workgroup))
-;;         (wt (wg-workgroup-state-table frame)))
-;;     (or (gethash uid wt)
-;;         (puthash
-;;          uid
-;;          (wg-make-workgroup-state
-;;           :undo-pointer 0
-;;           :undo-list (list (wg-workgroup-saved-wconfig workgroup)))
-;;          wt))))
-
 (defun wg-get-workgroup-state (workgroup &optional frame)
   "Return FRAME's WORKGROUP's state table."
   (let ((uid (wg-workgroup-uid workgroup))
-        (wt (wg-workgroup-state-table frame)))
-    (or (gethash uid wt)
-        (puthash
-         uid
-         (wg-make-workgroup-state
-          :undo-pointer 0
-          :undo-list (list (wg-workgroup-saved-wconfig workgroup)))
-         wt))))
+        (state-table (wg-workgroup-state-table frame)))
+    (or (gethash uid state-table)
+        (let ((wgs (wg-make-workgroup-state
+                    :undo-pointer 0
+                    :undo-list (list (wg-workgroup-saved-wconfig workgroup)))))
+          (puthash uid wgs state-table)
+          wgs))))
 
 (defmacro wg-with-undo (workgroup spec &rest body)
   "Bind WORKGROUP's undo state to SPEC and eval BODY."
@@ -2592,23 +2612,36 @@ BUFFER nil defaults to `current-buffer'."
   "Return WCONFIG's wtree's `wg-wtree-buf-uids'."
   (wg-wtree-unique-buf-uids (wg-wconfig-wtree wconfig)))
 
-(defun wg-string-list-union (list1 list2)
+(defun wg-string-list-union (&optional list1 list2)
   "Return the `union' of LIST1 and LIST2, using `string=' as the test.
 This only exists to get rid of duplicate lambdas in a few reductions."
   (union list1 list2 :test 'string=))
 
-(defun wg-workgroup-base-wconfig-buf-uids (workgroup)
+;; (defun wg-workgroup-base-wconfig-buf-uids (workgroup)
+;;   "Return a new list of all unique buf uids in WORKGROUP's base wconfig."
+;;   (wg-wconfig-buf-uids (wg-workgroup-base-wconfig workgroup)))
+
+(defun wg-workgroup-stashed-wconfigs-buf-uids (workgroup)
   "Return a new list of all unique buf uids in WORKGROUP's base wconfig."
-  (wg-wconfig-buf-uids (wg-workgroup-base-wconfig workgroup)))
+  (reduce 'wg-string-list-union
+          (mapcar 'wg-wconfig-buf-uids
+                  (wg-workgroup-stashed-wconfigs workgroup))))
 
 (defun wg-workgroup-saved-wconfig-buf-uids (workgroup)
   "Return a new list of all unique buf uids in WORKGROUP's working wconfig."
   (wg-wconfig-buf-uids (wg-workgroup-saved-wconfig workgroup)))
 
+;; (defun wg-workgroup-all-buf-uids (workgroup)
+;;   "Return a new list of all unique buf uids in WORKGROUP."
+;;   (reduce 'wg-string-list-union
+;;           (list (wg-workgroup-base-wconfig-buf-uids workgroup)
+;;                 (wg-workgroup-saved-wconfig-buf-uids workgroup)
+;;                 (wg-workgroup-associated-buf-uids workgroup))))
+
 (defun wg-workgroup-all-buf-uids (workgroup)
   "Return a new list of all unique buf uids in WORKGROUP."
   (reduce 'wg-string-list-union
-          (list (wg-workgroup-base-wconfig-buf-uids workgroup)
+          (list (wg-workgroup-stashed-wconfigs-buf-uids workgroup)
                 (wg-workgroup-saved-wconfig-buf-uids workgroup)
                 (wg-workgroup-associated-buf-uids workgroup))))
 
@@ -2622,12 +2655,19 @@ nil otherwise."
        (not (wg-dups-p (wg-buf-list) :key 'wg-buf-uid :test 'string=))
        (not (wg-dups-p (wg-workgroup-list) :key 'wg-workgroup-uid :test 'string=))))
 
-(defun wg-all-workgroup-base-wconfig-buf-uids (&optional session)
+;; (defun wg-all-workgroup-base-wconfig-buf-uids (&optional session)
+;;   "Return a new list of all unique buf uids in SESSION's `workgroup-list'.
+;; SESSION nil defaults to `wg-current-session'."
+;;   (reduce 'wg-string-list-union
+;;           (wg-session-workgroup-list (or session (wg-current-session)))
+;;           :key 'wg-workgroup-base-wconfig-buf-uids))
+
+(defun wg-all-workgroups-stashed-wconfigs-buf-uids (&optional session)
   "Return a new list of all unique buf uids in SESSION's `workgroup-list'.
 SESSION nil defaults to `wg-current-session'."
   (reduce 'wg-string-list-union
           (wg-session-workgroup-list (or session (wg-current-session)))
-          :key 'wg-workgroup-base-wconfig-buf-uids))
+          :key 'wg-workgroup-stashed-wconfigs-buf-uids))
 
 (defun wg-session-all-extant-buf-uids (&optional session)
   "Return a new list of all unique buf uids in SESSION.
@@ -2647,17 +2687,31 @@ BUFFER-LIST nil defaults to `buffer-list'."
   (union (wg-session-all-extant-buf-uids session)
          (wg-buffer-uids buffer-list)))
 
+;; (defun wg-gc-bufs ()
+;;   "Remove all bufs from `wg-buf-list' with uids not
+;; present in `wg-all-extant-buf-uids'."
+;;   (let ((base-wconfig-buf-uids (wg-all-workgroups-stashed-wconfigs-buf-uids))
+;;         (all-buf-uids (wg-all-extant-buf-uids)))
+;;     (wg-asetf (wg-buf-list)
+;;               (remove-if (lambda (buf)
+;;                            (let ((uid (wg-buf-uid buf))
+;;                                  (gc (wg-buf-gc buf)))
+;;                              (unless (or (eq gc 'never)
+;;                                          (member uid base-wconfig-buf-uids))
+;;                                (or gc (not (member uid all-buf-uids))))))
+;;                          it))))
+
 (defun wg-gc-bufs ()
   "Remove all bufs from `wg-buf-list' with uids not
 present in `wg-all-extant-buf-uids'."
-  (let ((base-wconfig-buf-uids (wg-all-workgroup-base-wconfig-buf-uids))
+  (let ((stashed-wconfigs-buf-uids (wg-all-workgroups-stashed-wconfigs-buf-uids))
         (all-buf-uids (wg-all-extant-buf-uids)))
     (wg-asetf (wg-buf-list)
               (remove-if (lambda (buf)
                            (let ((uid (wg-buf-uid buf))
                                  (gc (wg-buf-gc buf)))
                              (unless (or (eq gc 'never)
-                                         (member uid base-wconfig-buf-uids))
+                                         (member uid stashed-wconfigs-buf-uids))
                                (or gc (not (member uid all-buf-uids))))))
                          it))))
 
@@ -2721,13 +2775,21 @@ Query to overwrite if a workgroup with the same name exists."
         (error "Cancelled"))))
   (wg-add-workgroup workgroup))
 
+;; (defun wg-make-and-add-workgroup (name &optional blank)
+;;   "Create a workgroup named NAME and add it with `wg-check-and-add-workgroup'."
+;;   (wg-check-and-add-workgroup
+;;    (wg-make-workgroup
+;;     :name name
+;;     :base-wconfig (if blank (wg-make-blank-wconfig)
+;;                     (wg-frame-to-wconfig)))))
+
 (defun wg-make-and-add-workgroup (name &optional blank)
   "Create a workgroup named NAME and add it with `wg-check-and-add-workgroup'."
   (wg-check-and-add-workgroup
    (wg-make-workgroup
     :name name
-    :base-wconfig (if blank (wg-make-blank-wconfig)
-                    (wg-frame-to-wconfig)))))
+    :saved-wconfig (if blank (wg-make-blank-wconfig)
+                     (wg-frame-to-wconfig)))))
 
 (defun wg-get-workgroup-create (workgroup)
   "Return the workgroup specified by WORKGROUP, creating a new one if needed.
@@ -3345,6 +3407,7 @@ safe -- don't mutate them."
       (:cur (wg-workgroup-name workgroup)) "  "
       (wg-workgroup-list-display))))
 
+;; FIXME: nix this
 (defun wg-kill-ring-save-base-wconfig (workgroup)
   "Save WORKGROUP's base wconfig to the kill ring."
   (interactive (list nil))
@@ -3419,6 +3482,7 @@ ring, starting at the front."
 
 ;;; workgroup updating and reverting commands
 
+;; FIXME: nix this
 (defun wg-update-workgroup (workgroup)
   "Set WORKGROUP's base wconfig to its working-wconfig in `selected-frame'."
   (interactive (list nil))
@@ -3430,6 +3494,7 @@ ring, starting at the front."
       (:cmd "Updated: ")
       (:cur (wg-workgroup-name workgroup)))))
 
+;; FIXME: nix this
 (defun wg-revert-workgroup (workgroup)
   "Set WORKGROUP's working-wconfig to its base wconfig in `selected-frame'."
   (interactive (list nil))
@@ -3735,9 +3800,22 @@ Workgroups session object, etc."
 
 ;;; file commands
 
+(defun wg-save-all-workgroup-working-wconfigs ()
+  "FIXME: docstring this"
+  (dolist (workgroup (wg-workgroup-list))
+    (setf (wg-workgroup-saved-wconfig workgroup)
+          (wg-workgroup-working-wconfig workgroup))))
+
+;; (defun wg-perform-session-maintenance ()
+;;   "Perform various maintenance operations on the current Workgroups session."
+;;   (wg-update-current-workgroup-working-wconfig)
+;;   (wg-gc-bufs)
+;;   (wg-gc-buf-uids)
+;;   (wg-update-buf-list))
+
 (defun wg-perform-session-maintenance ()
   "Perform various maintenance operations on the current Workgroups session."
-  (wg-update-current-workgroup-working-wconfig)
+  (wg-save-all-workgroup-working-wconfigs)
   (wg-gc-bufs)
   (wg-gc-buf-uids)
   (wg-update-buf-list))
@@ -3751,7 +3829,7 @@ confirmation before overwriting an existing file.  Interactively,
 confirmation is required unless you supply a prefix argument.
 
 Think of it as `write-file' for Workgroups sessions."
-  (interactive (list (read-file-name "FSave session as: ")
+  (interactive (list (read-file-name "Save session as: ")
                      (not current-prefix-arg)))
   (when (and confirm (file-exists-p filename))
     (unless (y-or-n-p (format "File `%s' exists; overwrite? " filename))
