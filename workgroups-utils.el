@@ -173,6 +173,23 @@ into a var, like so: (a (b c) . rest)
 
 
 
+;;; boolean operators
+
+(defmacro wg-eager-or (&rest conditions)
+  "Evaluate all CONDITIONS.  Return the first non-nil return value."
+  (let ((syms (mapcar (lambda (x) (gensym)) conditions)))
+    `(let ,(mapcar* 'list syms conditions)
+       (or ,@syms))))
+
+(defmacro wg-eager-and (&rest conditions)
+  "Evaluate all conditions.  If any return nil, return nil.
+Otherwise return the return value of the last condition."
+  (let ((syms (mapcar (lambda (x) (gensym)) conditions)))
+    `(let ,(mapcar* 'list syms conditions)
+       (and ,@syms))))
+
+
+
 ;;; numbers
 
 (defun wg-step-to (n m step)
