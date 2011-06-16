@@ -211,23 +211,17 @@ Similar to `org-id-int-to-b36'."
 
 ;;; lists
 
-(defmacro wg-removef-p (object place)
-  "If OBJECT is a `member' of PLACE, remove it from PLACE and return t.
-Otherwise return nil."
-  (wg-with-gensyms (obj)
-    `(let ((,obj ,object))
-       (when (member ,obj ,place)
-         (setf ,place (remove ,obj ,place))
-         t))))
+(defmacro wg-removef-p (item seq-place &rest keys)
+  "If ITEM is a `member*' of SEQ-PLACE, remove it from SEQ-PLACE and return t.
+Otherwise return nil.  KEYS can be any keywords accepted by `remove*'."
+  `(> (length ,seq-place)
+      (length (setf ,seq-place (remove* ,item ,seq-place ,@keys)))))
 
-(defmacro wg-pushnew-p (object place)
-  "If OBJECT is not a `member' of PLACE, push it to PLACE and return t.
-Otherwise return nil."
-  (wg-with-gensyms (obj)
-    `(let ((,obj ,object))
-       (unless (member ,obj ,place)
-         (push ,obj ,place)
-         t))))
+(defmacro wg-pushnew-p (item seq-place &rest keys)
+  "If ITEM is not a `member' of SEQ-PLACE, push it to SEQ-PLACE and return t.
+Otherwise return nil.  KEYS can be any keyword args accepted by `pushnew'."
+  `(< (length ,seq-place)
+      (length (pushnew ,item ,seq-place ,@keys))))
 
 (defun wg-last1 (list)
   "Return the last element of LIST."
