@@ -126,6 +126,11 @@ it should be made here."
 ;; (as above), 'confirm-auto (as above, but overridable), or 'ask (always ask)
 ;; [10:30]"
 
+;; FIXME: add autosave, and an autosave timer.  Autosaves should not save over
+;; the currently visited file.  And if there's an autosave file newer than the
+;; visited file, it should ask the user if they want to load the autosave.  Can
+;; this be piggybacked on Emacs' existing autosave?
+
 (defcustom wg-default-session-file
   (concat user-emacs-directory "workgroups-session")
   "FIXME: docstring this"
@@ -332,7 +337,7 @@ say, irc buffers where `point-max' is constantly increasing."
   :type 'boolean
   :group 'workgroups)
 
-(defcustom wg-restore-dedicated t
+(defcustom wg-restore-window-dedicated-p t
   "Non-nil means restore `window-dedicated-p' on workgroup restore."
   :type 'boolean
   :group 'workgroups)
@@ -1370,6 +1375,26 @@ BUFFER or `wg-default-buffer' is visible in the only window."
     (wg-frame-to-wconfig)))
 
 
+;; FIXME: figure out whether to keep this
+(defvar wg-current-wconfig-internal nil
+  "Binding this to a wconfig causes `wg-current-wconfig' to
+return that wconfig, rather than `wg-frame-to-wconfig'.")
+
+(defmacro wg-with-current-wconfig (wconfig &rest body)
+  "Eval BODY with WCONFIG current."
+  (declare (indent 1))
+  `(let ((wg-current-wconfig-internal ,wconfig)) ,@body))
+
+;; FIXME: figure out whether to keep this
+(defun wg-current-wconfig ()
+  "Return the current wconfig.
+If `wg-current-wconfig' is non-nil, return it.  Otherwise return
+`wg-frame-to-wconfig'."
+  (or wg-current-wconfig-internal (wg-frame-to-wconfig)))
+
+
+
+
 
 ;;; win/wtree/wconfig utils
 
@@ -1843,25 +1868,42 @@ If BUF's file doesn't exist, call `wg-restore-default-buffer'"
 ;;         (if wg-restore-margins (wg-win-margins win)
 ;;           '(nil . nil))
 ;;       (set-window-margins selected left-width right-width))
-;;     (when wg-restore-dedicated
+;;     (when wg-restore-window-dedicated-p
 ;;       (set-window-dedicated-p selected (wg-win-dedicated win)))))
 
-;; FIXME: restoring `window-dedicated-p' after an improper buf restoration
-;; leaves the window dedicated to the wrong buffer
+;; ;; FIXME: restoring `window-dedicated-p' after an improper buf restoration
+;; ;; leaves the window dedicated to the wrong buffer
+;; (defun wg-restore-window (win)
+;;   "Restore WIN in `selected-window'."
+;;   (let ((selected (selected-window)))
+;;     (wg-if-let (buf (wg-find-buf-by-uid (wg-win-buf-uid win)))
+;;         (when(wg-restore-buffer buf)
+;;           (wg-restore-window-positions win selected))
+;;       (wg-restore-default-buffer))
+;;     (when (wg-win-selected win)
+;;       (setq wg-window-tree-selected-window selected))
+;;     (when (and wg-restore-minibuffer-scroll-window
+;;                (wg-win-minibuffer-scroll win))
+;;       (setq minibuffer-scroll-window selected))
+;;     (when wg-restore-window-dedicated-p
+;;       (set-window-dedicated-p selected (wg-win-dedicated win)))))
+
 (defun wg-restore-window (win)
   "Restore WIN in `selected-window'."
-  (let ((selected (selected-window)))
+  (let ((selwin (selected-window))
+        (buffer-restored-p))
     (wg-if-let (buf (wg-find-buf-by-uid (wg-win-buf-uid win)))
-        (when (wg-restore-buffer buf)
-          (wg-restore-window-positions win selected))
+        (when (setq buffer-restored-p (wg-restore-buffer buf))
+          (wg-restore-window-positions win selwin))
       (wg-restore-default-buffer))
+    (when buffer-restored-p ;; settings dependent on correct buffer go here
+      (when wg-restore-window-dedicated-p
+        (set-window-dedicated-p selwin (wg-win-dedicated win))))
     (when (wg-win-selected win)
-      (setq wg-window-tree-selected-window selected))
+      (setq wg-window-tree-selected-window selwin))
     (when (and wg-restore-minibuffer-scroll-window
                (wg-win-minibuffer-scroll win))
-      (setq minibuffer-scroll-window selected))
-    (when wg-restore-dedicated
-      (set-window-dedicated-p selected (wg-win-dedicated win)))))
+      (setq minibuffer-scroll-window selwin))))
 
 (defun wg-reset-window-tree ()
   "Delete all but one window in `selected-frame', and reset
@@ -2086,14 +2128,14 @@ WORKGROUP should be a workgroup or nil."
   (set-frame-parameter frame 'wg-previous-workgroup-uid
                        (when workgroup (wg-workgroup-uid workgroup))))
 
-(defun wg-current-workgroup-p (workgroup &optional noerror frame)
+(defun wg-current-workgroup-p (workgroup &optional frame)
   "Return t when WORKGROUP is the current workgroup, nil otherwise."
-  (wg-awhen (wg-current-workgroup noerror frame)
+  (wg-awhen (wg-current-workgroup t frame)
     (eq workgroup it)))
 
-(defun wg-previous-workgroup-p (workgroup &optional noerror frame)
+(defun wg-previous-workgroup-p (workgroup &optional frame)
   "Return t when WORKGROUP is the previous workgroup, nil otherwise."
-  (wg-awhen (wg-previous-workgroup noerror frame)
+  (wg-awhen (wg-previous-workgroup t frame)
     (eq workgroup it)))
 
 (defmacro wg-with-current-workgroup (workgroup &rest body)
@@ -2443,21 +2485,37 @@ current command."
       (setf (wg-workgroup-state-undo-list state) undo-list)
       (setf (wg-workgroup-state-undo-pointer state) 0))))
 
+;; (defun wg-workgroup-working-wconfig (workgroup)
+;;   "Return WORKGROUP's working-wconfig, which is its current undo state.
+;; If WORKGROUP is the current workgroup in `selected-frame', set
+;; its working wconfig to `wg-frame-to-wconfig' and return the
+;; updated wconfig.  Otherwise, return the current undo state
+;; unupdated."
+;;   (if (wg-current-workgroup-p workgroup)
+;;       (wg-set-workgroup-working-wconfig workgroup (wg-frame-to-wconfig))
+;;     (wg-with-undo workgroup (state undo-pointer undo-list)
+;;       (nth undo-pointer undo-list))))
+
 (defun wg-workgroup-working-wconfig (workgroup)
   "Return WORKGROUP's working-wconfig, which is its current undo state.
 If WORKGROUP is the current workgroup in `selected-frame', set
-its working wconfig to `wg-frame-to-wconfig' and return the
+its working wconfig to `wg-current-wconfig' and return the
 updated wconfig.  Otherwise, return the current undo state
 unupdated."
-  (if (wg-current-workgroup-p workgroup t)
-      (wg-set-workgroup-working-wconfig workgroup (wg-frame-to-wconfig))
+  (if (wg-current-workgroup-p workgroup)
+      (wg-set-workgroup-working-wconfig workgroup (wg-current-wconfig))
     (wg-with-undo workgroup (state undo-pointer undo-list)
       (nth undo-pointer undo-list))))
 
+;; (defun wg-update-current-workgroup-working-wconfig ()
+;;   "Update WORKGROUP's working-wconfig with `wg-frame-to-wconfig'."
+;;   (wg-awhen (wg-current-workgroup t)
+;;     (wg-set-workgroup-working-wconfig it (wg-frame-to-wconfig))))
+
 (defun wg-update-current-workgroup-working-wconfig ()
-  "Update WORKGROUP's working-wconfig with `wg-frame-to-wconfig'."
+  "Update WORKGROUP's working-wconfig with `wg-current-wconfig'."
   (wg-awhen (wg-current-workgroup t)
-    (wg-set-workgroup-working-wconfig it (wg-frame-to-wconfig))))
+    (wg-set-workgroup-working-wconfig it (wg-current-wconfig))))
 
 (defun wg-restore-wconfig-undoably (wconfig &optional noundo)
   "Restore WCONFIG in `selected-frame', saving undo information."
@@ -2472,9 +2530,27 @@ WORKGROUP is current."
   (wg-with-undo workgroup (state undo-pointer undo-list)
     (let ((new-pointer (+ undo-pointer increment)))
       (when (wg-within new-pointer 0 (length undo-list))
-        (when (wg-current-workgroup-p workgroup t)
+        (when (wg-current-workgroup-p workgroup)
           (wg-restore-wconfig-undoably (nth new-pointer undo-list) t))
         (setf (wg-workgroup-state-undo-pointer state) new-pointer)))))
+
+;; (defun wg-undoify-window-configuration-change ()
+;;   "Conditionally `wg-add-wconfig-to-undo-list'.
+;; Added to `post-command-hook'."
+;;   (when (and
+;;          ;; When the window config has changed,
+;;          wg-window-configuration-changed
+;;          ;; and undoification is still on for the current command
+;;          wg-undoify-window-configuration-change
+;;          ;; and the change didn't occur while the minibuffer is active,
+;;          (zerop (minibuffer-depth)))
+;;     ;; and there's a current workgroup,
+;;     (wg-when-let ((wg (wg-current-workgroup t)))
+;;       ;; add the current wconfig to that workgroup's undo list:
+;;       (wg-add-wconfig-to-undo-list wg (wg-frame-to-wconfig))))
+;;   ;; Reset both flags no matter what:
+;;   (setq wg-window-configuration-changed nil
+;;         wg-undoify-window-configuration-change t))
 
 (defun wg-undoify-window-configuration-change ()
   "Conditionally `wg-add-wconfig-to-undo-list'.
@@ -2489,7 +2565,7 @@ Added to `post-command-hook'."
     ;; and there's a current workgroup,
     (wg-when-let ((wg (wg-current-workgroup t)))
       ;; add the current wconfig to that workgroup's undo list:
-      (wg-add-wconfig-to-undo-list wg (wg-frame-to-wconfig))))
+      (wg-add-wconfig-to-undo-list wg (wg-current-wconfig))))
   ;; Reset both flags no matter what:
   (setq wg-window-configuration-changed nil
         wg-undoify-window-configuration-change t))
@@ -2710,9 +2786,9 @@ Also delete all references to it by `wg-workgroup-state-table',
 `wg-current-workgroup' and `wg-previous-workgroup'."
   (dolist (frame (frame-list))
     (remhash (wg-workgroup-uid workgroup) (wg-workgroup-state-table frame))
-    (when (wg-current-workgroup-p workgroup t frame)
+    (when (wg-current-workgroup-p workgroup frame)
       (wg-set-current-workgroup nil frame))
-    (when (wg-previous-workgroup-p workgroup t frame)
+    (when (wg-previous-workgroup-p workgroup frame)
       (wg-set-previous-workgroup nil frame)))
   (setf (wg-workgroup-list) (remove workgroup (wg-workgroup-list-or-error)))
   (setf (wg-session-modified (wg-current-session)) t)
@@ -2750,13 +2826,21 @@ Query to overwrite if a workgroup with the same name exists."
 ;;     :base-wconfig (if blank (wg-make-blank-wconfig)
 ;;                     (wg-frame-to-wconfig)))))
 
+;; (defun wg-make-and-add-workgroup (name &optional blank)
+;;   "Create a workgroup named NAME and add it with `wg-check-and-add-workgroup'."
+;;   (wg-check-and-add-workgroup
+;;    (wg-make-workgroup
+;;     :name name
+;;     :base-wconfig (if blank (wg-make-blank-wconfig)
+;;                     (wg-frame-to-wconfig)))))
+
 (defun wg-make-and-add-workgroup (name &optional blank)
   "Create a workgroup named NAME and add it with `wg-check-and-add-workgroup'."
   (wg-check-and-add-workgroup
    (wg-make-workgroup
     :name name
     :base-wconfig (if blank (wg-make-blank-wconfig)
-                    (wg-frame-to-wconfig)))))
+                    (wg-current-wconfig)))))
 
 (defun wg-get-workgroup-create (workgroup)
   "Return the workgroup specified by WORKGROUP, creating a new one if needed.
@@ -2882,8 +2966,8 @@ Also save the msg to `wg-last-message'."
     (wg-element-display
      workgroup
      (format "%d: %s" index (wg-workgroup-name workgroup))
-     (lambda (wg) (wg-current-workgroup-p wg t))
-     (lambda (wg) (wg-previous-workgroup-p wg t)))))
+     (lambda (wg) (wg-current-workgroup-p wg))
+     (lambda (wg) (wg-previous-workgroup-p wg)))))
 
 (defun wg-buffer-display (buffer index)
   "Return display string for BUFFER. INDEX is ignored."
@@ -3439,7 +3523,7 @@ ring, starting at the front."
     (dolist (w (wg-workgroup-list-or-error))
       (unless (eq w workgroup)
         (wg-delete-workgroup w)))
-    (unless (wg-current-workgroup-p workgroup t)
+    (unless (wg-current-workgroup-p workgroup)
       (wg-switch-to-workgroup workgroup))
     (wg-fontified-message
       (:cmd "Deleted: ")
@@ -3462,19 +3546,6 @@ ring, starting at the front."
 ;;       (:cmd "Updated: ")
 ;;       (:cur (wg-workgroup-name workgroup)))))
 
-;; FIXME: nix this
-(defun wg-revert-workgroup (&optional workgroup)
-  "Set WORKGROUP's working-wconfig to its base wconfig in `selected-frame'."
-  (interactive)
-  (let* ((workgroup (wg-get-workgroup workgroup))
-         (base-wconfig (wg-workgroup-base-wconfig workgroup)))
-    (if (wg-current-workgroup-p workgroup t)
-        (wg-restore-wconfig-undoably base-wconfig)
-      (wg-add-wconfig-to-undo-list workgroup base-wconfig))
-    (wg-fontified-message
-      (:cmd "Reverted: ")
-      (:cur (wg-workgroup-name workgroup)))))
-
 ;; (defun wg-update-all-workgroups ()
 ;;   "Update all workgroups' base wconfigs.
 ;; Worgroups are updated with their working-wconfigs in the
@@ -3484,6 +3555,18 @@ ring, starting at the front."
 ;;   (wg-fontified-message
 ;;     (:cmd "Updated: ")
 ;;     (:msg "All")))
+
+(defun wg-revert-workgroup (&optional workgroup)
+  "Restore WORKGROUP's wconfig to its state at the last save."
+  (interactive)
+  (let* ((workgroup (wg-get-workgroup workgroup))
+         (base-wconfig (wg-workgroup-base-wconfig workgroup)))
+    (if (wg-current-workgroup-p workgroup)
+        (wg-restore-wconfig-undoably base-wconfig)
+      (wg-add-wconfig-to-undo-list workgroup base-wconfig))
+    (wg-fontified-message
+      (:cmd "Reverted: ")
+      (:cur (wg-workgroup-name workgroup)))))
 
 (defun wg-revert-all-workgroups ()
   "Revert all workgroups to their base wconfigs.
@@ -3499,12 +3582,24 @@ reverted."
 
 ;;; saved wconfig commands
 
+;; (defun wg-save-wconfig ()
+;;   "FIXME: docstring this"
+;;   (interactive)
+;;   (let* ((workgroup (wg-current-workgroup))
+;;          (name (read-string "Name: "))
+;;          (wconfig (wg-frame-to-wconfig)))
+;;     (setf (wg-wconfig-name wconfig) name)
+;;     (wg-workgroup-save-wconfig workgroup wconfig)
+;;     (wg-fontified-message
+;;       (:cmd "Saved: ")
+;;       (:cur name))))
+
 (defun wg-save-wconfig ()
   "FIXME: docstring this"
   (interactive)
   (let* ((workgroup (wg-current-workgroup))
          (name (read-string "Name: "))
-         (wconfig (wg-frame-to-wconfig)))
+         (wconfig (wg-current-wconfig)))
     (setf (wg-wconfig-name wconfig) name)
     (wg-workgroup-save-wconfig workgroup wconfig)
     (wg-fontified-message
@@ -3878,6 +3973,20 @@ Workgroups session object, etc."
   (wg-gc-buf-uids)
   (wg-update-buf-list))
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; FIXME: The kill Emacs hooks run after `save-buffers-kill-emacs's process-list
+;; check possibly calls `list-processes', screwing up the window config right
+;; before it gets saved.
+;;
+;; Maybe put around-advice on `save-buffers-kill-emacs' that let-binds a global
+;; var to the current wconfig, then put a function on `kill-emacs-hook' that
+;; `wg-write-session-file's a session with that wconfig.
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
 (defun wg-write-session-file (filename &optional confirm)
   "Write the current session into file FILENAME.
 This makes the session visit that file, and marks it as not modified.
@@ -4110,6 +4219,8 @@ in which case call `wg-previous-buffer-list-filter'."
 
 ;;; advice
 
+;; buffer auto-association advice
+
 (defun wg-auto-associate-buffer-helper (workgroup buffer assoc)
   "Associate BUFFER with WORKGROUP based on ASSOC.
 See `wg-buffer-auto-association' for allowable values of ASSOC."
@@ -4140,23 +4251,53 @@ Frame defaults to `selected-frame'.  See `wg-buffer-auto-association'."
    (ad-get-arg 1)
    (window-frame (or (ad-get-arg 0) (selected-window)))))
 
+
+;; save-buffers-kill-emacs advice
+
+(defadvice save-buffers-kill-emacs (around wg-freeze-wconfig)
+  "FIXME: docstring this"
+  (wg-with-current-wconfig (wg-frame-to-wconfig)
+    ad-do-it))
+
+
 (defun wg-enable-all-advice ()
   "Enable and activate all of Workgroups' advice."
+
+  ;; switch-to-buffer
   (ad-define-subr-args
    'switch-to-buffer '(buffer-or-name &optional norecord))
   (ad-enable-advice 'switch-to-buffer 'after 'wg-auto-associate-buffer)
   (ad-activate 'switch-to-buffer)
+
+  ;; set-window-buffer
   (ad-define-subr-args
    'set-window-buffer '(window buffer-or-name &optional keep-margins))
   (ad-enable-advice 'set-window-buffer 'after 'wg-auto-associate-buffer)
-  (ad-activate 'set-window-buffer))
+  (ad-activate 'set-window-buffer)
+
+  ;; save-buffers-kill-emacs
+  (ad-enable-advice 'save-buffers-kill-emacs 'around 'wg-freeze-wconfig)
+  (ad-activate 'save-buffers-kill-emacs)
+
+  )
+
 
 (defun wg-disable-all-advice ()
   "Disable and deactivate all of Workgroups' advice."
+
+  ;; switch-to-buffer
   (ad-disable-advice 'switch-to-buffer 'after 'wg-auto-associate-buffer)
   (ad-deactivate 'switch-to-buffer)
+
+  ;; set-window-buffer
   (ad-disable-advice 'set-window-buffer 'after 'wg-auto-associate-buffer)
-  (ad-deactivate 'set-window-buffer))
+  (ad-deactivate 'set-window-buffer)
+
+  ;; save-buffers-kill-emacs
+  (ad-disable-advice 'save-buffers-kill-emacs 'around 'wg-freeze-wconfig)
+  (ad-deactivate 'save-buffers-kill-emacs)
+
+  )
 
 
 

@@ -332,6 +332,11 @@ Keywords supported: :test :key
           for elt = (funcall key elt)
           when (find elt rest :test test :key key) return elt)))
 
+(defun wg-string-list-union (&optional list1 list2)
+  "Return the `union' of LIST1 and LIST2, using `string=' as the test.
+This only exists to get rid of duplicate lambdas in a few reductions."
+  (union list1 list2 :test 'string=))
+
 
 
 ;;; alists
