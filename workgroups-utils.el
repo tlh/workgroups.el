@@ -206,15 +206,23 @@ HI-INCLUSIVE non-nil means the HI bound is inclusive."
 
 (defun wg-int-to-b36-one-digit (i)
   "Return a character in 0..9 or A..Z from I, and integer 0<=I<32.
-Similar to `org-id-int-to-b36-one-digit'."
+Cribbed from `org-id-int-to-b36-one-digit'."
   (cond ((not (wg-within i 0 36))
          (error "%s out of range" i))
         ((< i 10) (+ ?0 i))
         ((< i 36) (+ ?A i -10))))
 
+(defun wg-b36-to-int-one-digit (i)
+  "Turn a character 0..9, A..Z, a..z into a number 0..61.
+The input I may be a character, or a single-letter string.
+Cribbed from `org-id-b36-to-int-one-digit'."
+  (and (stringp i) (setq i (string-to-char i)))
+  (cond ((and (>= i ?0) (<= i ?9)) (- i ?0))
+        ((and (>= i ?A) (<= i ?Z)) (+ (- i ?A) 10))
+        (t (error "Invalid b36 character"))))
+
 (defun wg-int-to-b36 (i &optional length)
-  "Return a base 36 string from I.
-Similar to `org-id-int-to-b36'."
+  "Return a base 36 string from I."
   (let ((base 36) b36)
     (flet ((add-digit () (push (wg-int-to-b36-one-digit (mod i base)) b36)
                       (setq i (/ i base))))
@@ -223,6 +231,16 @@ Similar to `org-id-int-to-b36'."
       (setq b36 (map 'string 'identity b36))
       (if (not length) b36
         (concat (make-string (max 0 (- length (length b36))) ?0) b36)))))
+
+(defun wg-b36-to-int (str)
+  "Convert STR, a base-36 string, into the corresponding integer.
+Cribbed from `org-id-b36-to-int'."
+  (let ((result 0))
+    (mapc (lambda (i)
+            (setq result (+ (* result 36)
+                            (wg-b36-to-int-one-digit i))))
+          str)
+    result))
 
 
 

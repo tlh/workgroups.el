@@ -1007,12 +1007,19 @@ This needs to be a macro to allow specification of a setf'able place."
 
 
 
-;;; uid construction
+;;; uid utils
 
 (defun wg-time-to-b36 (&optional time)
   "Convert `current-time' into a b36 string."
   (apply 'concat (wg-docar (time (or time (current-time)))
                    (wg-int-to-b36 time 4))))
+
+(defun wg-b36-to-time (b36)
+  "Parse the time from UID."
+  (loop for i from 0 to 8 by 4
+        collect (wg-b36-to-int (subseq b36 i (+ i 4)))))
+
+(defalias 'wg-uid-to-time 'wg-b36-to-time)
 
 (defun wg-generate-uid (&optional prefix)
   "Return a new uid, optionally prefixed by PREFIX."
@@ -1021,6 +1028,9 @@ This needs to be a macro to allow specification of a setf'able place."
           "-"
           (wg-int-to-b36 string-chars-consed)))
 
+(defun wg-uid-to-seconds (uid)
+  "FIXME: docstring this"
+  (time-to-seconds (wg-uid-to-time uid)))
 
 
 ;;; structure types
@@ -1054,7 +1064,7 @@ This needs to be a macro to allow specification of a setf'able place."
   (wlist))
 
 (wg-defstruct wg wconfig
-  (uid)
+  (uid (wg-generate-uid))
   (name)
   (parameters)
   (left)
@@ -1864,23 +1874,6 @@ If BUF's file doesn't exist, call `wg-restore-default-buffer'"
 ;;     (when wg-restore-window-dedicated-p
 ;;       (set-window-dedicated-p selected (wg-win-dedicated win)))))
 
-;; ;; FIXME: restoring `window-dedicated-p' after an improper buf restoration
-;; ;; leaves the window dedicated to the wrong buffer
-;; (defun wg-restore-window (win)
-;;   "Restore WIN in `selected-window'."
-;;   (let ((selected (selected-window)))
-;;     (wg-if-let (buf (wg-find-buf-by-uid (wg-win-buf-uid win)))
-;;         (when(wg-restore-buffer buf)
-;;           (wg-restore-window-positions win selected))
-;;       (wg-restore-default-buffer))
-;;     (when (wg-win-selected win)
-;;       (setq wg-window-tree-selected-window selected))
-;;     (when (and wg-restore-minibuffer-scroll-window
-;;                (wg-win-minibuffer-scroll win))
-;;       (setq minibuffer-scroll-window selected))
-;;     (when wg-restore-window-dedicated-p
-;;       (set-window-dedicated-p selected (wg-win-dedicated win)))))
-
 (defun wg-restore-window (win)
   "Restore WIN in `selected-window'."
   (let ((selwin (selected-window))
@@ -2375,6 +2368,7 @@ This returns all buffers under \"~/\" that are also in `emacs-lisp-mode'."
 
 ;; buffer-list-filter context
 
+;; FIXME: lookup of workgroup-local and session-local vars should be generalized
 (defun wg-buffer-list-filter-order (workgroup command)
   "Return WORKGROUP's buffer-list-filter order for COMMAND, or a default."
   (let ((bso (wg-workgroup-parameter workgroup 'buffer-list-filter-order-alist)))
@@ -2478,13 +2472,13 @@ current command."
       (setf (wg-workgroup-state-undo-list state) undo-list)
       (setf (wg-workgroup-state-undo-pointer state) 0))))
 
-(defun wg-workgroup-working-wconfig (workgroup)
+(defun wg-workgroup-working-wconfig (workgroup &optional noupdate)
   "Return WORKGROUP's working-wconfig, which is its current undo state.
 If WORKGROUP is the current workgroup in `selected-frame', set
 its working wconfig to `wg-current-wconfig' and return the
 updated wconfig.  Otherwise, return the current undo state
 unupdated."
-  (if (wg-current-workgroup-p workgroup)
+  (if (and (not noupdate) (wg-current-workgroup-p workgroup))
       (wg-set-workgroup-working-wconfig workgroup (wg-current-wconfig))
     (wg-with-undo workgroup (state undo-pointer undo-list)
       (nth undo-pointer undo-list))))
@@ -2493,12 +2487,6 @@ unupdated."
   "Update WORKGROUP's working-wconfig with `wg-current-wconfig'."
   (wg-awhen (wg-current-workgroup t)
     (wg-set-workgroup-working-wconfig it (wg-current-wconfig))))
-
-(defun wg-update-all-base-wconfigs ()
-  "Set all workgroups' base-wconfigs to their current working-wconfigs."
-  (dolist (workgroup (wg-workgroup-list))
-    (setf (wg-workgroup-base-wconfig workgroup)
-          (wg-workgroup-working-wconfig workgroup))))
 
 (defun wg-restore-wconfig-undoably (wconfig &optional noundo)
   "Restore WCONFIG in `selected-frame', saving undo information."
@@ -2535,6 +2523,9 @@ Added to `post-command-hook'."
   (setq wg-window-configuration-changed nil
         wg-undoify-window-configuration-change t))
 
+
+;; FIXME: replace `wg-commands-that-alter-window-configs' with advice on every
+;; window-config altering function.
 (defun wg-update-working-wconfig-before-command ()
   "Update the current workgroup's working-wconfig before
 `wg-commands-that-alter-window-configs'. Added to
@@ -2572,6 +2563,53 @@ Added to `post-command-hook'."
  'help-with-tutorial
  'jump-to-register
  'erc-complete-word)
+
+
+
+;;; base wconfig updating
+
+(defun wg-set-workgroup-base-wconfig (workgroup wconfig)
+  "Set WORKGROUP's base wconfig to WCONFIG, and set WORKGROUP's modified flag."
+  (setf (wg-workgroup-base-wconfig workgroup) wconfig
+        (wg-workgroup-modified workgroup) t))
+
+(defun wg-workgroup-most-recent-working-wconfig (workgroup)
+  "Return WORKGROUP's most recently created working wconfig by frame."
+  (reduce
+   (lambda (wconfig1 &optional wconfig2)
+     (if (or (not wconfig2)
+             (>= (wg-uid-to-seconds (wg-wconfig-uid wconfig1))
+                 (wg-uid-to-seconds (wg-wconfig-uid wconfig2))))
+         wconfig1
+       wconfig2))
+   (frame-list)
+   :key (lambda (frame)
+          (with-selected-frame frame
+            (wg-workgroup-working-wconfig workgroup t)))
+   :initial-value (wg-workgroup-base-wconfig workgroup)))
+
+(defun wg-workgroup-update-base-wconfig (workgroup)
+  "Update WORKGROUP's base wconfig with
+`wg-workgroup-most-recent-working-wconfig'."
+  (wg-set-workgroup-base-wconfig
+   workgroup (wg-workgroup-most-recent-working-wconfig workgroup)))
+
+(defun wg-update-all-base-wconfigs ()
+  "Update every workgroup's base wconfig with
+`wg-workgroup-update-base-wconfig'."
+  (mapc 'wg-workgroup-update-base-wconfig (wg-workgroup-list)))
+
+(defun wg-update-base-wconfigs-from-frame-if-necessary (frame)
+  "Added to `delete-frame-hook'.  Conditionally update each
+workgroup's base wconfig with its working wconfig in FRAME.  Only
+update if FRAME's working wconfig is the most recently created of
+the working wconfigs and the base wconfig."
+  (dolist (workgroup (wg-workgroup-list))
+    (let ((wconfig (lambda (frame)
+                     (with-selected-frame frame
+                       (wg-workgroup-working-wconfig workgroup t)))))
+      (when (eq wconfig (wg-workgroup-most-recent-working-wconfig workgroup))
+        (wg-set-workgroup-base-wconfig workgroup wconfig)))))
 
 
 
@@ -4448,6 +4486,7 @@ Called when `workgroups-mode' is turned off."
   (wg-add-or-remove-hooks
    remove
    'kill-emacs-query-functions 'wg-save-session-on-emacs-exit
+   'delete-frame-hook 'wg-update-base-wconfigs-from-frame-if-necessary
    'window-configuration-change-hook 'wg-flag-window-configuration-changed
    'pre-command-hook 'wg-update-working-wconfig-before-command
    'post-command-hook 'wg-undoify-window-configuration-change
