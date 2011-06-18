@@ -337,9 +337,8 @@ say, irc buffers where `point-max' is constantly increasing."
 
 ;; wconfig undo/redo customization
 
-(defcustom wg-wconfig-undo-list-max 30
-  "Number of past window configs for undo to retain.
-A value of nil means no limit."
+(defcustom wg-wconfig-undo-list-max 20
+  "Number of past window configs to retain for undo."
   :type 'integer
   :group 'workgroups)
 
@@ -2517,21 +2516,20 @@ current command."
 
 (defun wg-add-wconfig-to-undo-list (workgroup wconfig)
   "Add WCONFIG to WORKGROUP's undo list, truncating its future if necessary."
-  (wg-with-undo workgroup (state undo-pointer undo-list)
+  (let ((state (wg-get-workgroup-state workgroup)))
     (wg-flag-workgroup-modified workgroup)
-    (let ((undo-list (cons wconfig (nthcdr undo-pointer undo-list))))
-      (when (and wg-wconfig-undo-list-max
-                 (> (length undo-list) wg-wconfig-undo-list-max))
-        (setq undo-list (wg-take undo-list wg-wconfig-undo-list-max)))
-      (setf (wg-workgroup-state-undo-list state) undo-list)
-      (setf (wg-workgroup-state-undo-pointer state) 0))))
+    (push wconfig (wg-workgroup-state-undo-list state))
+    (setf (wg-workgroup-state-undo-pointer state) 0)
+    (wg-awhen (nthcdr wg-wconfig-undo-list-max
+                      (wg-workgroup-state-undo-list state))
+      (setcdr it nil))))
 
 (defun wg-workgroup-working-wconfig (workgroup &optional noupdate)
-  "Return WORKGROUP's working-wconfig, which is its current undo state.
-If WORKGROUP is the current workgroup in `selected-frame', set
-its working wconfig to `wg-current-wconfig' and return the
-updated wconfig.  Otherwise, return the current undo state
-unupdated."
+  "Return WORKGROUP's working-wconfig.
+If WORKGROUP is the current workgroup in `selected-frame', and
+NOUPDATE is nil, set its working wconfig in `selected-frame' to
+`wg-current-wconfig' and return the updated wconfig.  Otherwise
+return WORKGROUP's current undo state."
   (if (and (not noupdate) (wg-current-workgroup-p workgroup))
       (wg-set-workgroup-working-wconfig workgroup (wg-current-wconfig))
     (wg-with-undo workgroup (state undo-pointer undo-list)
