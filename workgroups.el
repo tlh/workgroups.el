@@ -188,14 +188,15 @@ minibuffer is active."
 ;;
 ;; FIXME:
 ;;
-;; Only set `wg-workgroup-base-wconfig' on `wg-write-session-file', and
-;; set it with the most recently changed working-wconfig.  Then, since it's not
-;; overwritten on every call to `wg-workgroup-working-wconfig', its restoration
-;; can be retried after manually recreating buffers that couldn't be restored.
-;; So it takes over the 'incorrect restoration' portion of the base wconfig's
-;; duty.  All that leaves to base wconfigs is that they're a saved wconfig the
-;; user felt was important.  So way not allow more of of them?  A workgroup
-;; could store an unlimited number of saved wconfigs.
+;; Only set `wg-workgroup-base-wconfig' on `wg-write-session-file' or
+;; `delete-frame' and only with the most recently changed working-wconfig.
+;; Then, since it's not overwritten on every call to
+;; `wg-workgroup-working-wconfig', its restoration can be retried after manually
+;; recreating buffers that couldn't be restored.  So it takes over the
+;; 'incorrect restoration' portion of the base wconfig's duty.  All that leaves
+;; to base wconfigs is that they're a saved wconfig the user felt was important.
+;; So why not allow more of of them?  A workgroup could store an unlimited
+;; number of saved wconfigs.
 ;;
 ;; TODO:
 ;;
@@ -304,11 +305,6 @@ workgroup on workgroup restore."
 
 (defcustom wg-restore-margins t
   "Non-nil means restore margin settings on workgroup restore."
-  :type 'boolean
-  :group 'workgroups)
-
-(defcustom wg-restore-minibuffer-scroll-window t
-  "Non-nil means restore `minibuffer-scroll-window' on workgroup restore."
   :type 'boolean
   :group 'workgroups)
 
@@ -805,8 +801,8 @@ window configuration changes triggered by commands called with
 (defvar wg-current-workgroup nil
   "Bound to the current workgroup in `wg-with-buffer-list-filters'.")
 
-(defvar wg-current-buffer-command nil
-  "Bound to the current buffer command in `wg-with-buffer-list-filters'.")
+;; (defvar wg-current-buffer-command nil
+;;   "Bound to the current buffer command in `wg-with-buffer-list-filters'.")
 
 (defvar wg-current-buffer-list-filter-id nil
   "Bound to the current buffer-list-filter symbol in `wg-with-buffer-list-filters'.")
@@ -1029,8 +1025,9 @@ This needs to be a macro to allow specification of a setf'able place."
           (wg-int-to-b36 string-chars-consed)))
 
 (defun wg-uid-to-seconds (uid)
-  "FIXME: docstring this"
-  (time-to-seconds (wg-uid-to-time uid)))
+  "Return the `float-time' parsed from UID with `wg-uid-to-time'."
+  (float-time (wg-uid-to-time uid)))
+
 
 
 ;;; structure types
@@ -1846,50 +1843,26 @@ If BUF's file doesn't exist, call `wg-restore-default-buffer'"
              (t win-point)))
       (when (>= win-start (point-max)) (recenter)))))
 
-;; (defun wg-restore-window (win)
-;;   "Restore WIN in `selected-window'."
-;;   (let ((buf (wg-find-buf-by-uid (wg-win-buf-uid win)))
-;;         (selected (selected-window)))
-;;     (when (wg-restore-buffer buf)
-;;       (wg-restore-window-positions win selected)
-;;       (wg-restore-buffer-mark buf))
-;;     (when (wg-win-selected win)
-;;       (setq wg-window-tree-selected-window selected))
-;;     (when (and wg-restore-minibuffer-scroll-window
-;;                (wg-win-minibuffer-scroll win))
-;;       (setq minibuffer-scroll-window selected))
-;;     (wg-dbind (width cols vtype htype)
-;;         (if wg-restore-scroll-bars (wg-win-scroll-bars win)
-;;           '(nil nil nil nil))
-;;       (set-window-scroll-bars selected width vtype htype))
-;;     (wg-dbind (left-width right-width outside-margins)
-;;         (if wg-restore-fringes (wg-win-fringes win)
-;;           '(nil nil nil))
-;;       (set-window-fringes
-;;        selected left-width right-width outside-margins))
-;;     (wg-dbind (left-width . right-width)
-;;         (if wg-restore-margins (wg-win-margins win)
-;;           '(nil . nil))
-;;       (set-window-margins selected left-width right-width))
-;;     (when wg-restore-window-dedicated-p
-;;       (set-window-dedicated-p selected (wg-win-dedicated win)))))
+;; FIXME: nix these or move them to the vars section
+(defvar wg-incorrectly-restored-bufs nil
+  "FIXME: docstring this")
+
+(defvar wg-record-incorrectly-restored-bufs nil
+  "FIXME: docstring this")
 
 (defun wg-restore-window (win)
   "Restore WIN in `selected-window'."
   (let ((selwin (selected-window))
-        (buffer-restored-p))
-    (wg-if-let (buf (wg-find-buf-by-uid (wg-win-buf-uid win)))
-        (when (setq buffer-restored-p (wg-restore-buffer buf))
-          (wg-restore-window-positions win selwin))
-      (wg-restore-default-buffer))
-    (when buffer-restored-p ;; settings dependent on correct buffer go here
-      (when wg-restore-window-dedicated-p
-        (set-window-dedicated-p selwin (wg-win-dedicated win))))
-    (when (wg-win-selected win)
-      (setq wg-window-tree-selected-window selwin))
-    (when (and wg-restore-minibuffer-scroll-window
-               (wg-win-minibuffer-scroll win))
-      (setq minibuffer-scroll-window selwin))))
+        (buf (wg-find-buf-by-uid (wg-win-buf-uid win))))
+    (cond ((not buf)
+           (wg-restore-default-buffer))
+          ((wg-restore-buffer buf)
+           (wg-restore-window-positions win selwin)
+           (when wg-restore-window-dedicated-p
+             (set-window-dedicated-p selwin (wg-win-dedicated win))))
+          (t (wg-restore-default-buffer)
+             (when wg-record-incorrectly-restored-bufs
+               (pushnew buf wg-incorrectly-restored-bufs))))))
 
 (defun wg-reset-window-tree ()
   "Delete all but one window in `selected-frame', and reset
@@ -1897,6 +1870,16 @@ various parameters of that window in preparation for restoring
 a wtree."
   (delete-other-windows)
   (set-window-dedicated-p nil nil))
+
+;; (defun wg-restore-window-tree-helper (w)
+;;   "Recursion helper for `wg-restore-window-tree'."
+;;   (if (wg-wtree-p w)
+;;       (loop with dir = (wg-wtree-dir w)
+;;             for (win . rest) on (wg-wtree-wlist w)
+;;             do (when rest (split-window nil (wg-w-size win dir) (not dir)))
+;;             do (wg-restore-window-tree-helper win))
+;;     (wg-restore-window w)
+;;     (other-window 1)))
 
 (defun wg-restore-window-tree-helper (w)
   "Recursion helper for `wg-restore-window-tree'."
@@ -1906,7 +1889,20 @@ a wtree."
             do (when rest (split-window nil (wg-w-size win dir) (not dir)))
             do (wg-restore-window-tree-helper win))
     (wg-restore-window w)
+    (when (wg-win-selected w)
+      (setq wg-window-tree-selected-window (selected-window)))
+    (when (wg-win-minibuffer-scroll w)
+      (setq minibuffer-scroll-window (selected-window)))
     (other-window 1)))
+
+;; (defun wg-restore-window-tree (wtree)
+;;   "Restore WTREE in `selected-frame'."
+;;   (let ((window-min-width wg-window-min-width)
+;;         (window-min-height wg-window-min-height)
+;;         (wg-window-tree-selected-window nil))
+;;     (wg-reset-window-tree)
+;;     (wg-restore-window-tree-helper wtree)
+;;     (wg-awhen wg-window-tree-selected-window (select-window it))))
 
 (defun wg-restore-window-tree (wtree)
   "Restore WTREE in `selected-frame'."
@@ -1930,16 +1926,23 @@ a wtree."
   (set-frame-parameter
    nil 'scroll-bar-width (wg-wconfig-scroll-bar-width wconfig)))
 
+;; FIXME: throw a specific error condition if the restoration was unsuccessful
 (defun wg-restore-wconfig (wconfig)
   "Restore WCONFIG in `selected-frame'."
-  (wg-barf-on-active-minibuffer)
-  (when wg-restore-frame-position
-    (wg-wconfig-restore-frame-position wconfig))
-  (let ((wtree (wg-resize-frame-scale-wtree wconfig)))
-    (wg-restore-window-tree
-     (if (not (wg-morph-p)) wtree (wg-morph wtree))))
-  (when wg-restore-scroll-bars
-    (wg-wconfig-restore-scroll-bars wconfig)))
+  (let ((wg-record-incorrectly-restored-bufs t)
+        (wg-incorrectly-restored-bufs nil))
+    (wg-barf-on-active-minibuffer)
+    (when wg-restore-frame-position
+      (wg-wconfig-restore-frame-position wconfig))
+    (let ((wtree (wg-resize-frame-scale-wtree wconfig)))
+      (wg-restore-window-tree
+       (if (not (wg-morph-p)) wtree (wg-morph wtree))))
+    (when wg-restore-scroll-bars
+      (wg-wconfig-restore-scroll-bars wconfig))
+    (when wg-incorrectly-restored-bufs
+      (message "Unable to restore these buffers: %S\n\
+If you want, restore them manually and try again."
+               (mapcar 'wg-buf-name wg-incorrectly-restored-bufs)))))
 
 
 
@@ -2041,6 +2044,34 @@ Dispatches on each possible combination of types."
         ((and (wg-wtree-p w1) (wg-win-p w2))
          (wg-morph-wtree-to-win w1 w2))))
 
+;; (defun wg-morph (to &optional from)
+;;   "Morph from wtree FROM to wtree TO.
+;; Assumes both FROM and TO fit in `selected-frame'."
+;;   (let ((from (or from (wg-window-tree-to-wtree (window-tree))))
+;;         (wg-morph-hsteps
+;;          (wg-morph-determine-steps wg-morph-hsteps wg-morph-terminal-hsteps))
+;;         (wg-morph-vsteps
+;;          (wg-morph-determine-steps wg-morph-vsteps wg-morph-terminal-vsteps))
+;;         (truncate-partial-width-windows wg-morph-truncate-partial-width-windows)
+;;         (wg-restore-scroll-bars nil)
+;;         (wg-restore-fringes nil)
+;;         (wg-restore-margins nil)
+;;         (wg-restore-point nil)
+;;         (wg-restore-mark nil)
+;;         (watchdog 0))
+;;     (wg-until (wg-equal-wtrees from to)
+;;       (condition-case err
+;;           (if (> (incf watchdog) wg-morph-max-steps)
+;;               (error "`wg-morph-max-steps' exceeded")
+;;             (setq from (wg-normalize-wtree (wg-morph-dispatch from to)))
+;;             (wg-restore-window-tree from)
+;;             (redisplay))
+;;         (error (wg-dbind (sym data) err
+;;                  (unless (and (stringp data)
+;;                               (string-match "too small" data))
+;;                    (signal sym data))))))
+;;     to))
+
 (defun wg-morph (to &optional from)
   "Morph from wtree FROM to wtree TO.
 Assumes both FROM and TO fit in `selected-frame'."
@@ -2050,6 +2081,7 @@ Assumes both FROM and TO fit in `selected-frame'."
         (wg-morph-vsteps
          (wg-morph-determine-steps wg-morph-vsteps wg-morph-terminal-vsteps))
         (truncate-partial-width-windows wg-morph-truncate-partial-width-windows)
+        (wg-record-incorrectly-restored-bufs nil)
         (wg-restore-scroll-bars nil)
         (wg-restore-fringes nil)
         (wg-restore-margins nil)
@@ -2366,16 +2398,41 @@ This returns all buffers under \"~/\" that are also in `emacs-lisp-mode'."
    nil (wg-buffer-list-filter-home-dir nil buffer-list)))
 
 
+
+;;; workgroup and session local variables
+;;
+;; FIXME: move this elsewhere
+;;
+
+(defun wg-session-local-value (variable &optional session)
+  "Return the value of VARIABLE in SESSION.
+SESSION nil defaults to the current session.  If VARIABLE does
+not have a session-local binding in SESSION, the value is
+resolved by Emacs."
+  (let ((value (wg-session-parameter session variable 'default)))
+    (if (not (eq value 'default)) value
+      (symbol-value variable))))
+
+(defun wg-workgroup-local-value (variable &optional workgroup)
+  "Return the value of VARIABLE in WORKGROUP.
+WORKGROUP nil defaults to the current workgroup.  If there is no
+current workgroup, or if VARIABLE does not have a workgroup-local
+binding in WORKGROUP, resolve VARIABLE with `wg-session-local-value'."
+  (let ((workgroup (wg-get-workgroup workgroup t)))
+    (if (not workgroup) (wg-session-local-value variable)
+      (let ((value (wg-workgroup-parameter workgroup variable 'default)))
+        (if (not (eq value 'default)) value
+          (wg-session-local-value variable))))))
+
+(defalias 'wg-local-value 'wg-workgroup-local-value)
+
+
 ;; buffer-list-filter context
 
-;; FIXME: lookup of workgroup-local and session-local vars should be generalized
-(defun wg-buffer-list-filter-order (workgroup command)
+(defun wg-buffer-list-filter-order (command)
   "Return WORKGROUP's buffer-list-filter order for COMMAND, or a default."
-  (let ((bso (wg-workgroup-parameter workgroup 'buffer-list-filter-order-alist)))
-    (or (wg-aget bso command)
-        (wg-aget bso 'default)
-        (wg-aget wg-buffer-list-filter-order-alist command)
-        (wg-aget wg-buffer-list-filter-order-alist 'default))))
+  (let ((bfo (wg-local-value 'wg-buffer-list-filter-order-alist)))
+    (or (wg-aget bfo command) (wg-aget bfo 'default))))
 
 (defmacro wg-prior-mapping (mode command)
   "Return whatever COMMAND would call if MODE wasn't on."
@@ -2387,14 +2444,11 @@ This returns all buffers under \"~/\" that are also in `emacs-lisp-mode'."
 
 (defmacro wg-with-buffer-list-filters (command &rest body)
   "Establish buffer-list-filter context for buffer command COMMAND, and eval BODY.
-Binds `wg-current-workgroup', `wg-current-buffer-command' and
-`wg-current-buffer-list-filter-id' in BODY."
+Binds `wg-current-buffer-list-filter-id' in BODY."
   (declare (indent 1))
   (wg-with-gensyms (order status)
-    `(let* ((wg-current-workgroup (wg-current-workgroup t))
-            (wg-current-buffer-command ,command)
-            (wg-minibuffer-contents nil)
-            (,order (wg-buffer-list-filter-order wg-current-workgroup ,command)))
+    `(let* ((wg-minibuffer-contents nil)
+            (,order (wg-buffer-list-filter-order ,command)))
        (catch 'wg-result
          (while 'your-mom
            (let* ((wg-current-buffer-list-filter-id (car ,order))
@@ -2591,8 +2645,9 @@ Added to `post-command-hook'."
 (defun wg-workgroup-update-base-wconfig (workgroup)
   "Update WORKGROUP's base wconfig with
 `wg-workgroup-most-recent-working-wconfig'."
-  (wg-set-workgroup-base-wconfig
-   workgroup (wg-workgroup-most-recent-working-wconfig workgroup)))
+  (let ((wconfig (wg-workgroup-most-recent-working-wconfig workgroup)))
+    (unless (eq (wg-workgroup-base-wconfig workgroup) wconfig)
+      (wg-set-workgroup-base-wconfig workgroup wconfig))))
 
 (defun wg-update-all-base-wconfigs ()
   "Update every workgroup's base wconfig with
@@ -2604,12 +2659,13 @@ Added to `post-command-hook'."
 workgroup's base wconfig with its working wconfig in FRAME.  Only
 update if FRAME's working wconfig is the most recently created of
 the working wconfigs and the base wconfig."
-  (dolist (workgroup (wg-workgroup-list))
+  (dolist (wg (wg-workgroup-list))
     (let ((wconfig (lambda (frame)
                      (with-selected-frame frame
-                       (wg-workgroup-working-wconfig workgroup t)))))
-      (when (eq wconfig (wg-workgroup-most-recent-working-wconfig workgroup))
-        (wg-set-workgroup-base-wconfig workgroup wconfig)))))
+                       (wg-workgroup-working-wconfig wg t)))))
+      (when (and (not (eq wconfig (wg-workgroup-base-wconfig wg)))
+                 (eq wconfig (wg-workgroup-most-recent-working-wconfig wg)))
+        (wg-set-workgroup-base-wconfig wg wconfig)))))
 
 
 
@@ -3275,8 +3331,8 @@ parameters and the parameters of all its workgroups."
     (wg-read-object
      (or prompt (format "Name (default: %S): " default))
      (lambda (new) (and (stringp new)
-                        (not (equal new ""))
-                        (wg-unique-workgroup-name-p new)))
+                   (not (equal new ""))
+                   (wg-unique-workgroup-name-p new)))
      "Please enter a unique, non-empty name"
      nil nil nil nil default)))
 
@@ -3453,7 +3509,6 @@ safe -- don't mutate them."
       (:cur (wg-workgroup-name workgroup)) "  "
       (wg-workgroup-list-display))))
 
-;; FIXME: nix this
 (defun wg-kill-ring-save-base-wconfig (&optional workgroup)
   "Save WORKGROUP's base wconfig to the kill ring."
   (interactive)
@@ -3856,6 +3911,7 @@ See `wg-workgroup-cycle-bufobj-association-type' for details."
      (wg-get-workgroup workgroup))
     'both)))
 
+;; FIXME: add dedicated indicator to the mode-line display
 (defun wg-toggle-window-dedicated-p ()
   "Toggle `window-dedicated-p' in `selected-window'."
   (interactive)
