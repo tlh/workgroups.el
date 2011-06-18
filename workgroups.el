@@ -342,22 +342,6 @@ say, irc buffers where `point-max' is constantly increasing."
   :type 'integer
   :group 'workgroups)
 
-(defcustom wg-commands-that-alter-window-configs (make-hash-table)
-  "Table of commands before which to save up-to-date undo
-information about the current window-configuration.  Because some
-window-configuration changes -- like changes to selected-window,
-window scrolling, point, mark, fringes, margins and scroll-bars
--- don't trigger `window-configuration-change-hook', they are
-effectively invisible to undoification.  Workgroups solves this
-problem by checking in `pre-command-hook' whether `this-command'
-is in this table, and saving undo info if it is.  Since it's just
-a single hash-table lookup per command, there's no noticeable
-slowdown.  Add commands to this table if they aren't already
-present, and you want up-to-date undo info saved prior to their
-invocation."
-  :type 'hash-table
-  :group 'workgroups)
-
 
 ;; wconfig kill-ring customization
 
@@ -427,7 +411,10 @@ example function `wg-buffer-list-filter-elisp':
 
 After this form has been evaluated, `elisp' can be used wherever
 other buffer-list-filter identifiers are used, like in
-`wg-buffer-list-filter-order-alist'."
+`wg-buffer-list-filter-order-alist'.
+
+Becomes workgroup-local when set with `wg-set-workgroup-parameter'.
+Becomes session-local when set with `wg-set-session-parameter'."
   :type 'list
   :group 'workgroups)
 
@@ -447,7 +434,10 @@ alist.
 The cdr of each entry should be a list of buffer-list-filter
 identifiers defining the order in which filtered buffer-lists are
 presented for the command.  See
-`wg-buffer-list-filter-definitions'."
+`wg-buffer-list-filter-definitions'.
+
+Becomes workgroup-local when set with `wg-set-workgroup-parameter'.
+Becomes session-local when set with `wg-set-session-parameter'."
   :type 'alist
   :group 'workgroups)
 
@@ -779,6 +769,9 @@ temporarily disable flagging `modified'.")
 
 (defvar wg-window-configuration-changed nil
   "Flag set by `window-configuration-change-hook'.")
+
+(defvar wg-already-updated-working-wconfig nil
+  "Flag set by `wg-update-working-wconfig-before-command'.")
 
 (defvar wg-undoify-window-configuration-change t
   "Flag unset when changes to the window config shouldn't cause
@@ -1158,6 +1151,15 @@ Return value."
   (let ((session (or session (wg-current-session))))
     (wg-asetf (wg-session-parameters session) (wg-aremove it parameter))
     (setf (wg-session-modified session) t)))
+
+(defun wg-session-local-value (variable &optional session)
+  "Return the value of VARIABLE in SESSION.
+SESSION nil defaults to the current session.  If VARIABLE does
+not have a session-local binding in SESSION, the value is
+resolved by Emacs."
+  (let ((value (wg-session-parameter session variable 'default)))
+    (if (not (eq value 'default)) value
+      (symbol-value variable))))
 
 
 
@@ -2200,6 +2202,19 @@ Return VALUE."
     (wg-flag-workgroup-modified workgroup)
     (wg-asetf (wg-workgroup-parameters workgroup) (wg-aremove it parameter))))
 
+(defun wg-workgroup-local-value (variable &optional workgroup)
+  "Return the value of VARIABLE in WORKGROUP.
+WORKGROUP nil defaults to the current workgroup.  If there is no
+current workgroup, or if VARIABLE does not have a workgroup-local
+binding in WORKGROUP, resolve VARIABLE with `wg-session-local-value'."
+  (let ((workgroup (wg-get-workgroup workgroup t)))
+    (if (not workgroup) (wg-session-local-value variable)
+      (let ((value (wg-workgroup-parameter workgroup variable 'default)))
+        (if (not (eq value 'default)) value
+          (wg-session-local-value variable))))))
+
+(defalias 'wg-local-value 'wg-workgroup-local-value)
+
 
 
 ;;; workgroup associated buffers
@@ -2316,7 +2331,8 @@ Lots of possible errors here because
         (unless noerror
           (error "`%S' is not a valid buffer-list-filter definition slot" key))
       (let* ((id (wg-get-buffer-list-filter-id-flexibly id))
-             (entry (assq id wg-buffer-list-filter-definitions)))
+             (entry (assq id (wg-local-value
+                              'wg-buffer-list-filter-definitions))))
         (if (not entry)
             (unless noerror
               (error "`%S' is an undefined buffer-list-filter" id))
@@ -2397,35 +2413,6 @@ This returns all buffers under \"~/\" that are also in `emacs-lisp-mode'."
    nil (wg-buffer-list-filter-home-dir nil buffer-list)))
 
 
-
-;;; workgroup and session local variables
-;;
-;; FIXME: move this elsewhere
-;;
-
-(defun wg-session-local-value (variable &optional session)
-  "Return the value of VARIABLE in SESSION.
-SESSION nil defaults to the current session.  If VARIABLE does
-not have a session-local binding in SESSION, the value is
-resolved by Emacs."
-  (let ((value (wg-session-parameter session variable 'default)))
-    (if (not (eq value 'default)) value
-      (symbol-value variable))))
-
-(defun wg-workgroup-local-value (variable &optional workgroup)
-  "Return the value of VARIABLE in WORKGROUP.
-WORKGROUP nil defaults to the current workgroup.  If there is no
-current workgroup, or if VARIABLE does not have a workgroup-local
-binding in WORKGROUP, resolve VARIABLE with `wg-session-local-value'."
-  (let ((workgroup (wg-get-workgroup workgroup t)))
-    (if (not workgroup) (wg-session-local-value variable)
-      (let ((value (wg-workgroup-parameter workgroup variable 'default)))
-        (if (not (eq value 'default)) value
-          (wg-session-local-value variable))))))
-
-(defalias 'wg-local-value 'wg-workgroup-local-value)
-
-
 ;; buffer-list-filter context
 
 (defun wg-buffer-list-filter-order (command)
@@ -2490,6 +2477,14 @@ Binds `wg-current-buffer-list-filter-id' in BODY."
             (,undo-list (wg-workgroup-state-undo-list ,state)))
        ,@body)))
 
+(defun wg-update-working-wconfig-before-command ()
+  "Used in before advice on all functions that trigger
+`window-configuration-change-hook' to save up to date undo info
+before the change."
+  (unless wg-already-updated-working-wconfig
+    (wg-update-current-workgroup-working-wconfig)
+    (setq wg-already-updated-working-wconfig t)))
+
 (defun wg-flag-just-exited-minibuffer ()
   "Added to `minibuffer-exit-hook'."
   (setq wg-just-exited-minibuffer t))
@@ -2516,13 +2511,12 @@ current command."
 
 (defun wg-add-wconfig-to-undo-list (workgroup wconfig)
   "Add WCONFIG to WORKGROUP's undo list, truncating its future if necessary."
-  (let ((state (wg-get-workgroup-state workgroup)))
-    (wg-flag-workgroup-modified workgroup)
-    (push wconfig (wg-workgroup-state-undo-list state))
-    (setf (wg-workgroup-state-undo-pointer state) 0)
-    (wg-awhen (nthcdr wg-wconfig-undo-list-max
-                      (wg-workgroup-state-undo-list state))
-      (setcdr it nil))))
+  (wg-with-undo workgroup (state undo-pointer undo-list)
+    (let ((undo-list (cons wconfig (nthcdr undo-pointer undo-list))))
+      (wg-awhen (nthcdr wg-wconfig-undo-list-max undo-list) (setcdr it nil))
+      (setf (wg-workgroup-state-undo-list state) undo-list)
+      (setf (wg-workgroup-state-undo-pointer state) 0)
+      (wg-flag-workgroup-modified workgroup))))
 
 (defun wg-workgroup-working-wconfig (workgroup &optional noupdate)
   "Return WORKGROUP's working-wconfig.
@@ -2568,53 +2562,13 @@ Added to `post-command-hook'."
          ;; and the change didn't occur while the minibuffer is active,
          (zerop (minibuffer-depth)))
     ;; and there's a current workgroup,
-    (wg-when-let ((wg (wg-current-workgroup t)))
+    (wg-when-let ((workgroup (wg-current-workgroup t)))
       ;; add the current wconfig to that workgroup's undo list:
-      (wg-add-wconfig-to-undo-list wg (wg-current-wconfig))))
-  ;; Reset both flags no matter what:
+      (wg-add-wconfig-to-undo-list workgroup (wg-current-wconfig))))
+  ;; Reset all flags no matter what:
   (setq wg-window-configuration-changed nil
-        wg-undoify-window-configuration-change t))
-
-
-;; FIXME: replace `wg-commands-that-alter-window-configs' with advice on every
-;; window-config altering function.
-(defun wg-update-working-wconfig-before-command ()
-  "Update the current workgroup's working-wconfig before
-`wg-commands-that-alter-window-configs'. Added to
-`pre-command-hook'."
-  (when (gethash this-original-command wg-commands-that-alter-window-configs)
-    (wg-update-current-workgroup-working-wconfig)))
-
-(defun wg-add-commands-that-modify-window-configs (&rest commands)
-  "Add COMMANDS to `wg-commands-that-alter-window-configs'."
-  (dolist (command commands commands)
-    (puthash command t wg-commands-that-alter-window-configs)))
-
-(defun wg-remove-commands-that-modify-window-configs (&rest commands)
-  "Remove command symbols from `wg-commands-that-alter-window-configs'."
-  (dolist (command commands commands)
-    (remhash command wg-commands-that-alter-window-configs)))
-
-(wg-add-commands-that-modify-window-configs
- 'split-window
- 'split-window-horizontally
- 'split-window-vertically
- 'delete-window
- 'delete-other-windows
- 'delete-other-windows-vertically
- 'enlarge-window
- 'enlarge-window-horizontally
- 'shrink-window
- 'shrink-window-horizontally
- 'shrink-window-if-larger-than-buffer
- 'switch-to-buffer
- 'switch-to-buffer-other-window
- 'switch-to-buffer-other-frame
- 'balance-windows
- 'balance-windows-area
- 'help-with-tutorial
- 'jump-to-register
- 'erc-complete-word)
+        wg-undoify-window-configuration-change t
+        wg-already-updated-working-wconfig nil))
 
 
 
@@ -3329,8 +3283,8 @@ parameters and the parameters of all its workgroups."
     (wg-read-object
      (or prompt (format "Name (default: %S): " default))
      (lambda (new) (and (stringp new)
-                   (not (equal new ""))
-                   (wg-unique-workgroup-name-p new)))
+                        (not (equal new ""))
+                        (wg-unique-workgroup-name-p new)))
      "Please enter a unique, non-empty name"
      nil nil nil nil default)))
 
@@ -4235,6 +4189,51 @@ its correct state, prior to any window-config changes caused by
     ad-do-it))
 
 
+;; advice on functions that trigger `window-configuration-change-hook'
+
+(defadvice split-window (before wg-update-working-wconfig-before-command)
+  "Call `wg-update-working-wconfig-before-command' before this
+function to save up-to-date undo information before the
+window-configuration changes."
+  (wg-update-working-wconfig-before-command))
+
+(defadvice enlarge-window (before wg-update-working-wconfig-before-command)
+  "Call `wg-update-working-wconfig-before-command' before this
+function to save up-to-date undo information before the
+window-configuration changes."
+  (wg-update-working-wconfig-before-command))
+
+(defadvice delete-window (before wg-update-working-wconfig-before-command)
+  "Call `wg-update-working-wconfig-before-command' before this
+function to save up-to-date undo information before the
+window-configuration changes."
+  (wg-update-working-wconfig-before-command))
+
+(defadvice delete-other-windows (before wg-update-working-wconfig-before-command)
+  "Call `wg-update-working-wconfig-before-command' before this
+function to save up-to-date undo information before the
+window-configuration changes."
+  (wg-update-working-wconfig-before-command))
+
+(defadvice delete-windows-on (before wg-update-working-wconfig-before-command)
+  "Call `wg-update-working-wconfig-before-command' before this
+function to save up-to-date undo information before the
+window-configuration changes."
+  (wg-update-working-wconfig-before-command))
+
+(defadvice switch-to-buffer (before wg-update-working-wconfig-before-command)
+  "Call `wg-update-working-wconfig-before-command' before this
+function to save up-to-date undo information before the
+window-configuration changes."
+  (wg-update-working-wconfig-before-command))
+
+(defadvice set-window-buffer (before wg-update-working-wconfig-before-command)
+  "Call `wg-update-working-wconfig-before-command' before this
+function to save up-to-date undo information before the
+window-configuration changes."
+  (wg-update-working-wconfig-before-command))
+
+
 (defun wg-enable-all-advice ()
   "Enable and activate all of Workgroups' advice."
 
@@ -4242,13 +4241,35 @@ its correct state, prior to any window-config changes caused by
   (ad-define-subr-args
    'switch-to-buffer '(buffer-or-name &optional norecord))
   (ad-enable-advice 'switch-to-buffer 'after 'wg-auto-associate-buffer)
+  (ad-enable-advice 'switch-to-buffer 'before 'wg-update-working-wconfig-before-command)
   (ad-activate 'switch-to-buffer)
 
   ;; set-window-buffer
   (ad-define-subr-args
    'set-window-buffer '(window buffer-or-name &optional keep-margins))
   (ad-enable-advice 'set-window-buffer 'after 'wg-auto-associate-buffer)
+  (ad-enable-advice 'set-window-buffer 'before 'wg-update-working-wconfig-before-command)
   (ad-activate 'set-window-buffer)
+
+  ;; split-window
+  (ad-enable-advice 'split-window 'before 'wg-update-working-wconfig-before-command)
+  (ad-activate 'split-window)
+
+  ;; enlarge-window
+  (ad-enable-advice 'enlarge-window 'before 'wg-update-working-wconfig-before-command)
+  (ad-activate 'enlarge-window)
+
+  ;; delete-window
+  (ad-enable-advice 'delete-window 'before 'wg-update-working-wconfig-before-command)
+  (ad-activate 'delete-window)
+
+  ;; delete-other-windows
+  (ad-enable-advice 'delete-other-windows 'before 'wg-update-working-wconfig-before-command)
+  (ad-activate 'delete-other-windows)
+
+  ;; delete-windows-on
+  (ad-enable-advice 'delete-windows-on 'before 'wg-update-working-wconfig-before-command)
+  (ad-activate 'delete-windows-on)
 
   ;; save-buffers-kill-emacs
   (ad-enable-advice 'save-buffers-kill-emacs 'around 'wg-freeze-wconfig)
@@ -4262,17 +4283,69 @@ its correct state, prior to any window-config changes caused by
 
   ;; switch-to-buffer
   (ad-disable-advice 'switch-to-buffer 'after 'wg-auto-associate-buffer)
+  (ad-disable-advice 'switch-to-buffer 'before 'wg-update-working-wconfig-before-command)
   (ad-deactivate 'switch-to-buffer)
 
   ;; set-window-buffer
   (ad-disable-advice 'set-window-buffer 'after 'wg-auto-associate-buffer)
+  (ad-disable-advice 'set-window-buffer 'before 'wg-update-working-wconfig-before-command)
   (ad-deactivate 'set-window-buffer)
+
+  ;; split-window
+  (ad-disable-advice 'split-window 'before 'wg-update-working-wconfig-before-command)
+  (ad-deactivate 'split-window)
+
+  ;; enlarge-window
+  (ad-disable-advice 'enlarge-window 'before 'wg-update-working-wconfig-before-command)
+  (ad-deactivate 'enlarge-window)
+
+  ;; delete-window
+  (ad-disable-advice 'delete-window 'before 'wg-update-working-wconfig-before-command)
+  (ad-deactivate 'delete-window)
+
+  ;; delete-other-windows
+  (ad-disable-advice 'delete-other-windows 'before 'wg-update-working-wconfig-before-command)
+  (ad-deactivate 'delete-other-windows)
+
+  ;; delete-windows-on
+  (ad-disable-advice 'delete-windows-on 'before 'wg-update-working-wconfig-before-command)
+  (ad-deactivate 'delete-windows-on)
 
   ;; save-buffers-kill-emacs
   (ad-disable-advice 'save-buffers-kill-emacs 'around 'wg-freeze-wconfig)
   (ad-deactivate 'save-buffers-kill-emacs)
 
   )
+
+;; (defun wg-enable-all-advice ()
+;;   "Enable and activate all of Workgroups' advice."
+;;   ;; switch-to-buffer
+;;   (ad-define-subr-args
+;;    'switch-to-buffer '(buffer-or-name &optional norecord))
+;;   (ad-enable-advice 'switch-to-buffer 'after 'wg-auto-associate-buffer)
+;;   (ad-activate 'switch-to-buffer)
+;;   ;; set-window-buffer
+;;   (ad-define-subr-args
+;;    'set-window-buffer '(window buffer-or-name &optional keep-margins))
+;;   (ad-enable-advice 'set-window-buffer 'after 'wg-auto-associate-buffer)
+;;   (ad-activate 'set-window-buffer)
+;;   ;; save-buffers-kill-emacs
+;;   (ad-enable-advice 'save-buffers-kill-emacs 'around 'wg-freeze-wconfig)
+;;   (ad-activate 'save-buffers-kill-emacs)
+;;   )
+
+;; (defun wg-disable-all-advice ()
+;;   "Disable and deactivate all of Workgroups' advice."
+;;   ;; switch-to-buffer
+;;   (ad-disable-advice 'switch-to-buffer 'after 'wg-auto-associate-buffer)
+;;   (ad-deactivate 'switch-to-buffer)
+;;   ;; set-window-buffer
+;;   (ad-disable-advice 'set-window-buffer 'after 'wg-auto-associate-buffer)
+;;   (ad-deactivate 'set-window-buffer)
+;;   ;; save-buffers-kill-emacs
+;;   (ad-disable-advice 'save-buffers-kill-emacs 'around 'wg-freeze-wconfig)
+;;   (ad-deactivate 'save-buffers-kill-emacs)
+;;   )
 
 
 
@@ -4535,6 +4608,23 @@ Called when `workgroups-mode' is turned off."
     (query (wg-query-for-save) t)
     (nosave t)))
 
+;; (defun wg-add-or-remove-workgroups-hooks (remove)
+;;   "Add or remove all of Workgroups' hooks, depending on REMOVE."
+;;   (wg-add-or-remove-hooks
+;;    remove
+;;    'kill-emacs-query-functions 'wg-save-session-on-emacs-exit
+;;    'delete-frame-hook 'wg-update-base-wconfigs-from-frame-if-necessary
+;;    'window-configuration-change-hook 'wg-flag-window-configuration-changed
+;;    'pre-command-hook 'wg-update-working-wconfig-before-command
+;;    'post-command-hook 'wg-undoify-window-configuration-change
+;;    'minibuffer-setup-hook 'wg-turn-on-minibuffer-mode
+;;    'minibuffer-exit-hook 'wg-flag-just-exited-minibuffer
+;;    'minibuffer-exit-hook 'wg-turn-off-minibuffer-mode
+;;    'ido-make-buffer-list-hook 'wg-set-ido-buffer-list
+;;    'iswitchb-make-buflist-hook 'wg-set-iswitchb-buffer-list
+;;    'kill-buffer-hook 'wg-auto-dissociate-buffer-hook
+;;    'kill-buffer-hook 'wg-update-buffer-in-buf-list))
+
 (defun wg-add-or-remove-workgroups-hooks (remove)
   "Add or remove all of Workgroups' hooks, depending on REMOVE."
   (wg-add-or-remove-hooks
@@ -4542,7 +4632,7 @@ Called when `workgroups-mode' is turned off."
    'kill-emacs-query-functions 'wg-save-session-on-emacs-exit
    'delete-frame-hook 'wg-update-base-wconfigs-from-frame-if-necessary
    'window-configuration-change-hook 'wg-flag-window-configuration-changed
-   'pre-command-hook 'wg-update-working-wconfig-before-command
+   ;; 'pre-command-hook 'wg-update-working-wconfig-before-command
    'post-command-hook 'wg-undoify-window-configuration-change
    'minibuffer-setup-hook 'wg-turn-on-minibuffer-mode
    'minibuffer-exit-hook 'wg-flag-just-exited-minibuffer
