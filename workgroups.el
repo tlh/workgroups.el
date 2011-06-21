@@ -1411,7 +1411,7 @@ If `wg-current-wconfig' is non-nil, return it.  Otherwise return
   "Eval BODY with WCONFIG current in FRAME.
 FRAME nil defaults to `selected-frame'."
   (declare (indent 2))
-  (with-gensyms (frame-sym old-value)
+  (wg-with-gensyms (frame-sym old-value)
     `(let* ((,frame-sym (or ,frame (selected-frame)))
             (,old-value (frame-parameter ,frame-sym 'wg-current-wconfig)))
        (unwind-protect
@@ -3606,7 +3606,7 @@ Also add it to the wconfig kill-ring."
     (wg-add-to-wconfig-kill-ring wconfig)
     (wg-fontified-message
       (:cmd "Deleted: ")
-      (:cur name))))
+      (:cur (wg-wconfig-name wconfig)))))
 
 
 
