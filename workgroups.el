@@ -470,30 +470,27 @@ nil means it's off.  See `wg-buffer-auto-association'."
 (defcustom wg-buffer-auto-association 'weak
   "Specifies the behavior for auto-associating buffers with workgroups.
 
-Buffers can be auto-associated with workgroups whenever they are
-made visible in windows (by any function that bottoms out in a
-call to `switch-to-buffer' or `set-window-buffer').  This setting
-determines whether and how that happens.  The workgroup with
-which to associate the buffer is the current workgroup in the
-window's frame.
+When a buffer is made visible in a window it can be automatically
+associated with the current workgroup in the window's frame.
+This setting determines whether and how that happens.
 
-`no-assoc' means don't associate buffers with workgroups.
-`weak' means weakly associate buffers with workgroups.
-`strong' means strongly associate buffers with workgroups.
+Allowable values:
 
-If the value is a function specifier (a function-symbol or a lambda),
-it will be `funcall'd to determine whether and how to associate
-the buffer.  The function should accept two arguments -- a
-workgroup and a buffer -- and should return one of the above
-values.
+`weak' - weakly associate the buffer with the workgroup
 
-Any other value means don't associate buffers with workgroups.
+`strong' - strongly associate the buffer with the workgroup
 
-Also, if the workgroup's `buffer-auto-association' parameter is
-non-nil, it overrides this setting.  Allowable values of the
-parameter are the same as above, except that nil defers to
-`wg-buffer-auto-association's value.  See
-`wg-set-workgroup-parameter'."
+A function (a function-symbol or a lambda) - `funcall' the function to
+determine whether and how to associate the buffer with the
+workgroup.  The function should accept two arguments -- the
+buffer and the workgroup -- and should return one of the
+allowable values for this variable.
+
+`nil' or any other value - don't associate the buffer with the
+workgroup.
+
+Becomes workgroup-local when set with `wg-set-workgroup-parameter'.
+Becomes session-local when set with `wg-set-session-parameter'."
   :type 'sexp
   :group 'workgroups)
 
@@ -1185,8 +1182,9 @@ Return value."
 SESSION nil defaults to the current session.  If VARIABLE does
 not have a session-local binding in SESSION, the value is
 resolved by Emacs."
-  (let ((value (wg-session-parameter session variable 'default)))
-    (if (not (eq value 'default)) value
+  (let* ((undefined (gensym))
+         (value (wg-session-parameter session variable undefined)))
+    (if (not (eq value undefined)) value
       (symbol-value variable))))
 
 
@@ -2182,6 +2180,17 @@ Return VALUE."
     (wg-flag-workgroup-modified workgroup)
     (wg-asetf (wg-workgroup-parameters workgroup) (wg-aremove it parameter))))
 
+;; (defun wg-workgroup-local-value (variable &optional workgroup)
+;;   "Return the value of VARIABLE in WORKGROUP.
+;; WORKGROUP nil defaults to the current workgroup.  If there is no
+;; current workgroup, or if VARIABLE does not have a workgroup-local
+;; binding in WORKGROUP, resolve VARIABLE with `wg-session-local-value'."
+;;   (let ((workgroup (wg-get-workgroup workgroup t)))
+;;     (if (not workgroup) (wg-session-local-value variable)
+;;       (let ((value (wg-workgroup-parameter workgroup variable 'default)))
+;;         (if (not (eq value 'default)) value
+;;           (wg-session-local-value variable))))))
+
 (defun wg-workgroup-local-value (variable &optional workgroup)
   "Return the value of VARIABLE in WORKGROUP.
 WORKGROUP nil defaults to the current workgroup.  If there is no
@@ -2189,8 +2198,9 @@ current workgroup, or if VARIABLE does not have a workgroup-local
 binding in WORKGROUP, resolve VARIABLE with `wg-session-local-value'."
   (let ((workgroup (wg-get-workgroup workgroup t)))
     (if (not workgroup) (wg-session-local-value variable)
-      (let ((value (wg-workgroup-parameter workgroup variable 'default)))
-        (if (not (eq value 'default)) value
+      (let* ((undefined (gensym))
+             (value (wg-workgroup-parameter workgroup variable undefined)))
+        (if (not (eq value undefined)) value
           (wg-session-local-value variable))))))
 
 (defalias 'wg-local-value 'wg-workgroup-local-value)
@@ -3246,8 +3256,8 @@ parameters and the parameters of all its workgroups."
     (wg-read-object
      (or prompt (format "Name (default: %S): " default))
      (lambda (new) (and (stringp new)
-                   (not (equal new ""))
-                   (wg-unique-workgroup-name-p new)))
+                        (not (equal new ""))
+                        (wg-unique-workgroup-name-p new)))
      "Please enter a unique, non-empty name"
      nil nil nil nil default)))
 
@@ -4156,8 +4166,7 @@ Frame defaults to `selected-frame'.  See `wg-buffer-auto-association'."
     (wg-when-let ((wg (wg-current-workgroup t frame)))
       (unless (wg-workgroup-bufobj-association-type wg buffer)
         (wg-auto-associate-buffer-helper
-         wg buffer (or (wg-workgroup-parameter wg 'buffer-auto-association)
-                       wg-buffer-auto-association))))))
+         wg buffer (wg-local-value 'wg-buffer-auto-association wg))))))
 
 (defadvice switch-to-buffer (after wg-auto-associate-buffer)
   "Automatically associate the buffer with the current workgroup."
@@ -4174,7 +4183,7 @@ Frame defaults to `selected-frame'.  See `wg-buffer-auto-association'."
 
 (macrolet ((define-p-w-c-c-h-advice
              (fn)
-             `(defadvice ,fn (before wg-update-working-wconfig-hook)
+             `(defadvice ,fn (before wg-pre-window-configuration-change-hook)
                 "Call `wg-update-working-wconfig-hook' before this
 function to save up-to-date undo information before the
 window-configuration changes."
@@ -4218,34 +4227,41 @@ before selecting a new frame."
   (ad-define-subr-args
    'switch-to-buffer '(buffer-or-name &optional norecord))
   (ad-enable-advice 'switch-to-buffer 'after 'wg-auto-associate-buffer)
-  (ad-enable-advice 'switch-to-buffer 'before 'wg-update-working-wconfig-hook)
+  (ad-enable-advice
+   'switch-to-buffer 'before 'wg-pre-window-configuration-change-hook)
   (ad-activate 'switch-to-buffer)
 
   ;; set-window-buffer
   (ad-define-subr-args
    'set-window-buffer '(window buffer-or-name &optional keep-margins))
   (ad-enable-advice 'set-window-buffer 'after 'wg-auto-associate-buffer)
-  (ad-enable-advice 'set-window-buffer 'before 'wg-update-working-wconfig-hook)
+  (ad-enable-advice
+   'set-window-buffer 'before 'wg-pre-window-configuration-change-hook)
   (ad-activate 'set-window-buffer)
 
   ;; split-window
-  (ad-enable-advice 'split-window 'before 'wg-update-working-wconfig-hook)
+  (ad-enable-advice
+   'split-window 'before 'wg-pre-window-configuration-change-hook)
   (ad-activate 'split-window)
 
   ;; enlarge-window
-  (ad-enable-advice 'enlarge-window 'before 'wg-update-working-wconfig-hook)
+  (ad-enable-advice
+   'enlarge-window 'before 'wg-pre-window-configuration-change-hook)
   (ad-activate 'enlarge-window)
 
   ;; delete-window
-  (ad-enable-advice 'delete-window 'before 'wg-update-working-wconfig-hook)
+  (ad-enable-advice
+   'delete-window 'before 'wg-pre-window-configuration-change-hook)
   (ad-activate 'delete-window)
 
   ;; delete-other-windows
-  (ad-enable-advice 'delete-other-windows 'before 'wg-update-working-wconfig-hook)
+  (ad-enable-advice
+   'delete-other-windows 'before 'wg-pre-window-configuration-change-hook)
   (ad-activate 'delete-other-windows)
 
   ;; delete-windows-on
-  (ad-enable-advice 'delete-windows-on 'before 'wg-update-working-wconfig-hook)
+  (ad-enable-advice
+   'delete-windows-on 'before 'wg-pre-window-configuration-change-hook)
   (ad-activate 'delete-windows-on)
 
   ;; save-buffers-kill-emacs
@@ -4268,32 +4284,39 @@ before selecting a new frame."
 
   ;; switch-to-buffer
   (ad-disable-advice 'switch-to-buffer 'after 'wg-auto-associate-buffer)
-  (ad-disable-advice 'switch-to-buffer 'before 'wg-update-working-wconfig-hook)
+  (ad-disable-advice
+   'switch-to-buffer 'before 'wg-pre-window-configuration-change-hook)
   (ad-deactivate 'switch-to-buffer)
 
   ;; set-window-buffer
   (ad-disable-advice 'set-window-buffer 'after 'wg-auto-associate-buffer)
-  (ad-disable-advice 'set-window-buffer 'before 'wg-update-working-wconfig-hook)
+  (ad-disable-advice
+   'set-window-buffer 'before 'wg-pre-window-configuration-change-hook)
   (ad-deactivate 'set-window-buffer)
 
   ;; split-window
-  (ad-disable-advice 'split-window 'before 'wg-update-working-wconfig-hook)
+  (ad-disable-advice
+   'split-window 'before 'wg-pre-window-configuration-change-hook)
   (ad-deactivate 'split-window)
 
   ;; enlarge-window
-  (ad-disable-advice 'enlarge-window 'before 'wg-update-working-wconfig-hook)
+  (ad-disable-advice
+   'enlarge-window 'before 'wg-pre-window-configuration-change-hook)
   (ad-deactivate 'enlarge-window)
 
   ;; delete-window
-  (ad-disable-advice 'delete-window 'before 'wg-update-working-wconfig-hook)
+  (ad-disable-advice
+   'delete-window 'before 'wg-pre-window-configuration-change-hook)
   (ad-deactivate 'delete-window)
 
   ;; delete-other-windows
-  (ad-disable-advice 'delete-other-windows 'before 'wg-update-working-wconfig-hook)
+  (ad-disable-advice
+   'delete-other-windows 'before 'wg-pre-window-configuration-change-hook)
   (ad-deactivate 'delete-other-windows)
 
   ;; delete-windows-on
-  (ad-disable-advice 'delete-windows-on 'before 'wg-update-working-wconfig-hook)
+  (ad-disable-advice
+   'delete-windows-on 'before 'wg-pre-window-configuration-change-hook)
   (ad-deactivate 'delete-windows-on)
 
   ;; save-buffers-kill-emacs
