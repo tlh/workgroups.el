@@ -1096,6 +1096,7 @@ This needs to be a macro to allow specification of a setf'able place."
   (modified)
   (parameters)
   (base-wconfig)
+  (selected-frame-wconfig)
   (saved-wconfigs)
   (strong-buf-uids)
   (weak-buf-uids))
@@ -1117,11 +1118,6 @@ This needs to be a macro to allow specification of a setf'able place."
 
 
 ;;; session ops
-
-;; (defun wg-current-session ()
-;;   "Return `wg-current-session', setting it first if necessary."
-;;   (or wg-current-session
-;;       (setq wg-current-session (wg-make-session))))
 
 (defun wg-current-session (&optional noerror)
   "Return `wg-current-session', setting it first if necessary."
@@ -1413,11 +1409,12 @@ If `wg-current-wconfig' is non-nil, return it.  Otherwise return
   (or (frame-parameter nil 'wg-current-wconfig)
       (wg-frame-to-wconfig)))
 
-(defmacro wg-with-current-wconfig (wconfig frame &rest body)
-  "Eval BODY with WCONFIG current."
+(defmacro wg-with-current-wconfig (frame wconfig &rest body)
+  "Eval BODY with WCONFIG current in FRAME.
+FRAME nil defaults to `selected-frame'."
   (declare (indent 2))
   (with-gensyms (frame-sym old-value)
-    `(let* ((,frame-sym ,frame)
+    `(let* ((,frame-sym (or ,frame (selected-frame)))
             (,old-value (frame-parameter ,frame-sym 'wg-current-wconfig)))
        (unwind-protect
            (progn
@@ -2056,34 +2053,6 @@ Dispatches on each possible combination of types."
         ((and (wg-wtree-p w1) (wg-win-p w2))
          (wg-morph-wtree-to-win w1 w2))))
 
-;; (defun wg-morph (to &optional from)
-;;   "Morph from wtree FROM to wtree TO.
-;; Assumes both FROM and TO fit in `selected-frame'."
-;;   (let ((from (or from (wg-window-tree-to-wtree (window-tree))))
-;;         (wg-morph-hsteps
-;;          (wg-morph-determine-steps wg-morph-hsteps wg-morph-terminal-hsteps))
-;;         (wg-morph-vsteps
-;;          (wg-morph-determine-steps wg-morph-vsteps wg-morph-terminal-vsteps))
-;;         (truncate-partial-width-windows wg-morph-truncate-partial-width-windows)
-;;         (wg-restore-scroll-bars nil)
-;;         (wg-restore-fringes nil)
-;;         (wg-restore-margins nil)
-;;         (wg-restore-point nil)
-;;         (wg-restore-mark nil)
-;;         (watchdog 0))
-;;     (wg-until (wg-equal-wtrees from to)
-;;       (condition-case err
-;;           (if (> (incf watchdog) wg-morph-max-steps)
-;;               (error "`wg-morph-max-steps' exceeded")
-;;             (setq from (wg-normalize-wtree (wg-morph-dispatch from to)))
-;;             (wg-restore-window-tree from)
-;;             (redisplay))
-;;         (error (wg-dbind (sym data) err
-;;                  (unless (and (stringp data)
-;;                               (string-match "too small" data))
-;;                    (signal sym data))))))
-;;     to))
-
 (defun wg-morph (to &optional from)
   "Morph from wtree FROM to wtree TO.
 Assumes both FROM and TO fit in `selected-frame'."
@@ -2476,7 +2445,9 @@ Binds `wg-current-buffer-list-filter-id' in BODY."
     (or (gethash uid state-table)
         (let ((wgs (wg-make-workgroup-state
                     :undo-pointer 0
-                    :undo-list (list (wg-workgroup-base-wconfig workgroup)))))
+                    :undo-list
+                    (list (or (wg-workgroup-selected-frame-wconfig workgroup)
+                              (wg-workgroup-base-wconfig workgroup))))))
           (puthash uid wgs state-table)
           wgs))))
 
@@ -2510,17 +2481,18 @@ current command."
 (defun wg-set-workgroup-working-wconfig (workgroup wconfig)
   "Set the working-wconfig of WORKGROUP to WCONFIG."
   (wg-flag-workgroup-modified workgroup)
+  (setf (wg-workgroup-selected-frame-wconfig workgroup) wconfig)
   (wg-with-undo workgroup (state undo-pointer undo-list)
     (setcar (nthcdr undo-pointer undo-list) wconfig)))
 
 (defun wg-add-wconfig-to-undo-list (workgroup wconfig)
   "Add WCONFIG to WORKGROUP's undo list, truncating its future if necessary."
   (wg-with-undo workgroup (state undo-pointer undo-list)
-    (let ((undo-list (cons wconfig (nthcdr undo-pointer undo-list))))
+    (let ((undo-list (cons nil (nthcdr undo-pointer undo-list))))
       (wg-awhen (nthcdr wg-wconfig-undo-list-max undo-list) (setcdr it nil))
-      (setf (wg-workgroup-state-undo-list state) undo-list)
-      (setf (wg-workgroup-state-undo-pointer state) 0)
-      (wg-flag-workgroup-modified workgroup))))
+      (setf (wg-workgroup-state-undo-list state) undo-list))
+    (setf (wg-workgroup-state-undo-pointer state) 0))
+  (wg-set-workgroup-working-wconfig workgroup wconfig))
 
 (defun wg-workgroup-working-wconfig (workgroup &optional noupdate)
   "Return WORKGROUP's working-wconfig.
@@ -2534,7 +2506,8 @@ return WORKGROUP's current undo state."
       (nth undo-pointer undo-list))))
 
 (defun wg-update-current-workgroup-working-wconfig ()
-  "Update WORKGROUP's working-wconfig with `wg-current-wconfig'."
+  "Update `selected-frame's current workgroup's working-wconfig
+with `wg-current-wconfig'."
   (wg-awhen (wg-current-workgroup t)
     (wg-set-workgroup-working-wconfig it (wg-current-wconfig))))
 
@@ -2586,50 +2559,19 @@ before the change."
 
 ;;; base wconfig updating
 
-(defun wg-set-workgroup-base-wconfig (workgroup wconfig)
-  "Set WORKGROUP's base wconfig to WCONFIG, and set WORKGROUP's modified flag."
-  (setf (wg-workgroup-base-wconfig workgroup) wconfig
-        (wg-workgroup-modified workgroup) t))
-
-(defun wg-workgroup-most-recent-working-wconfig (workgroup)
-  "Return WORKGROUP's most recently created working wconfig by frame."
-  (reduce
-   (lambda (wconfig1 &optional wconfig2)
-     (if (or (not wconfig2)
-             (>= (wg-uid-to-seconds (wg-wconfig-uid wconfig1))
-                 (wg-uid-to-seconds (wg-wconfig-uid wconfig2))))
-         wconfig1
-       wconfig2))
-   (frame-list)
-   :key (lambda (frame)
-          (with-selected-frame frame
-            (wg-workgroup-working-wconfig workgroup t)))
-   :initial-value (wg-workgroup-base-wconfig workgroup)))
-
-(defun wg-workgroup-update-base-wconfig (workgroup)
-  "Update WORKGROUP's base wconfig with
-`wg-workgroup-most-recent-working-wconfig'."
-  (let ((wconfig (wg-workgroup-most-recent-working-wconfig workgroup)))
-    (unless (eq (wg-workgroup-base-wconfig workgroup) wconfig)
-      (wg-set-workgroup-base-wconfig workgroup wconfig))))
-
 (defun wg-update-all-base-wconfigs ()
   "Update every workgroup's base wconfig with
 `wg-workgroup-update-base-wconfig'."
-  (mapc 'wg-workgroup-update-base-wconfig (wg-workgroup-list)))
+  (dolist (workgroup (wg-workgroup-list))
+    (wg-awhen (wg-workgroup-selected-frame-wconfig workgroup)
+      (setf (wg-workgroup-base-wconfig workgroup) it
+            (wg-workgroup-selected-frame-wconfig workgroup) nil))))
 
-(defun wg-update-base-wconfigs-from-frame-if-necessary (frame)
-  "Added to `delete-frame-hook'.  Conditionally update each
-workgroup's base wconfig with its working wconfig in FRAME.  Only
-update if FRAME's working wconfig is the most recently created of
-the working wconfigs and the base wconfig."
-  (dolist (wg (wg-workgroup-list))
-    (let ((wconfig (lambda (frame)
-                     (with-selected-frame frame
-                       (wg-workgroup-working-wconfig wg t)))))
-      (when (and (not (eq wconfig (wg-workgroup-base-wconfig wg)))
-                 (eq wconfig (wg-workgroup-most-recent-working-wconfig wg)))
-        (wg-set-workgroup-base-wconfig wg wconfig)))))
+(defun wg-update-working-wconfig-on-delete-frame (frame)
+  "Update FRAME's current workgroup's working-wconfig before
+FRAME is deleted, so we don't lose its state."
+  (with-selected-frame frame
+    (wg-update-current-workgroup-working-wconfig)))
 
 
 
@@ -2772,27 +2714,8 @@ BUFFER-LIST nil defaults to `buffer-list'."
               (remove-if-not (lambda (uid) (member uid all-buf-uids)) it
                              :key 'wg-buf-uid))))
 
-;; FIXME: timestamp `selected-frame' when the working-wconfig is updated.
-
-;; FIXME: add before advice to `select-frame' to update `selected-frame's
-;; current workgroup's working-wconfig
-
-;; (defun wg-update-all-current-workgroup-working-wconfigs ()
-;;   "Update each frame's current workgroup's working wconfig.
-;; Move `selected-frame' to the end of the list, so its current
-;; workgroup's working wconfig is updated last, in case that
-;; workgroup is current in one or more other frames.  This isn't
-;; perfect, since a different workgroup could be current in more
-;; than one of the other frame, but it's close enough for now, and
-;; avoids a bunch of extra complexity."
-;;   (dolist (frame (let ((sf (selected-frame)))
-;;                    (append (remove sf (frame-list)) (list sf))))
-;;     (with-selected-frame frame
-;;       (wg-update-current-workgroup-working-wconfig))))
-
 (defun wg-perform-session-maintenance ()
   "Perform various maintenance operations on the current Workgroups session."
-  ;; (wg-update-all-current-workgroup-working-wconfigs)
   (wg-update-current-workgroup-working-wconfig)
   (wg-update-all-base-wconfigs)
   (wg-gc-bufs)
@@ -3323,8 +3246,8 @@ parameters and the parameters of all its workgroups."
     (wg-read-object
      (or prompt (format "Name (default: %S): " default))
      (lambda (new) (and (stringp new)
-                        (not (equal new ""))
-                        (wg-unique-workgroup-name-p new)))
+                   (not (equal new ""))
+                   (wg-unique-workgroup-name-p new)))
      "Please enter a unique, non-empty name"
      nil nil nil nil default)))
 
@@ -4027,15 +3950,6 @@ Think of it as `save-buffer' for Workgroups sessions."
           (filename (wg-write-session-file filename))
           (t (call-interactively 'wg-write-session-file)))))
 
-;; (defun wg-save-session ()
-;;   "Save the current Workgroups session to its visited file if modified.
-;; Think of it as `save-buffer' for Workgroups sessions."
-;;   (interactive)
-;;   (wg-acond
-;;    ((not (wg-modified-p)) (wg-message "(The session is unmodified)"))
-;;    ((wg-session-file-name (wg-current-session)) (wg-write-session-file it))
-;;    (t (call-interactively 'wg-write-session-file))))
-
 (defun wg-query-for-save ()
   "Query for save when `wg-modified-p'."
   (or (not (wg-modified-p))
@@ -4282,7 +4196,7 @@ processes exist, screwing up the window config right before
 Workgroups saves it.  This advice freezes `wg-current-wconfig' in
 its correct state, prior to any window-config changes caused by
 `s-b-k-e'."
-  (wg-with-current-wconfig (wg-frame-to-wconfig) (selected-frame)
+  (wg-with-current-wconfig nil (wg-frame-to-wconfig)
     ad-do-it))
 
 
@@ -4667,7 +4581,7 @@ Called when `workgroups-mode' is turned off."
   (wg-add-or-remove-hooks
    remove
    'kill-emacs-query-functions 'wg-save-session-on-emacs-exit
-   'delete-frame-hook 'wg-update-base-wconfigs-from-frame-if-necessary
+   'delete-frame-hook 'wg-update-working-wconfig-on-delete-frame
    'wg-pre-window-configuration-change-hook 'wg-update-working-wconfig-hook
    'window-configuration-change-hook 'wg-flag-window-configuration-changed
    'post-command-hook 'wg-undoify-window-configuration-change
