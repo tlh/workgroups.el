@@ -451,6 +451,10 @@ variable, and the cadr as the key."
   "Return BUFFER's major-mode."
   (with-current-buffer buffer-or-name major-mode))
 
+(defun wg-current-buffer-p (buffer-or-name)
+  "Return t if BUFFER-OR-NAME is the current buffer, nil otherwise."
+  (eq (wg-get-buffer buffer-or-name) (current-buffer)))
+
 (defmacro wg-buffer-local-setq (buffer var value)
   "`setq' VAR to VALUE while BUFFER is current.
 Note that this won't make VAR buffer-local if it isn't already."

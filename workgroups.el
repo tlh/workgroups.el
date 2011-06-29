@@ -1691,12 +1691,15 @@ KEY non-nil returns a list of the results of calling KEY on each win."
 See `wg-serialize-help-buffer'."
   (require 'help-mode)
   (wg-dbind (this-function item stack forward-stack) (wg-buf-special-data buf)
-    (let ((help-window-select t))
-      (apply (car item) (cdr item))
-      (set-buffer (window-buffer (selected-window)))
+    (condition-case err
+        (apply (car item) (cdr item))
+      (error (message "%s" err)))
+    (wg-awhen (get-buffer "*Help*")
+      (set-buffer it)
       (wg-when-boundp (help-xref-stack help-xref-forward-stack)
         (setq help-xref-stack stack
-              help-xref-forward-stack forward-stack)))))
+              help-xref-forward-stack forward-stack))
+      (current-buffer))))
 
 (defun wg-serialize-help-buffer (buffer)
   "Serialize a help buffer.
@@ -1839,15 +1842,17 @@ If BUF's file doesn't exist, call `wg-restore-default-buffer'"
 
 (defun wg-restore-special-buffer (buf)
   "Restore a buffer with DESERIALIZER-FN."
-  (wg-when-let ((special-data (wg-buf-special-data buf)))
-    (switch-to-buffer
-     (save-window-excursion
-       (condition-case err
-           (funcall (car special-data) buf)
-         (error (message "Error deserializing %S: %S"
-                         (wg-buf-name buf) err)))) t)
+  (wg-when-let
+      ((special-data (wg-buf-special-data buf))
+       (buffer (save-window-excursion
+                 (condition-case err
+                     (funcall (car special-data) buf)
+                   (error (message "Error deserializing %S: %S"
+                                   (wg-buf-name buf) err)
+                          nil)))))
+    (switch-to-buffer buffer t)
     (wg-set-buffer-uid-or-error (wg-buf-uid buf))
-    (current-buffer)))
+    buffer))
 
 (defun wg-restore-buffer (buf)
   "Restore BUF and return it."
@@ -2724,6 +2729,8 @@ BUFFER-LIST nil defaults to `buffer-list'."
               (remove-if-not (lambda (uid) (member uid all-buf-uids)) it
                              :key 'wg-buf-uid))))
 
+
+
 (defun wg-perform-session-maintenance ()
   "Perform various maintenance operations on the current Workgroups session."
   (wg-update-current-workgroup-working-wconfig)
@@ -2923,13 +2930,13 @@ Also save the msg to `wg-last-message'."
 ;; FIXME: add `wg-display-max-lines' to chop long display strings at max-line
 ;; and element-name boundaries
 
-(defun wg-element-display (elt elt-string current-p previous-p)
+(defun wg-element-display (elt elt-string &optional current-elt-p previous-elt-p)
   "Return display string for ELT."
-  (cond ((funcall current-p elt)
+  (cond ((and current-elt-p (funcall current-elt-p elt))
          (wg-fontify (:cur (concat wg-list-display-decor-current-left
                                    elt-string
                                    wg-list-display-decor-current-right))))
-        ((funcall previous-p elt)
+        ((and previous-elt-p (funcall previous-elt-p elt))
          (wg-fontify (:prev (concat wg-list-display-decor-previous-left
                                     elt-string
                                     wg-list-display-decor-previous-right))))
@@ -2941,8 +2948,8 @@ Also save the msg to `wg-last-message'."
     (wg-element-display
      workgroup
      (format "%d: %s" index (wg-workgroup-name workgroup))
-     (lambda (wg) (wg-current-workgroup-p wg))
-     (lambda (wg) (wg-previous-workgroup-p wg)))))
+     'wg-current-workgroup-p
+     'wg-previous-workgroup-p)))
 
 (defun wg-buffer-display (buffer index)
   "Return display string for BUFFER. INDEX is ignored."
@@ -2950,26 +2957,48 @@ Also save the msg to `wg-last-message'."
     (wg-element-display
      (wg-get-buffer buffer)
      (format "%s" (wg-buffer-name buffer))
-     (lambda (b) (eq (wg-get-buffer b) (current-buffer)))
-     (lambda (b) nil))))
+     'wg-current-buffer-p)))
+
+
+;; (defun wg-display-internal (elt-fn list)
+;;   "Return display string built by calling ELT-FN on each element of LIST."
+;;   (let ((div (wg-add-face :div wg-list-display-decor-divider))
+;;         (i -1))
+;;     (wg-fontify
+;;       (:brace wg-list-display-decor-left-brace)
+;;       (if (not list) (funcall elt-fn nil nil)
+;;         (wg-doconcat (elt list div) (funcall elt-fn elt (incf i))))
+;;       (:brace wg-list-display-decor-right-brace))))
+
+(defcustom wg-display-max-lines 1
+  "FIXME: docstring this"
+  :type 'integer
+  :group 'workgroups)
+
+
 
 (defun wg-display-internal (elt-fn list)
   "Return display string built by calling ELT-FN on each element of LIST."
   (let ((div (wg-add-face :div wg-list-display-decor-divider))
-        (i -1))
-    (wg-fontify
-      (:brace wg-list-display-decor-left-brace)
-      (if (not list) (funcall elt-fn nil nil)
-        (wg-doconcat (elt list div) (funcall elt-fn elt (incf i))))
-      (:brace wg-list-display-decor-right-brace))))
+        (wid (window-width (minibuffer-window)))
+        (i -1)
+        (str))
+    (setq str
+          (wg-fontify
+            (:brace wg-list-display-decor-left-brace)
+            (if (not list) (funcall elt-fn nil nil)
+              (wg-doconcat (elt list div) (funcall elt-fn elt (incf i))))
+            (:brace wg-list-display-decor-right-brace)))
+    ;; (subseq str 0 wid)
+    ))
 
 (defun wg-workgroup-list-display (&optional workgroup-list)
   "Return the Workgroups list display string.
 The string contains the names of all workgroups in `wg-workgroup-list',
 decorated with faces, dividers and strings identifying the
 current and previous workgroups."
-  (wg-display-internal
-   'wg-workgroup-display (or workgroup-list (wg-workgroup-list))))
+  (wg-display-internal 'wg-workgroup-display
+                       (or workgroup-list (wg-workgroup-list))))
 
 ;; TODO: Possibly add scroll animation for the buffer list display during
 ;; `wg-next-buffer' and `wg-previous-buffer'
@@ -3256,8 +3285,8 @@ parameters and the parameters of all its workgroups."
     (wg-read-object
      (or prompt (format "Name (default: %S): " default))
      (lambda (new) (and (stringp new)
-                        (not (equal new ""))
-                        (wg-unique-workgroup-name-p new)))
+                   (not (equal new ""))
+                   (wg-unique-workgroup-name-p new)))
      "Please enter a unique, non-empty name"
      nil nil nil nil default)))
 
