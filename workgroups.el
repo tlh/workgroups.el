@@ -2730,6 +2730,10 @@ BUFFER-LIST nil defaults to `buffer-list'."
                              :key 'wg-buf-uid))))
 
 
+;; FIXME: Duplicate buf names probably shouldn't be allowed.  An unrelated error
+;; causes two *scratch* buffers to be present, triggering the "uids don't match"
+;; error.  Write something to remove bufs with duplicate names.
+
 
 (defun wg-perform-session-maintenance ()
   "Perform various maintenance operations on the current Workgroups session."
@@ -4487,6 +4491,7 @@ before selecting a new frame."
    (kbd "C-t C-m")    'wg-toggle-mode-line-display
    (kbd "C-t C-m")    'wg-toggle-morph
    (kbd "C-t C-b")    'wg-toggle-buffer-list-filtration
+   (kbd "C-t C-d")    'wg-toggle-window-dedicated-p
 
 
    ;; echoing
@@ -4495,7 +4500,7 @@ before selecting a new frame."
    (kbd "E")          'wg-echo-current-workgroup
    (kbd "C-e")        'wg-echo-all-workgroups
    (kbd "e")          'wg-echo-all-workgroups
-   (kbd "C-t")        'wg-echo-time
+   ;; FIXME: possibly get rid of the time stuff
    (kbd "T")          'wg-echo-time
    (kbd "V")          'wg-echo-version
    (kbd "C-m")        'wg-echo-last-message
