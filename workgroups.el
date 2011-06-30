@@ -999,11 +999,24 @@ Anything else is formatted with %s to produce a string."
               ((stringp spec) spec)
               (t `(format "%s" ,spec))))))
 
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; ;;
+;; ;; IMPORTANT FIXME: Some commands trigger this error incorrectly:
+;; ;;  C-u C-z C-h t
+;; ;;  tmm-menubar
+;; ;;
+;; (defun wg-barf-on-active-minibuffer ()
+;;   "Throw an error when the minibuffer is active."
+;;   (unless (zerop (minibuffer-depth))
+;;     (error "Workgroup operations aren't permitted while the \
+;; minibuffer is active.")))
+
 (defun wg-barf-on-active-minibuffer ()
   "Throw an error when the minibuffer is active."
-  (unless (zerop (minibuffer-depth))
+  (when (wg-minibuffer-active-p)
     (error "Workgroup operations aren't permitted while the \
-minibuffer is active.")))
+minibuffer is active: %s")))
 
 (defmacro wg-set-parameter (place parameter value)
   "Set PARAMETER to VALUE at PLACE.
@@ -2552,7 +2565,7 @@ Added to `post-command-hook'."
          ;; and undoification is still on for the current command
          wg-undoify-window-configuration-change
          ;; and the change didn't occur while the minibuffer is active,
-         (zerop (minibuffer-depth)))
+         (wg-minibuffer-inactive-p))
     ;; and there's a current workgroup,
     (wg-when-let ((workgroup (wg-current-workgroup t)))
       ;; add the current wconfig to that workgroup's undo list:
@@ -2566,7 +2579,8 @@ Added to `post-command-hook'."
   "Used in before advice on all functions that trigger
 `window-configuration-change-hook' to save up to date undo info
 before the change."
-  (unless wg-already-updated-working-wconfig
+  (when (and (not wg-already-updated-working-wconfig)
+             (wg-minibuffer-inactive-p))
     (wg-update-current-workgroup-working-wconfig)
     (setq wg-already-updated-working-wconfig t)))
 
@@ -2984,7 +2998,7 @@ Also save the msg to `wg-last-message'."
 (defun wg-display-internal (elt-fn list)
   "Return display string built by calling ELT-FN on each element of LIST."
   (let ((div (wg-add-face :div wg-list-display-decor-divider))
-        (wid (window-width (minibuffer-window)))
+        (wwidth (window-width (minibuffer-window)))
         (i -1)
         (str))
     (setq str
@@ -2993,7 +3007,7 @@ Also save the msg to `wg-last-message'."
             (if (not list) (funcall elt-fn nil nil)
               (wg-doconcat (elt list div) (funcall elt-fn elt (incf i))))
             (:brace wg-list-display-decor-right-brace)))
-    ;; (subseq str 0 wid)
+    ;; (subseq str 0 wwidth)
     ))
 
 (defun wg-workgroup-list-display (&optional workgroup-list)

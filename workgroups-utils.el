@@ -547,6 +547,14 @@ the cadr as the accessor function."
 
 ;;; misc
 
+(defun wg-minibuffer-inactive-p ()
+  "Return t when `minibuffer-depth' returns zero, nil otherwise."
+  (zerop (minibuffer-depth)))
+
+(defun wg-minibuffer-active-p ()
+  "Return t when `minibuffer-depth' does not return zero, nil otherwise."
+  (not (wg-minibuffer-inactive-p)))
+
 (defun wg-fill-keymap (keymap &rest binds)
   "Return KEYMAP after defining in it all keybindings in BINDS."
   (while binds
