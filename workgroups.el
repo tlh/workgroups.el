@@ -157,18 +157,24 @@ when it's found with `wg-find-session-file'."
 (defcustom wg-emacs-exit-save-behavior 'save
   "Determines save behavior on Emacs exit.
 Possible values:
-`ask'     Ask the user whether to save if there are unsaved changes
-`save'    Call `wg-save-session' when there are unsaved changes
-`nosave'  Exit Emacs without saving changes"
+`ask'
+  Ask the user whether to save if there are unsaved changes
+`save'
+  Call `wg-save-session' when there are unsaved changes
+`nil' or any other value
+  Exit Emacs without saving changes"
   :type 'symbol
   :group 'workgroups)
 
 (defcustom wg-workgroups-mode-exit-save-behavior 'save
   "Determines save behavior on `workgroups-mode' exit.
 Possible values:
-`ask'     Ask the user whether to saveif there are unsaved changes
-`save'    Call `wg-save-session' when there are unsaved changes
-`nosave'  Exit `workgroups-mode' without saving changes"
+`ask'
+  Ask the user whether to saveif there are unsaved changes
+`save'
+  Call `wg-save-session' when there are unsaved changes
+`nil' or any other value
+  Exit `workgroups-mode' without saving changes"
   :type 'symbol
   :group 'workgroups)
 
@@ -999,24 +1005,11 @@ Anything else is formatted with %s to produce a string."
               ((stringp spec) spec)
               (t `(format "%s" ,spec))))))
 
-
-;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; ;;
-;; ;; IMPORTANT FIXME: Some commands trigger this error incorrectly:
-;; ;;  C-u C-z C-h t
-;; ;;  tmm-menubar
-;; ;;
-;; (defun wg-barf-on-active-minibuffer ()
-;;   "Throw an error when the minibuffer is active."
-;;   (unless (zerop (minibuffer-depth))
-;;     (error "Workgroup operations aren't permitted while the \
-;; minibuffer is active.")))
-
 (defun wg-barf-on-active-minibuffer ()
   "Throw an error when the minibuffer is active."
   (when (wg-minibuffer-active-p)
     (error "Workgroup operations aren't permitted while the \
-minibuffer is active: %s")))
+minibuffer is active")))
 
 (defmacro wg-set-parameter (place parameter value)
   "Set PARAMETER to VALUE at PLACE.
@@ -1951,7 +1944,7 @@ a wtree."
   (set-frame-parameter
    nil 'scroll-bar-width (wg-wconfig-scroll-bar-width wconfig)))
 
-;; FIXME: throw a specific error condition if the restoration was unsuccessful
+;; FIXME: throw a specific error if the restoration was unsuccessful
 (defun wg-restore-wconfig (wconfig)
   "Restore WCONFIG in `selected-frame'."
   (let ((wg-record-incorrectly-restored-bufs t)
@@ -3303,8 +3296,8 @@ parameters and the parameters of all its workgroups."
     (wg-read-object
      (or prompt (format "Name (default: %S): " default))
      (lambda (new) (and (stringp new)
-                   (not (equal new ""))
-                   (wg-unique-workgroup-name-p new)))
+                        (not (equal new ""))
+                        (wg-unique-workgroup-name-p new)))
      "Please enter a unique, non-empty name"
      nil nil nil nil default)))
 
@@ -4631,21 +4624,25 @@ as Workgroups' command remappings."
 
 ;;; workgroups-mode
 
+(defun wg-save-session-on-exit (behavior)
+  "Perform session-saving operations based on BEHAVIOR."
+  (case behavior
+    (ask (wg-query-for-save))
+    (save (if (wg-session-file-name (wg-current-session))
+              (call-interactively 'wg-save-session)
+            (wg-query-for-save)))))
+
 (defun wg-save-session-on-emacs-exit ()
-  "Conditionally call `wg-query-for-save'.
+  "Call `wg-save-session-on-exit' with `wg-emacs-exit-save-behavior'.
 Added to `kill-emacs-query-functions'."
-  (case wg-emacs-exit-save-behavior
-    (ask (wg-query-for-save) t)
-    (save (call-interactively 'wg-save-session) t)
-    (nosave t)))
+  (wg-save-session-on-exit wg-emacs-exit-save-behavior)
+  t)
 
 (defun wg-save-session-on-workgroups-mode-exit ()
-  "Conditionally call `wg-query-for-save'.
+  "Call `wg-save-session-on-exit' with `wg-workgroups-mode-exit-save-behavior'.
 Called when `workgroups-mode' is turned off."
-  (case wg-workgroups-mode-exit-save-behavior
-    (ask (wg-query-for-save) t)
-    (save (call-interactively 'wg-save-session) t)
-    (nosave t)))
+  (wg-save-session-on-exit wg-workgroups-mode-exit-save-behavior)
+  t)
 
 (defun wg-add-or-remove-workgroups-hooks (remove)
   "Add or remove all of Workgroups' hooks, depending on REMOVE."
