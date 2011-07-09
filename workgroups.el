@@ -157,24 +157,18 @@ when it's found with `wg-find-session-file'."
 (defcustom wg-emacs-exit-save-behavior 'save
   "Determines save behavior on Emacs exit.
 Possible values:
-`ask'
-  Ask the user whether to save if there are unsaved changes
-`save'
-  Call `wg-save-session' when there are unsaved changes
-`nil' or any other value
-  Exit Emacs without saving changes"
+`ask'         - Ask the user whether to save if there are unsaved changes
+`save'        - Call `wg-save-session' when there are unsaved changes
+Anything else - Exit Emacs without saving changes"
   :type 'symbol
   :group 'workgroups)
 
 (defcustom wg-workgroups-mode-exit-save-behavior 'save
   "Determines save behavior on `workgroups-mode' exit.
 Possible values:
-`ask'
-  Ask the user whether to saveif there are unsaved changes
-`save'
-  Call `wg-save-session' when there are unsaved changes
-`nil' or any other value
-  Exit `workgroups-mode' without saving changes"
+`ask'         - Ask the user whether to saveif there are unsaved changes
+`save'        - Call `wg-save-session' when there are unsaved changes
+Anything else - Exit `workgroups-mode' without saving changes"
   :type 'symbol
   :group 'workgroups)
 
@@ -4521,7 +4515,7 @@ before selecting a new frame."
    (kbd "?")          'wg-help
 
    )
-  "Make and return the keymap that sits on `wg-prefix-key'.")
+  "The keymap that sits on `wg-prefix-key'.")
 
 (defun wg-make-workgroups-mode-map ()
   "Return Workgroups' minor-mode-map.
