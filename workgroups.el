@@ -1447,6 +1447,12 @@ BUFFER or `wg-default-buffer' is visible in the only window."
     (wg-win (wg-win-edges w))
     (wg-wtree (wg-wtree-edges w))))
 
+(defun wg-copy-w (w)
+  "Return a copy of W.  W should be a wg-win or a wg-wtree."
+  (etypecase w
+    (wg-win (wg-copy-win w))
+    (wg-wtree (wg-copy-wtree w))))
+
 (defun wg-set-edges (w edges)
   "Set W's edge list, and return W."
   (etypecase w
