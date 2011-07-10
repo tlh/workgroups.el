@@ -143,7 +143,7 @@ it should be made here."
   :group 'workgroups)
 
 (defcustom wg-default-session-file
-  (concat user-emacs-directory "workgroups-session")
+  (concat user-emacs-directory "default-workgroups-session")
   "FIXME: nix or docstring this"
   :type 'file
   :group 'workgroups)
