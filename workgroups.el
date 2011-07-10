@@ -4628,6 +4628,14 @@ as Workgroups' command remappings."
 
 ;;; workgroups-mode
 
+(defun wg-find-session-file-on-workgroups-mode-entry ()
+  "FIXME: docstring this"
+  (when (and wg-use-default-session-file
+             (file-exists-p wg-default-session-file))
+    (condition-case err
+        (wg-find-session-file wg-default-session-file)
+      (error (message "Error finding `wg-default-session-file': %s" err)))))
+
 (defun wg-save-session-on-exit (behavior)
   "Perform session-saving operations based on BEHAVIOR."
   (case behavior
@@ -4694,6 +4702,7 @@ If ARG is anything else, turn on `workgroups-mode'."
     (wg-enable-all-advice)
     (wg-add-or-remove-workgroups-hooks nil)
     (wg-add-mode-line-display)
+    (wg-find-session-file-on-workgroups-mode-entry)
     (run-hooks 'workgroups-mode-hook))
    (t
     (wg-save-session-on-workgroups-mode-exit)
