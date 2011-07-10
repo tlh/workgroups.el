@@ -157,18 +157,24 @@ when it's found with `wg-find-session-file'."
 (defcustom wg-emacs-exit-save-behavior 'save
   "Determines save behavior on Emacs exit.
 Possible values:
-`ask'         - Ask the user whether to save if there are unsaved changes
-`save'        - Call `wg-save-session' when there are unsaved changes
-Anything else - Exit Emacs without saving changes"
+
+`ask'           Ask the user whether to save if there are unsaved changes
+
+`save'          Call `wg-save-session' when there are unsaved changes
+
+Anything else   Exit Emacs without saving changes"
   :type 'symbol
   :group 'workgroups)
 
 (defcustom wg-workgroups-mode-exit-save-behavior 'save
   "Determines save behavior on `workgroups-mode' exit.
 Possible values:
-`ask'         - Ask the user whether to saveif there are unsaved changes
-`save'        - Call `wg-save-session' when there are unsaved changes
-Anything else - Exit `workgroups-mode' without saving changes"
+
+`ask'           Ask the user whether to saveif there are unsaved changes
+
+`save'          Call `wg-save-session' when there are unsaved changes
+
+Anything else   Exit `workgroups-mode' without saving changes"
   :type 'symbol
   :group 'workgroups)
 
@@ -206,8 +212,8 @@ minibuffer is active."
 ;; recreating buffers that couldn't be restored.  So it takes over the
 ;; 'incorrect restoration' portion of the base wconfig's duty.  All that leaves
 ;; to base wconfigs is that they're a saved wconfig the user felt was important.
-;; So why not allow more of of them?  A workgroup could store an unlimited
-;; number of saved wconfigs.
+;; So why not allow more of of them?  A workgroup could stash an unlimited
+;; number of wconfigs.
 ;;
 ;; TODO:
 ;;
