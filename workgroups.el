@@ -4010,11 +4010,22 @@ Think of it as `write-file' for Workgroups sessions."
   (wg-mark-everything-unmodified)
   (wg-fontified-message (:cmd "Wrote: ") (:file filename)))
 
+;; (defun wg-save-session ()
+;;   "Save the current Workgroups session to its visited file if modified.
+;; Think of it as `save-buffer' for Workgroups sessions."
+;;   (interactive)
+;;   (let ((filename (wg-session-file-name (wg-current-session))))
+;;     (cond ((not (wg-modified-p)) (wg-message "(The session is unmodified)"))
+;;           (filename (wg-write-session-file filename))
+;;           (t (call-interactively 'wg-write-session-file)))))
+
 (defun wg-save-session ()
   "Save the current Workgroups session to its visited file if modified.
 Think of it as `save-buffer' for Workgroups sessions."
   (interactive)
-  (let ((filename (wg-session-file-name (wg-current-session))))
+  (let ((filename (or (wg-session-file-name (wg-current-session))
+                      (when wg-use-default-session-file
+                        wg-default-session-file))))
     (cond ((not (wg-modified-p)) (wg-message "(The session is unmodified)"))
           (filename (wg-write-session-file filename))
           (t (call-interactively 'wg-write-session-file)))))
@@ -4654,11 +4665,20 @@ as Workgroups' command remappings."
         (wg-find-session-file wg-default-session-file)
       (error (message "Error finding `wg-default-session-file': %s" err)))))
 
+;; (defun wg-save-session-on-exit (behavior)
+;;   "Perform session-saving operations based on BEHAVIOR."
+;;   (case behavior
+;;     (ask (wg-query-for-save))
+;;     (save (if (wg-session-file-name (wg-current-session))
+;;               (call-interactively 'wg-save-session)
+;;             (wg-query-for-save)))))
+
 (defun wg-save-session-on-exit (behavior)
   "Perform session-saving operations based on BEHAVIOR."
   (case behavior
     (ask (wg-query-for-save))
-    (save (if (wg-session-file-name (wg-current-session))
+    (save (if (or wg-use-default-session-file
+                  (wg-session-file-name (wg-current-session)))
               (call-interactively 'wg-save-session)
             (wg-query-for-save)))))
 
