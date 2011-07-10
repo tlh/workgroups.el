@@ -1783,8 +1783,9 @@ be any difference between the two except how the name of the
 buffer is generated."
   (with-current-buffer buffer
     (when (eq major-mode 'term-mode)
-      (list 'wg-deserialize-term-buffer
-            (wg-last1 (process-command (get-buffer-process buffer)))))))
+      (wg-when-let ((process (get-buffer-process buffer)))
+        (list 'wg-deserialize-term-buffer
+              (wg-last1 (process-command process)))))))
 
 
 
