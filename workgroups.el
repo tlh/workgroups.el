@@ -1441,7 +1441,7 @@ BUFFER or `wg-default-buffer' is visible in the only window."
 
 ;;; win/wtree/wconfig utils
 
-(defun wg-edges (w)
+(defun wg-w-edges (w)
   "Return W's edge list."
   (etypecase w
     (wg-win (wg-win-edges w))
@@ -1465,7 +1465,7 @@ BUFFER or `wg-default-buffer' is visible in the only window."
 (defmacro wg-with-edges (w spec &rest body)
   "Bind W's edge list to SPEC and eval BODY."
   (declare (indent 2))
-  `(wg-dbind ,spec (wg-edges ,w) ,@body))
+  `(wg-dbind ,spec (wg-w-edges ,w) ,@body))
 
 (defmacro wg-with-bounds (wtree dir spec &rest body)
   "Bind SPEC to W's bounds in DIR, and eval BODY.
@@ -1495,7 +1495,7 @@ BUFFER or `wg-default-buffer' is visible in the only window."
 
 (defun wg-w-edge-operation (w edges op)
   "Return a copy of W with its edges mapped against EDGES through OP."
-  (wg-set-edges w (mapcar* op (wg-edges w) edges)))
+  (wg-set-edges w (mapcar* op (wg-w-edges w) edges)))
 
 (defun wg-first-win (w)
   "Return the first actual window in W."
@@ -1509,7 +1509,7 @@ BUFFER or `wg-default-buffer' is visible in the only window."
 
 (defun wg-minify-win (w)
   "Set W's edges to the smallest allowable."
-  (let* ((edges (wg-edges w))
+  (let* ((edges (wg-w-edges w))
          (left (car edges))
          (top (cadr edges)))
     (wg-set-edges w (list left top
@@ -1543,7 +1543,7 @@ BUFFER or `wg-default-buffer' is visible in the only window."
 (defun wg-equal-wtrees (w1 w2)
   "Return t when W1 and W2 have equal structure."
   (cond ((and (wg-win-p w1) (wg-win-p w2))
-         (equal (wg-edges w1) (wg-edges w2)))
+         (equal (wg-w-edges w1) (wg-w-edges w2)))
         ((and (wg-wtree-p w1) (wg-wtree-p w2))
          (and (eq (wg-wtree-dir w1) (wg-wtree-dir w2))
               (equal (wg-wtree-edges w1) (wg-wtree-edges w2))
@@ -1977,7 +1977,7 @@ If you want, restore them manually and try again."
 
 (defun wg-morph-step-edges (w1 w2)
   "Step W1's edges toward W2's by `wg-morph-hsteps' and `wg-morph-vsteps'."
-  (wg-step-edges (wg-edges w1) (wg-edges w2)
+  (wg-step-edges (wg-w-edges w1) (wg-w-edges w2)
                  wg-morph-hsteps wg-morph-vsteps))
 
 (defun wg-morph-determine-steps (gui-steps &optional term-steps)
