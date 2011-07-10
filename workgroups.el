@@ -4000,6 +4000,8 @@ Think of it as `write-file' for Workgroups sessions."
   (when (and confirm (file-exists-p filename))
     (unless (y-or-n-p (format "File `%s' exists; overwrite? " filename))
       (error "Cancelled")))
+  (unless (file-writable-p filename)
+    (error "File %s can't be written to" filename))
   (wg-perform-session-maintenance)
   (setf (wg-session-file-name (wg-current-session)) filename)
   (wg-write-sexp-to-file
