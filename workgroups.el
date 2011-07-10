@@ -4264,17 +4264,20 @@ before selecting a new frame."
 (defun wg-enable-all-advice ()
   "Enable and activate all of Workgroups' advice."
 
+  ;; From advice.el:
+  ;;
+  ;; (defmacro ad-define-subr-args (subr arglist)
+  ;;   `(put ,subr 'ad-subr-arglist (list ,arglist)))
+
   ;; switch-to-buffer
-  (ad-define-subr-args
-   'switch-to-buffer '(buffer-or-name &optional norecord))
+  ;; (ad-define-subr-args 'switch-to-buffer '(buffer-or-name &optional norecord))
   (ad-enable-advice 'switch-to-buffer 'after 'wg-auto-associate-buffer)
   (ad-enable-advice
    'switch-to-buffer 'before 'wg-pre-window-configuration-change-hook)
   (ad-activate 'switch-to-buffer)
 
   ;; set-window-buffer
-  (ad-define-subr-args
-   'set-window-buffer '(window buffer-or-name &optional keep-margins))
+  ;; (ad-define-subr-args 'set-window-buffer '(window buffer-or-name &optional keep-margins))
   (ad-enable-advice 'set-window-buffer 'after 'wg-auto-associate-buffer)
   (ad-enable-advice
    'set-window-buffer 'before 'wg-pre-window-configuration-change-hook)
