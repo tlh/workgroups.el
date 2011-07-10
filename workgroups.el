@@ -1531,14 +1531,24 @@ BUFFER or `wg-default-buffer' is visible in the only window."
   (wg-with-edges w (l1 t1 r1 b1)
     (if height (- b1 t1) (- r1 l1))))
 
+;; (defun wg-adjust-w-size (w width-fn height-fn &optional new-left new-top)
+;;   "Adjust W's width and height with WIDTH-FN and HEIGHT-FN."
+;;   (wg-with-edges w (left top right bottom)
+;;     (let ((left (or new-left left)) (top (or new-top top)))
+;;       (wg-set-edges w (list left
+;;                             top
+;;                             (+ left (funcall width-fn  (- right  left)))
+;;                             (+ top  (funcall height-fn (- bottom top))))))))
+
 (defun wg-adjust-w-size (w width-fn height-fn &optional new-left new-top)
   "Adjust W's width and height with WIDTH-FN and HEIGHT-FN."
   (wg-with-edges w (left top right bottom)
     (let ((left (or new-left left)) (top (or new-top top)))
-      (wg-set-edges w (list left
-                            top
-                            (+ left (funcall width-fn  (- right  left)))
-                            (+ top  (funcall height-fn (- bottom top))))))))
+      (wg-set-edges (wg-copy-w w)
+                    (list left
+                          top
+                          (+ left (funcall width-fn  (- right  left)))
+                          (+ top  (funcall height-fn (- bottom top))))))))
 
 (defun wg-scale-w-size (w width-scale height-scale)
   "Scale W's size by WIDTH-SCALE and HEIGHT-SCALE."
