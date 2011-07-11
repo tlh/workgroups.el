@@ -127,16 +127,6 @@ it should be made here."
 
 ;; save and load customization
 
-;; FIXME: add default directory and file customizations, and a save
-;; customization like: "<jlf> or maybe have wg-save-file-name be one of 'auto
-;; (as above), 'confirm-auto (as above, but overridable), or 'ask (always ask)
-;; [10:30]"
-
-;; FIXME: add autosave, and an autosave timer.  Autosaves should not save over
-;; the currently visited file.  And if there's an autosave file newer than the
-;; visited file, it should ask the user if they want to load the autosave.  Can
-;; this be piggybacked on Emacs' existing autosave?
-
 (defcustom wg-use-default-session-file t
   "FIXME: docstring this"
   :type 'boolean
@@ -4019,7 +4009,6 @@ Think of it as `write-file' for Workgroups sessions."
   (or (wg-session-file-name (wg-current-session))
       (and wg-use-default-session-file wg-default-session-file)))
 
-;; FIXME: add FORCE arg
 (defun wg-save-session (&optional force)
   "Save the current Workgroups session if it's been modified.
 Think of it as `save-buffer' for Workgroups sessions.  Optional
