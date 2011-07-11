@@ -3796,9 +3796,9 @@ will take you."
         (wg-awhen (wg-filtered-buffer-list) (wg-next-buffer-internal it prev))
         (wg-message (wg-buffer-command-display))))))
 
-(defun wg-previous-buffer (&optional fallback)
+(defun wg-previous-buffer ()
   "Switch to the next buffer in Workgroups' filtered buffer list."
-  (interactive "P")
+  (interactive)
   (wg-next-buffer t))
 
 (defun wg-bury-buffer (&optional buffer-or-name)
