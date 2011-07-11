@@ -3986,6 +3986,10 @@ Workgroups session object, etc."
 
 ;;; file commands
 
+(defun wg-read-session-save-file-name ()
+  "Read and return a new session filename."
+  (read-file-name "Save session as: "))
+
 (defun wg-write-session-file (filename &optional confirm)
   "Write the current session into file FILENAME.
 This makes the session visit that file, and marks it as not modified.
@@ -3995,7 +3999,7 @@ confirmation before overwriting an existing file.  Interactively,
 confirmation is required unless you supply a prefix argument.
 
 Think of it as `write-file' for Workgroups sessions."
-  (interactive (list (read-file-name "Save session as: ")
+  (interactive (list (wg-read-session-save-file-name)
                      (not current-prefix-arg)))
   (when (and confirm (file-exists-p filename))
     (unless (y-or-n-p (format "File `%s' exists; overwrite? " filename))
@@ -4010,32 +4014,38 @@ Think of it as `write-file' for Workgroups sessions."
   (wg-mark-everything-unmodified)
   (wg-fontified-message (:cmd "Wrote: ") (:file filename)))
 
-;; (defun wg-save-session ()
-;;   "Save the current Workgroups session to its visited file if modified.
-;; Think of it as `save-buffer' for Workgroups sessions."
-;;   (interactive)
-;;   (let ((filename (wg-session-file-name (wg-current-session))))
-;;     (cond ((not (wg-modified-p)) (wg-message "(The session is unmodified)"))
-;;           (filename (wg-write-session-file filename))
-;;           (t (call-interactively 'wg-write-session-file)))))
+(defun wg-determine-session-save-file-name ()
+  "Return the filename in which to save the session."
+  (or (wg-session-file-name (wg-current-session))
+      (and wg-use-default-session-file wg-default-session-file)))
 
-(defun wg-save-session ()
-  "Save the current Workgroups session to its visited file if modified.
-Think of it as `save-buffer' for Workgroups sessions."
-  (interactive)
-  (let ((filename (or (wg-session-file-name (wg-current-session))
-                      (when wg-use-default-session-file
-                        wg-default-session-file))))
-    (cond ((not (wg-modified-p)) (wg-message "(The session is unmodified)"))
-          (filename (wg-write-session-file filename))
-          (t (call-interactively 'wg-write-session-file)))))
+;; FIXME: add FORCE arg
+(defun wg-save-session (&optional force)
+  "Save the current Workgroups session if it's been modified.
+Think of it as `save-buffer' for Workgroups sessions.  Optional
+argument FORCE non-nil, or interactively with a prefix arg, save
+the session regardless of whether it's been modified."
+  (interactive "P")
+  (if (and (not (wg-modified-p)) (not force))
+      (wg-message "(The session is unmodified)")
+    (wg-write-session-file
+     (or (wg-determine-session-save-file-name)
+         (wg-read-session-save-file-name)))))
 
-(defun wg-query-for-save ()
+(defun wg-query-and-save-if-modified ()
   "Query for save when `wg-modified-p'."
   (or (not (wg-modified-p))
-      (not (y-or-n-p "Save modified workgroups? "))
-      (call-interactively 'wg-save-session)
-      t))
+      (when (y-or-n-p "Save modified workgroups? ")
+        (wg-save-session))))
+
+(defun wg-save-session-on-exit (behavior)
+  "Perform session-saving operations based on BEHAVIOR."
+  (case behavior
+    (ask (wg-query-and-save-if-modified))
+    (save
+     (if (wg-determine-session-save-file-name)
+         (wg-save-session)
+       (wg-query-and-save-if-modified)))))
 
 (defun wg-find-session-file (filename)
   "Load a session visiting FILENAME, creating one if none already exists."
@@ -4053,10 +4063,10 @@ Think of it as `save-buffer' for Workgroups sessions."
            (:cmd "Loaded: ")
            (:file filename)))
         (t
-         (when (wg-query-for-save)
-           (wg-reset-internal (wg-make-session :file-name filename))
-           (wg-fontified-message
-             (:cmd "(New Workgroups session file)"))))))
+         (wg-query-and-save-if-modified)
+         (wg-reset-internal (wg-make-session :file-name filename))
+         (wg-fontified-message
+           (:cmd "(New Workgroups session file)")))))
 
 (defun wg-find-file-in-new-workgroup (filename)
   "Create a new blank workgroup and find file FILENAME in it."
@@ -4664,23 +4674,6 @@ as Workgroups' command remappings."
     (condition-case err
         (wg-find-session-file wg-default-session-file)
       (error (message "Error finding `wg-default-session-file': %s" err)))))
-
-;; (defun wg-save-session-on-exit (behavior)
-;;   "Perform session-saving operations based on BEHAVIOR."
-;;   (case behavior
-;;     (ask (wg-query-for-save))
-;;     (save (if (wg-session-file-name (wg-current-session))
-;;               (call-interactively 'wg-save-session)
-;;             (wg-query-for-save)))))
-
-(defun wg-save-session-on-exit (behavior)
-  "Perform session-saving operations based on BEHAVIOR."
-  (case behavior
-    (ask (wg-query-for-save))
-    (save (if (or wg-use-default-session-file
-                  (wg-session-file-name (wg-current-session)))
-              (call-interactively 'wg-save-session)
-            (wg-query-for-save)))))
 
 (defun wg-save-session-on-emacs-exit ()
   "Call `wg-save-session-on-exit' with `wg-emacs-exit-save-behavior'.
