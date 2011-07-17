@@ -1,4 +1,4 @@
-;;; workgroups.el --- Workgroups For Windows (for Emacs)
+;;; workgroups.el --- Workgroups For for Emacs: Save Your Game
 ;;
 ;; Copyright (C) 2010, 2011 tlh
 ;;
@@ -128,7 +128,10 @@ it should be made here."
 ;; save and load customization
 
 (defcustom wg-use-default-session-file t
-  "FIXME: docstring this"
+  "Generally, non-nil means take care of saving and loading automatically,
+and nil means leave it up to the user.
+
+FIXME: docstring this"
   :type 'boolean
   :group 'workgroups)
 
