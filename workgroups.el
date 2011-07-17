@@ -1,4 +1,4 @@
-;;; workgroups.el --- Workgroups For for Emacs: Save Your Game
+;;; workgroups.el --- Workgroups For Emacs: Save Your Game
 ;;
 ;; Copyright (C) 2010, 2011 tlh
 ;;
