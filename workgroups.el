@@ -746,7 +746,12 @@ current workgroup"))
   :type 'string
   :group 'workgroups)
 
-
+(defcustom wg-associate-buffers t
+  "Non-nil means when emacs chooses a buffer to display in a
+workgroup, prefer buffers whose most recent appearance was in
+that workgroup."
+  :type 'boolean
+  :group 'workgroups)
 
 ;;; vars
 
@@ -886,6 +891,15 @@ let-bind this to nil around forms in which you don't want this to
 happen.")
 
 
+(defvar wg-buffer-workgroup nil
+  "Buffer-local variable associating each buffer with the
+  workgroup in which it most recently appeared.")
+(make-variable-buffer-local 'wg-buffer-workgroup)
+
+(defvar wg-deactivation-list nil
+  "A stack of workgroups that are currently being switched away from.
+Used to avoid associating the old workgroup's buffers with the
+new workgroup during a switch.")
 
 ;;; faces
 
@@ -2880,6 +2894,43 @@ that name and return it. Otherwise error."
 
 
 
+;;; buffer association
+
+(defun wg-associate-buffers (workgroup window-or-emacs-window-tree)
+  "Associate the buffers visible in window elements of
+WINDOW-OR-EMACS-WINDOW-TREE with the given WORKGROUP.
+WINDOW-OR-EMACS-WINDOW-TREE must be either a window or a tree of
+the form produced by `(car (window-tree))'."
+  (wg-aif (windowp window-or-emacs-window-tree)
+      (with-current-buffer (window-buffer window-or-emacs-window-tree)
+        (setq wg-buffer-workgroup workgroup))
+    (dolist (w (cddr window-or-emacs-window-tree))
+      (when w (wg-associate-buffers workgroup w)))))
+
+(defun wg-associate-frame-buffers ()
+  "Associate the buffers visible in the current frame with the
+current workgroup (unless it is currently being deactivated)."
+  (wg-awhen (wg-current-workgroup :noerror)
+    (unless (member it wg-deactivation-list)
+      (wg-associate-buffers it (car (window-tree))))))
+
+(defun wg-associate-all-frame-buffers ()
+  "Associate all visible buffers with the current
+workgroup (unless it is currently being deactivated)."
+  (mapcar 'wg-associate-frame-buffers (frame-list)))
+
+(defun wg-buffer-predicate (buffer)
+  "Return t iff the given BUFFER should be considered a candidate
+for display by `other-buffer' in the current workgroup."
+  (or (not wg-associate-buffers)
+      (wg-awhen (wg-current-workgroup :noerror)
+        (with-current-buffer buffer
+          (eq wg-buffer-workgroup it)))))
+
+(defun wg-after-make-frame (frame)
+  (set-frame-parameter frame 'buffer-predicate
+                       'wg-buffer-predicate))
+
 ;;; mode-line
 
 (defun wg-mode-line-buffer-association-indicator (workgroup)
@@ -3382,13 +3433,17 @@ blank session object."
         (current (wg-current-workgroup t)))
     (when (and (eq workgroup current) (not noerror))
       (error "Already on: %s" (wg-workgroup-name current)))
-    (wg-restore-workgroup workgroup)
-    (wg-set-previous-workgroup current)
-    (wg-set-current-workgroup workgroup)
-    (run-hooks 'wg-switch-to-workgroup-hook)
-    (wg-fontified-message
-      (:cmd "Switched:  ")
-      (wg-workgroup-list-display))))
+    (when current (push current wg-deactivation-list))
+    (unwind-protect
+        (progn
+          (wg-restore-workgroup workgroup)
+          (wg-set-previous-workgroup current)
+          (wg-set-current-workgroup workgroup)
+          (run-hooks 'wg-switch-to-workgroup-hook)
+          (wg-fontified-message
+           (:cmd "Switched:  ")
+           (wg-workgroup-list-display)))
+      (when current (pop wg-deactivation-list)))))
 
 (defun wg-switch-to-workgroup-other-frame (workgroup &optional n)
   "Switch to WORKGROUP in the frame N places cyclically from `selected-frame'.
@@ -4694,7 +4749,9 @@ Called when `workgroups-mode' is turned off."
    'ido-make-buffer-list-hook 'wg-set-ido-buffer-list
    'iswitchb-make-buflist-hook 'wg-set-iswitchb-buffer-list
    'kill-buffer-hook 'wg-auto-dissociate-buffer-hook
-   'kill-buffer-hook 'wg-update-buffer-in-buf-list))
+   'kill-buffer-hook 'wg-update-buffer-in-buf-list
+   'window-configuration-change-hook 'wg-associate-frame-buffers
+   'after-make-frame-functions 'wg-after-make-frame))
 
 (defun wg-add-workgroups-mode-minor-mode-entries ()
   "Add Workgroups' minor-mode entries.
@@ -4724,6 +4781,7 @@ If ARG is anything else, turn on `workgroups-mode'."
     (wg-add-workgroups-mode-minor-mode-entries)
     (wg-enable-all-advice)
     (wg-add-or-remove-workgroups-hooks nil)
+    (mapcar 'wg-after-make-frame (frame-list))
     (wg-add-mode-line-display)
     (wg-find-session-file-on-workgroups-mode-entry)
     (run-hooks 'workgroups-mode-hook))
