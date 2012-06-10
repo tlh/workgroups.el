@@ -313,6 +313,12 @@ wrapped status when `wg-morph' is complete."
   :type 'boolean
   :group 'workgroups)
 
+(defcustom wg-associate-buffers t
+  "Non-nil means when emacs chooses a buffer to display in a
+workgroup, prefer buffers whose most recent appearance was in
+that workgroup."
+  :type 'boolean
+  :group 'workgroups)
 
 ;;; vars
 
@@ -371,6 +377,15 @@ stable, but is left here for the time being.")
 (defvar wg-face-abbrevs nil
   "Assoc list mapping face abbreviations to face names.")
 
+(defvar wg-buffer-workgroup nil
+  "Buffer-local variable associating each buffer with the
+  workgroup in which it most recently appeared.")
+(make-variable-buffer-local 'wg-buffer-workgroup)
+
+(defvar wg-deactivation-list nil
+  "A stack of workgroups that are currently being switched away from.
+Used to avoid associating the old workgroup's buffers with the
+new workgroup during a switch.")
 
 ;;; faces
 
@@ -1429,6 +1444,43 @@ Query to overwrite if a workgroup with the same name exists."
                (member bname (wg-workgroup-buffer-list wg))))
 
 
+;;; buffer association
+
+(defun wg-associate-buffers (workgroup window-or-emacs-window-tree)
+  "Associate the buffers visible in window elements of
+WINDOW-OR-EMACS-WINDOW-TREE with the given WORKGROUP.
+WINDOW-OR-EMACS-WINDOW-TREE must be either a window or a tree of
+the form produced by `(car (window-tree))'."
+  (wg-aif (windowp window-or-emacs-window-tree)
+      (with-current-buffer (window-buffer window-or-emacs-window-tree)
+        (setq wg-buffer-workgroup workgroup))
+    (dolist (w (cddr window-or-emacs-window-tree))
+      (when w (wg-associate-buffers workgroup w)))))
+
+(defun wg-associate-frame-buffers ()
+  "Associate the buffers visible in the current frame with the
+current workgroup (unless it is currently being deactivated)."
+  (wg-awhen (wg-current-workgroup :noerror)
+    (unless (member it wg-deactivation-list)
+      (wg-associate-buffers it (car (window-tree))))))
+
+(defun wg-associate-all-frame-buffers ()
+  "Associate all visible buffers with the current
+workgroup (unless it is currently being deactivated)."
+  (mapcar 'wg-associate-frame-buffers (frame-list)))
+
+(defun wg-buffer-predicate (buffer)
+  "Return t iff the given BUFFER should be considered a candidate
+for display by `other-buffer' in the current workgroup."
+  (or (not wg-associate-buffers)
+      (wg-awhen (wg-current-workgroup :noerror)
+        (with-current-buffer buffer
+          (eq wg-buffer-workgroup it)))))
+
+(defun wg-after-make-frame (frame)
+  (set-frame-parameter frame 'buffer-predicate
+                       'wg-buffer-predicate))
+
 ;;; mode-line
 
 (defun wg-mode-line-string ()
@@ -1565,12 +1617,17 @@ current and previous workgroups."
 BASE nil means restore WORKGROUP's working config.
 BASE non-nil means restore WORKGROUP's base config."
   (interactive (list (wg-read-workgroup) current-prefix-arg))
-  (wg-awhen (wg-current-workgroup t)
-    (when (eq it workgroup) (error "Already on: %s" (wg-name it)))
-    (wg-update-working-config it))
-  (wg-restore-workgroup workgroup base)
-  (wg-set-previous-workgroup (wg-current-workgroup t))
-  (wg-set-current-workgroup workgroup)
+  (let ((cur-wg (wg-current-workgroup t)))
+    (wg-awhen cur-wg
+      (when (eq it workgroup) (error "Already on: %s" (wg-name it)))
+      (push cur-wg wg-deactivation-list))
+    (unwind-protect
+        (progn
+          (wg-awhen cur-wg (wg-update-working-config it))
+          (wg-restore-workgroup workgroup base)
+          (wg-set-previous-workgroup (wg-current-workgroup t))
+          (wg-set-current-workgroup workgroup))
+      (when cur-wg (pop wg-deactivation-list))))
   (run-hooks 'wg-switch-hook)
   (wg-fontified-msg (:cmd "Switched:  ") (wg-disp)))
 
@@ -2229,12 +2286,17 @@ If ARG is anything else, turn on `workgroups-mode'."
   (cond (workgroups-mode
          (add-hook 'kill-emacs-query-functions 'wg-emacs-exit-query)
          (add-hook 'delete-frame-functions 'wg-delete-frame)
+         (add-hook 'window-configuration-change-hook 'wg-associate-frame-buffers)
+         (add-hook 'after-make-frame-functions 'wg-after-make-frame)
+         (mapcar 'wg-after-make-frame (frame-list))
          (wg-set-prefix-key)
          (wg-mode-line-add-display))
         (t
          (wg-workgroups-mode-exit-query)
          (remove-hook 'kill-emacs-query-functions 'wg-emacs-exit-query)
          (remove-hook 'delete-frame-functions 'wg-delete-frame)
+         (remove-hook 'window-configuration-change-hook 'wg-associate-frame-buffers)
+         (remove-hook 'after-make-frame-functions 'wg-after-make-frame)
          (wg-unset-prefix-key)
          (wg-mode-line-remove-display))))
 
