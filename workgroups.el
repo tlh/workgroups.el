@@ -1574,6 +1574,15 @@ BASE non-nil means restore WORKGROUP's base config."
   (run-hooks 'wg-switch-hook)
   (wg-fontified-msg (:cmd "Switched:  ") (wg-disp)))
 
+(defun wg-capture-workgroup (name)
+  "Create and add a workgroup named NAME.
+Workgroup captures current window configuration."
+  (interactive (list (wg-read-new-workgroup-name)))
+  (let ((w (wg-make-default-workgroup name)))
+    (wg-check-and-add w)
+    (wg-switch-to-workgroup w)
+    (wg-fontified-msg (:cmd "Created: ") (:cur name) "  " (wg-disp))))
+
 (defun wg-create-workgroup (name)
   "Create and add a workgroup named NAME.
 If workgroups already exist, create a blank workgroup.  If no
