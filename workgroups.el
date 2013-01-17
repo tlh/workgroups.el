@@ -632,7 +632,7 @@ variable, and the cadr as the key."
   "Write the printable representation of SEXP to FILE."
   (with-temp-buffer
     (let (print-level print-length)
-      (insert (format "%S" sexp))
+      (insert (pp sexp))
       (write-file file))))
 
 (defun wg-read-sexp-from-file (file)
