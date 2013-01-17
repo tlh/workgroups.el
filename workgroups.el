@@ -151,8 +151,13 @@ Also used when a window's buffer can't be restored."
   :type 'string
   :group 'workgroups)
 
-(defcustom wg-restore-position nil
-  "Non-nil means restore frame position on workgroup restore."
+(defcustom wg-restore-frame-size nil
+  "Non-nil means restore frame size, in graphical emacs, on workgroup restore."
+  :type 'boolean
+  :group 'workgroups)
+
+(defcustom wg-restore-frame-position nil
+  "Non-nil means restore frame position, in graphical emacs, on workgroup restore."
   :type 'boolean
   :group 'workgroups)
 
@@ -879,6 +884,21 @@ unchanged.  If it wasn't, return a copy of WCONFIG's wtree scaled
 with `wg-scale-wconfigs-wtree' to fit the frame as it exists."
   (let ((frame (or frame (selected-frame))))
     (wg-abind wconfig ((wcwidth width) (wcheight height))
+      (when (and wg-restore-frame-size window-system wcwidth wcheight)
+          (set-frame-size frame wcwidth wcheight))
+      (let ((fwidth  (frame-parameter frame 'width))
+            (fheight (frame-parameter frame 'height)))
+        (if (and (= wcwidth fwidth) (= wcheight fheight))
+            (wg-wtree wconfig)
+          (wg-scale-wconfigs-wtree wconfig fwidth fheight))))))
+
+(defun w-frame-scale-wtree (wconfig &optional frame)
+  "Set FRAME's size to WCONFIG's, returning a possibly scaled wtree.
+If the frame size was set correctly, return WCONFIG's wtree
+unchanged.  If it wasn't, return a copy of WCONFIG's wtree scaled
+with `wg-scale-wconfigs-wtree' to fit the frame as it exists."
+  (let ((frame (or frame (selected-frame))))
+    (wg-abind wconfig ((wcwidth width) (wcheight height))
       (when window-system (set-frame-size frame wcwidth wcheight))
       (let ((fwidth  (frame-parameter frame 'width))
             (fheight (frame-parameter frame 'height)))
@@ -1061,7 +1081,7 @@ Return the buffer if it was found, nil otherwise."
   (let ((frame (selected-frame)) wtree)
     (wg-abind wconfig (left top sbars sbwid)
       (setq wtree (w-set-frame-size-and-scale-wtree wconfig frame))
-      (when (and wg-restore-position left top)
+      (when (and wg-restore-frame-position window-system left top)
         (set-frame-position frame left top))
       (when (and wg-morph-on after-init-time)
         (wg-morph (wg-ewtree->wtree) wtree wg-morph-no-error))
