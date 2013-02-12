@@ -2048,13 +2048,15 @@ The string is passed through a format arg to escape %'s."
 (defun wg-help ()
   "Display Workgroups' help buffer."
   (interactive)
-  (with-output-to-temp-buffer "*workroups help*"
+  (let ((wg-help-buffer-name "*workgroups help*"))
+  (with-output-to-temp-buffer wg-help-buffer-name
     (princ  "Workgroups' keybindings:\n\n")
     (dolist (elt (wg-partition wg-help 2))
       (wg-dbind (cmd help-string) elt
         (princ (format "%15s   %s\n"
                        (substitute-command-keys cmd)
-                       help-string))))))
+                       help-string)))))
+  (pop-to-buffer (get-buffer wg-help-buffer-name))))
 
 
 ;;; keymap
