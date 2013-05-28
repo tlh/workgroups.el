@@ -941,7 +941,7 @@ EWIN should be an Emacs window object."
     `((type      .   window)
       (edges     .  ,(window-edges ewin))
       (bname     .  ,(buffer-name))
-      (fname     .  ,(buffer-file-name))
+      (fname     .  ,(or (buffer-file-name) default-directory))
       (point     .  ,(wg-window-point ewin))
       (mark      .  ,(mark))
       (markx     .  ,mark-active)
@@ -1571,6 +1571,8 @@ BASE non-nil means restore WORKGROUP's base config."
   (wg-restore-workgroup workgroup base)
   (wg-set-previous-workgroup (wg-current-workgroup t))
   (wg-set-current-workgroup workgroup)
+  (wg-aif (wg-move-elt workgroup wg-list 0)
+      (setq wg-list it wg-dirty t))
   (run-hooks 'wg-switch-hook)
   (wg-fontified-msg (:cmd "Switched:  ") (wg-disp)))
 
