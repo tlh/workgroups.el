@@ -941,7 +941,7 @@ EWIN should be an Emacs window object."
     `((type      .   window)
       (edges     .  ,(window-edges ewin))
       (bname     .  ,(buffer-name))
-      (fname     .  ,(buffer-file-name))
+      (fname     .  ,(or (buffer-file-name) default-directory))
       (point     .  ,(wg-window-point ewin))
       (mark      .  ,(mark))
       (markx     .  ,mark-active)
