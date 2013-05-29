@@ -1471,7 +1471,11 @@ Query to overwrite if a workgroup with the same name exists."
 (defun wg-read-workgroup (&optional noerror)
   "Read a workgroup with `wg-completing-read'."
   (wg-get-workgroup
-   'name (wg-completing-read "Workgroup: " (wg-names))
+   'name (wg-completing-read "Workgroup: "
+			     ;; move previous workgroup on front of choices
+			     (wg-aif (wg-previous-workgroup t)
+				 (wg-move-elt (wg-name it) (wg-names) 0)
+			       (wg-names)))
    noerror))
 
 (defun wg-read-buffer-name ()
