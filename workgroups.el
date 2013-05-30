@@ -941,7 +941,7 @@ EWIN should be an Emacs window object."
     `((type      .   window)
       (edges     .  ,(window-edges ewin))
       (bname     .  ,(buffer-name))
-      (fname     .  ,(buffer-file-name))
+      (fname     .  ,(or (buffer-file-name) default-directory))
       (point     .  ,(wg-window-point ewin))
       (mark      .  ,(mark))
       (markx     .  ,mark-active)
@@ -1003,7 +1003,7 @@ Return the buffer if it was found, nil otherwise."
   (wg-abind win (fname bname)
     (cond ((and fname (file-exists-p fname))
            (find-file fname)
-           (rename-buffer bname)
+           (rename-buffer bname t)
            (current-buffer))
           ((wg-awhen (get-buffer bname) (switch-to-buffer it)))
           (t (switch-to-buffer wg-default-buffer) nil))))
@@ -1471,7 +1471,11 @@ Query to overwrite if a workgroup with the same name exists."
 (defun wg-read-workgroup (&optional noerror)
   "Read a workgroup with `wg-completing-read'."
   (wg-get-workgroup
-   'name (wg-completing-read "Workgroup: " (wg-names))
+   'name (wg-completing-read "Workgroup: "
+			     ;; move previous workgroup on front of choices
+			     (wg-aif (wg-previous-workgroup t)
+				 (wg-move-elt (wg-name it) (wg-names) 0)
+			       (wg-names)))
    noerror))
 
 (defun wg-read-buffer-name ()
@@ -2048,13 +2052,15 @@ The string is passed through a format arg to escape %'s."
 (defun wg-help ()
   "Display Workgroups' help buffer."
   (interactive)
-  (with-output-to-temp-buffer "*workroups help*"
+  (let ((wg-help-buffer-name "*workgroups help*"))
+  (with-output-to-temp-buffer wg-help-buffer-name
     (princ  "Workgroups' keybindings:\n\n")
     (dolist (elt (wg-partition wg-help 2))
       (wg-dbind (cmd help-string) elt
         (princ (format "%15s   %s\n"
                        (substitute-command-keys cmd)
-                       help-string))))))
+                       help-string)))))
+  (pop-to-buffer (get-buffer wg-help-buffer-name))))
 
 
 ;;; keymap

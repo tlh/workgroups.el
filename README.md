@@ -67,9 +67,9 @@ things like frame morphing, window moving, frame reversing and other operations.
 ## Getting Workgroups
 
 The latest version of Workgroups can always be found
-[here](http://github.com/tlh/workgroups.el). You can clone the repo by running:
+[here](http://github.com/workgroups/workgroups.el). You can clone the repo by running:
 
-    git clone git://github.com/tlh/workgroups.el
+    git clone git://github.com/workgroups/workgroups.el
 
 Workgroups is being actively developed.  Later on, when you want to update to
 the latest:
@@ -366,13 +366,13 @@ To bring up a help buffer listing all the commands and their bindings, hit
 ## Feature Requests
 
 Feature requests, like other parameters you'd like Workgroups to persist, should
-be added to the [wiki](http://github.com/tlh/workgroups.el/wiki)
+be added to the [wiki](http://github.com/workgroups/workgroups.el/wiki)
 
 
 ## Reporting Bugs
 
 If you encounter a bug in Workgroups, please file an issue
-[here](http://github.com/tlh/workgroups.el/issues).  If possible, please include
+[here](http://github.com/workgroups/workgroups.el/issues).  If possible, please include
 a stack-trace and the value of `wg-list`.
 
 
