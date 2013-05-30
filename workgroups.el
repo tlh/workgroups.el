@@ -1003,7 +1003,7 @@ Return the buffer if it was found, nil otherwise."
   (wg-abind win (fname bname)
     (cond ((and fname (file-exists-p fname))
            (find-file fname)
-           (rename-buffer bname)
+           (rename-buffer bname t)
            (current-buffer))
           ((wg-awhen (get-buffer bname) (switch-to-buffer it)))
           (t (switch-to-buffer wg-default-buffer) nil))))
