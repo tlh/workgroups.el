@@ -934,6 +934,10 @@ EWIN should be an Emacs window object."
   (let ((p (window-point ewin)))
     (if (and wg-restore-point-max (= p (point-max))) :max p)))
 
+(defun wg-fname ()
+  (or (buffer-file-name)
+      (and (equal major-mode 'dired-mode) (dired-current-directory))))
+
 (defun wg-ewin->window (ewin)
   "Return a new workgroups window from EWIN.
 EWIN should be an Emacs window object."
@@ -941,7 +945,7 @@ EWIN should be an Emacs window object."
     `((type      .   window)
       (edges     .  ,(window-edges ewin))
       (bname     .  ,(buffer-name))
-      (fname     .  ,(buffer-file-name))
+      (fname     .  ,(wg-fname))
       (point     .  ,(wg-window-point ewin))
       (mark      .  ,(mark))
       (markx     .  ,mark-active)
