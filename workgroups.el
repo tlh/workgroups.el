@@ -940,6 +940,7 @@ EWIN should be an Emacs window object."
   (with-current-buffer (window-buffer ewin)
     `((type      .   window)
       (edges     .  ,(window-edges ewin))
+      (buffer    .  ,(current-buffer))
       (bname     .  ,(buffer-name))
       (fname     .  ,(buffer-file-name))
       (point     .  ,(wg-window-point ewin))
@@ -1407,26 +1408,88 @@ Query to overwrite if a workgroup with the same name exists."
 
 ;;; buffer list ops
 
-(defun wg-wtree-buffer-list (wtree)
-  "Return a list of unique buffer names visible in WTREE."
-  (flet ((rec (w) (if (wg-window-p w) (list (wg-aget w 'bname))
-                    (mapcan #'rec (wg-wlist w)))))
-    (remove-duplicates (rec wtree) :test #'equal)))
+(defvar wg-buffer-mapping (make-hash-table :test 'eq :weakness 'key)
+  "Mapping from workgroups to their buffer lists.")
+
+(defun wg-add-buffer-to-workgroup (workgroup buffer)
+  "Adds BUFFER to the buffer list of WORKGROUP."
+  (interactive (list (wg-current-workgroup) (current-buffer)))
+  (let ((buffers (gethash workgroup wg-buffer-mapping)))
+    (unless (memq buffer buffers)
+      (puthash workgroup (cons buffer buffers) wg-buffer-mapping))))
+
+(defun wg-remove-buffer-from-workgroup (workgroup buffer)
+  "Removes BUFFER from the buffer list of WORKGROUP."
+  (interactive (list (wg-current-workgroup) (current-buffer)))
+  (puthash workgroup (delq buffer (gethash workgroup wg-buffer-mapping))
+           wg-buffer-mapping))
+
+(defun wg-toggle-buffer-in-workgroup (workgroup buffer)
+  "Toggles whether BUFFER is in the buffer list of WORKGROUP"
+  (interactive (list (wg-current-workgroup) (current-buffer)))
+  (let ((buffers (gethash workgroup wg-buffer-mapping)))
+    (if (memq buffer buffers)
+        (puthash workgroup (delq buffer buffers) wg-buffer-mapping)
+      (puthash workgroup (cons buffer buffers) wg-buffer-mapping))))
 
 (defun wg-workgroup-buffer-list (workgroup)
-  "Call `wg-wtree-buffer-list' on WORKGROUP's working config."
-  (wg-wtree-buffer-list (wg-wtree (wg-working-config workgroup))))
+  "Return a copy of the buffer list of WORKGROUP.
+Also removes any dead buffers."
+  (copy-list
+   (remove-if-not 'buffer-live-p (gethash workgroup wg-buffer-mapping))))
 
 (defun wg-buffer-list ()
   "Call `wg-workgroup-buffer-list' on all workgroups in `wg-list'."
   (remove-duplicates
    (mapcan #'wg-workgroup-buffer-list (wg-list t))
-   :test #'equal))
+   :test #'eq))
 
 (defun wg-find-buffer (bname)
-  "Return the first workgroup in which a buffer named BNAME is visible."
-  (wg-get-some (wg (wg-list))
-    (member bname (wg-workgroup-buffer-list wg))))
+  "Return the first workgroup whose buffer list contains BNAME."
+  (let ((buffer (get-buffer bname)))
+    (wg-get-some (wg (wg-list))
+      (memq buffer (wg-workgroup-buffer-list wg)))))
+
+(defun wg-sort-buffers (buffers)
+  "Sort BUFFERS according to `buffer-list' output."
+  (let ((buffer-list (buffer-list)))
+    (sort buffers (lambda (b1 b2)
+                    (< (position b1 buffer-list)
+                       (position b2 buffer-list))))))
+
+(defun wg-workgroup-visible-buffers (workgroup)
+  "Return a list of unique buffer names visible in WORKGROUP."
+  (let ((wtree (wg-wtree (wg-working-config workgroup))))
+    (flet ((rec (w) (if (wg-window-p w) (list (wg-aget w 'buffer))
+                      (mapcan #'rec (wg-wlist w)))))
+      (remove-duplicates (rec wtree) :test #'eq))))
+
+(defun wg-buffers-for-switching (&optional workgroup)
+  "Returns a sorted list of buffers for switching to."
+  (let* ((wg (or workgroup (wg-current-workgroup)))
+         (buffers (wg-workgroup-buffer-list wg))
+         (buffers (wg-sort-buffers buffers))
+         (buffers (let ((visible-buffers (wg-workgroup-visible-buffers wg)))
+                    (delete-if (lambda (b) (memq b visible-buffers)) buffers))))
+    buffers))
+
+(defun wg-switch-to-buffer ()
+  "Switch to a buffer from the current workgroup."
+  (interactive)
+  (switch-to-buffer
+   (ido-completing-read "Switch to buffer: "
+                        (mapcar 'buffer-name (wg-buffers-for-switching)))))
+
+(defun wg-kill-buffer (&optional buffer-or-name)
+  "Kill BUFFER, and if it was the current buffer, switch to one
+from the current workgroup."
+  (interactive (list (read-buffer "Kill buffer: " (current-buffer))))
+  (let* ((buffer (or (get-buffer buffer-or-name) (current-buffer)))
+         (switch-buffer (and (eq buffer (current-buffer))
+                             (car (wg-buffers-for-switching)))))
+    (kill-buffer buffer)
+    (if switch-buffer
+        (switch-to-buffer switch-buffer))))
 
 
 ;;; mode-line
