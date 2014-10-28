@@ -1426,7 +1426,7 @@ Query to overwrite if a workgroup with the same name exists."
 (defun wg-find-buffer (bname)
   "Return the first workgroup in which a buffer named BNAME is visible."
   (wg-get-some (wg (wg-list))
-               (member bname (wg-workgroup-buffer-list wg))))
+    (member bname (wg-workgroup-buffer-list wg))))
 
 
 ;;; mode-line
