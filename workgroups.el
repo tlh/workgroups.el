@@ -1414,7 +1414,7 @@ Query to overwrite if a workgroup with the same name exists."
     (remove-duplicates (rec wtree) :test #'equal)))
 
 (defun wg-workgroup-buffer-list (workgroup)
-  "Call `wg-wconfig-buffer-list' on WORKGROUP's working config."
+  "Call `wg-wtree-buffer-list' on WORKGROUP's working config."
   (wg-wtree-buffer-list (wg-wtree (wg-working-config workgroup))))
 
 (defun wg-buffer-list ()
