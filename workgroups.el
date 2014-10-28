@@ -2200,6 +2200,7 @@ The string is passed through a format arg to escape %'s."
                   "S-C-f"      'wg-find-file-read-only
                   "C-b"        'wg-get-by-buffer
                   "b"          'wg-get-by-buffer
+                  "B"          'wg-toggle-buffer-in-workgroup
                   "d"          'wg-dired
 
 
