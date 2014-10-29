@@ -1440,8 +1440,10 @@ Query to overwrite if a workgroup with the same name exists."
 (defun wg-workgroup-buffer-list (workgroup)
   "Return a copy of the buffer list of WORKGROUP.
 Also removes any dead buffers."
-  (copy-list
-   (remove-if-not 'buffer-live-p (gethash workgroup wg-buffer-mapping))))
+  (let* ((buffers (gethash workgroup wg-buffer-mapping))
+         (buffers (delete-if-not 'buffer-live-p buffers)))
+    (puthash workgroup buffers wg-buffer-mapping)
+    (copy-list buffers)))
 
 (defun wg-buffer-list ()
   "Call `wg-workgroup-buffer-list' on all workgroups in `wg-list'."
