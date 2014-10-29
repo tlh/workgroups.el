@@ -1429,8 +1429,13 @@ Query to overwrite if a workgroup with the same name exists."
   (interactive (list (wg-current-workgroup) (current-buffer)))
   (let ((buffers (gethash workgroup wg-buffer-mapping)))
     (if (memq buffer buffers)
-        (puthash workgroup (delq buffer buffers) wg-buffer-mapping)
-      (puthash workgroup (cons buffer buffers) wg-buffer-mapping))))
+        (progn
+          (puthash workgroup (delq buffer buffers) wg-buffer-mapping)
+          (when (called-interactively-p 'interactive)
+            (message "Removed buffer from workgroup.")))
+      (puthash workgroup (cons buffer buffers) wg-buffer-mapping)
+      (when (called-interactively-p 'interactive)
+        (message "Added buffer to workgroup.")))))
 
 (defun wg-workgroup-buffer-list (workgroup)
   "Return a copy of the buffer list of WORKGROUP.
