@@ -1546,7 +1546,8 @@ from the current workgroup."
 
 (defun wg-read-buffer-name ()
   "Read and return a buffer-name from `wg-buffer-list'."
-  (wg-completing-read "Workgroup buffers: " (wg-buffer-list)))
+  (wg-completing-read
+   "Workgroup buffers: " (mapcar #'buffer-name (wg-buffer-list))))
 
 (defun wg-read-new-workgroup-name (&optional prompt)
   "Read a non-empty name string from the minibuffer."
