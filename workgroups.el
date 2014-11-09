@@ -1494,9 +1494,9 @@ from the current workgroup."
   (let* ((buffer (or (get-buffer buffer-or-name) (current-buffer)))
          (switch-buffer (and (eq buffer (current-buffer))
                              (car (wg-buffers-for-switching)))))
-    (kill-buffer buffer)
     (if switch-buffer
-        (switch-to-buffer switch-buffer))))
+        (switch-to-buffer switch-buffer))
+    (kill-buffer buffer)))
 
 
 ;;; mode-line
