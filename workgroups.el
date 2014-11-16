@@ -1851,6 +1851,47 @@ Deletes saved state in `wg-frame-table' and nulls out `wg-list',
 
 ;;; file commands
 
+(defvar wg-nonprintable-wg-fields '()
+  "List of names of unprintable workgroup fields.")
+
+(defvar wg-nonprintable-wconfig-fields '()
+  "List of names of unprintable wconfig fields.")
+
+(defvar wg-nonprintable-wtree-fields '(buffer)
+  "List of names of unprintable wtree fields.")
+
+(defun wg-alist-filter (alist fields)
+  "Returns ALIST with fields in FIELDS filtered."
+  (remove-if (lambda (key-value)
+               (memq (car key-value) fields))
+             alist))
+
+(defun wg-alist-update (alist field update-function)
+  "Returns ALIST with FIELD updated to NEW-VALUE."
+  (mapcar (lambda (key-value)
+            (if (eq (car key-value) field)
+                (cons field (funcall update-function (cdr key-value)))
+              key-value))
+          alist))
+
+(defun wg-filter-nonprintable-fields (wg)
+  "Returns WG with non-printable fields filtered."
+  (let* ((wg (wg-alist-filter wg wg-nonprintable-wg-fields))
+         (wg (wg-alist-update wg 'wconfig
+                              #'wg-filter-nonprintable-wconfig-fields)))
+    wg))
+
+(defun wg-filter-nonprintable-wconfig-fields (wconfig)
+  "Returns WCONFIG with non-printable fields filtered."
+  (let* ((wconfig (wg-alist-filter wconfig wg-nonprintable-wconfig-fields))
+         (wconfig (wg-alist-update wconfig 'wtree
+                                   #'wg-filter-nonprintable-wtree-fields)))
+    wconfig))
+
+(defun wg-filter-nonprintable-wtree-fields (wtree)
+  "Returns WTREE with non-printable fields filtered."
+  (wg-alist-filter wtree wg-nonprintable-wtree-fields))
+
 (defun wg-save (file)
   "Save workgroups to FILE.
 Called interactively with a prefix arg, or if `wg-file'
@@ -1858,8 +1899,9 @@ is nil, read a filename.  Otherwise use `wg-file'."
   (interactive
    (list (if (or current-prefix-arg (not (wg-file t)))
              (read-file-name "File: ") (wg-file))))
-  (wg-write-sexp-to-file
-   (cons wg-persisted-workgroups-tag (wg-list)) file)
+  (let ((wg-list (mapcar #'wg-filter-nonprintable-fields (wg-list))))
+    (wg-write-sexp-to-file
+     (cons wg-persisted-workgroups-tag wg-list) file))
   (setq wg-dirty nil wg-file file)
   (wg-fontified-msg (:cmd "Wrote: ") (:file file)))
 
