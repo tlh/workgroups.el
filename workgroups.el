@@ -1471,32 +1471,53 @@ Also removes any dead buffers."
                       (mapcan #'rec (wg-wlist w)))))
       (remove-duplicates (rec wtree) :test #'eq))))
 
-(defun wg-buffers-for-switching (&optional workgroup)
-  "Returns a sorted list of buffers for switching to."
+(defun wg-buffers-for-reading (&optional workgroup)
+  "Returns a list of buffers for reading from the user."
   (let* ((wg (or workgroup (wg-current-workgroup)))
          (buffers (wg-workgroup-buffer-list wg))
-         (buffers (wg-sort-buffers buffers))
-         (buffers (let ((visible-buffers (wg-workgroup-visible-buffers wg)))
-                    (delete-if (lambda (b) (memq b visible-buffers)) buffers))))
+         (buffers (wg-sort-buffers buffers)))
     buffers))
+
+(defun wg-buffers-for-switching (&optional workgroup)
+  "Returns a list of buffers for switching to."
+  (let* ((wg (or workgroup (wg-current-workgroup)))
+         (buffers (wg-buffers-for-reading wg)))
+    (let ((visible-buffers (wg-workgroup-visible-buffers wg)))
+      (delete-if (lambda (b) (memq b visible-buffers)) buffers))))
+
+(defun wg-buffers-for-killing (&optional workgroup)
+  "Returns a list of buffers for killing."
+  (let ((bufs (wg-buffers-for-reading workgroup)))
+    (if (eq (car bufs) (current-buffer))
+        bufs
+      (cons (current-buffer) bufs))))
+
+(defun wg-make-ido-ignore-buffers (non-ignored-buffers)
+  "Return a value for `ido-ignore-buffers' that ignores all but
+NON-IGNORED-BUFFERS."
+  (let ((ignored-buffers (set-difference (buffer-list) non-ignored-buffers)))
+    (mapcar (lambda (b)
+              (rx-to-string `(: bos ,(buffer-name b) eos)))
+            ignored-buffers)))
 
 (defun wg-switch-to-buffer ()
   "Switch to a buffer from the current workgroup."
   (interactive)
-  (switch-to-buffer
-   (ido-completing-read "Switch to buffer: "
-                        (mapcar 'buffer-name (wg-buffers-for-switching)))))
+  (let* ((bufs (wg-buffers-for-switching))
+         (ido-ignore-buffers (wg-make-ido-ignore-buffers bufs)))
+    (let ((buffer (ido-read-buffer "Switch to buffer: ")))
+      (switch-to-buffer buffer))))
 
-(defun wg-kill-buffer (&optional buffer-or-name)
-  "Kill BUFFER, and if it was the current buffer, switch to one
-from the current workgroup."
-  (interactive (list (read-buffer "Kill buffer: " (current-buffer))))
-  (let* ((buffer (or (get-buffer buffer-or-name) (current-buffer)))
-         (switch-buffer (and (eq buffer (current-buffer))
-                             (car (wg-buffers-for-switching)))))
-    (if switch-buffer
-        (switch-to-buffer switch-buffer))
-    (kill-buffer buffer)))
+(defun wg-kill-buffer ()
+  "Kill a buffer from the current workgroup and, if it was
+current, switch to another from the current workgroup."
+  (interactive)
+  (let* ((bufs (wg-buffers-for-killing))
+         (ido-ignore-buffers (wg-make-ido-ignore-buffers bufs)))
+    (let ((buffer (ido-read-buffer "Kill buffer: " (car bufs))))
+      (when (eq (get-buffer buffer) (current-buffer))
+        (switch-to-buffer (car (wg-buffers-for-switching))))
+      (kill-buffer buffer))))
 
 
 ;;; mode-line
