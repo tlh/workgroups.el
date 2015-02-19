@@ -1504,7 +1504,8 @@ NON-IGNORED-BUFFERS."
   "Switch to a buffer from the current workgroup."
   (interactive)
   (let* ((bufs (wg-buffers-for-switching))
-         (ido-ignore-buffers (wg-make-ido-ignore-buffers bufs)))
+         (ido-ignore-buffers
+          (append ido-ignore-buffers (wg-make-ido-ignore-buffers bufs))))
     (let ((buffer (ido-read-buffer "Switch to buffer: ")))
       (switch-to-buffer buffer))))
 
