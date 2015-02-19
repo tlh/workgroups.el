@@ -1492,20 +1492,19 @@ Also removes any dead buffers."
         bufs
       (cons (current-buffer) bufs))))
 
-(defun wg-make-ido-ignore-buffers (non-ignored-buffers)
-  "Return a value for `ido-ignore-buffers' that ignores all but
+(defun wg-make-ido-ignore-buffers-regexp (non-ignored-buffers)
+  "Return an entry for `ido-ignore-buffers' that matches all but
 NON-IGNORED-BUFFERS."
-  (let ((ignored-buffers (set-difference (buffer-list) non-ignored-buffers)))
-    (mapcar (lambda (b)
-              (rx-to-string `(: bos ,(buffer-name b) eos)))
-            ignored-buffers)))
+  (let* ((ignored-buffers (set-difference (buffer-list) non-ignored-buffers))
+         (ignored-buffer-names (mapcar #'buffer-name ignored-buffers)))
+    (rx-to-string `(: bos (or ,@ignored-buffer-names) eos))))
 
 (defun wg-switch-to-buffer ()
   "Switch to a buffer from the current workgroup."
   (interactive)
   (let* ((bufs (wg-buffers-for-switching))
-         (ido-ignore-buffers
-          (append ido-ignore-buffers (wg-make-ido-ignore-buffers bufs))))
+         (regexp (wg-make-ido-ignore-buffers-regexp bufs))
+         (ido-ignore-buffers (cons regexp ido-ignore-buffers)))
     (let ((buffer (ido-read-buffer "Switch to buffer: ")))
       (switch-to-buffer buffer))))
 
@@ -1514,7 +1513,8 @@ NON-IGNORED-BUFFERS."
 current, switch to another from the current workgroup."
   (interactive)
   (let* ((bufs (wg-buffers-for-killing))
-         (ido-ignore-buffers (wg-make-ido-ignore-buffers bufs)))
+         (regexp (wg-make-ido-ignore-buffers-regexp bufs))
+         (ido-ignore-buffers (cons regexp ido-ignore-buffers)))
     (let ((buffer (ido-read-buffer "Kill buffer: " (car bufs))))
       (when (eq (get-buffer buffer) (current-buffer))
         (switch-to-buffer (car (wg-buffers-for-switching))))
