@@ -588,9 +588,9 @@ Otherwise, cons a new key-value-pair onto ALIST."
 
 (defun wg-aput (alist &rest key-value-pairs)
   "Add all KEY-VALUE-PAIRS to a copy of ALIST, and return the copy."
-  (flet ((rec (alist kvps) (if (not kvps) alist
-                             (wg-dbind (k v . rest) kvps
-                               (wg-aset (rec alist rest) k v)))))
+  (cl-labels ((rec (alist kvps) (if (not kvps) alist
+                                  (wg-dbind (k v . rest) kvps
+                                    (wg-aset (rec alist rest) k v)))))
     (rec (wg-acopy alist) key-value-pairs)))
 
 (defun wg-get-alist (key val alist-list)
@@ -813,8 +813,8 @@ minibuffer is active.")))
 
 (defun wg-scale-wsize (w width-scale height-scale)
   "Scale W's size by WIDTH-SCALE and HEIGHT-SCALE."
-  (flet ((wscale (width)  (truncate (* width  width-scale)))
-         (hscale (height) (truncate (* height height-scale))))
+  (cl-labels ((wscale (width)  (truncate (* width  width-scale)))
+              (hscale (height) (truncate (* height height-scale))))
     (wg-adjust-wsize w #'wscale #'hscale)))
 
 (defun wg-equal-wtrees (w1 w2)
@@ -838,16 +838,16 @@ new wlist, return it instead of a new wtree."
         (let* ((min-size (wg-min-size dir))
                (max (- hb1 1 min-size))
                (lastw (wg-last1 wlist)))
-          (flet ((mapwl
-                  (wl)
-                  (wg-dbind (sw . rest) wl
-                    (cons (wg-normalize-wtree
-                           (wg-put-bounds
-                            sw dir ls1 hs1 lb1
-                            (setq lb1 (if (eq sw lastw) hb1
-                                        (let ((hb2 (+ lb1 (wg-wsize sw dir))))
-                                          (if (>= hb2 max) hb1 hb2))))))
-                          (when (< lb1 max) (mapwl rest))))))
+          (cl-labels ((mapwl
+                       (wl)
+                       (wg-dbind (sw . rest) wl
+                         (cons (wg-normalize-wtree
+                                (wg-put-bounds
+                                 sw dir ls1 hs1 lb1
+                                 (setq lb1 (if (eq sw lastw) hb1
+                                             (let ((hb2 (+ lb1 (wg-wsize sw dir))))
+                                               (if (>= hb2 max) hb1 hb2))))))
+                               (when (< lb1 max) (mapwl rest))))))
             (let ((new (mapwl wlist)))
               (if (cdr new) (wg-aput wtree 'wlist new)
                 (car new)))))))))
@@ -891,15 +891,15 @@ with `wg-scale-wconfigs-wtree' to fit the frame as it exists."
 If DIR is nil, reverse WTREE horizontally.
 If DIR is 'both, reverse WTREE both horizontally and vertically.
 Otherwise, reverse WTREE vertically."
-  (flet ((inner (w) (if (wg-window-p w) w
-                      (wg-abind w ((d1 dir) edges wlist)
-                        (wg-make-wtree
-                         d1 edges
-                         (let ((wl2 (mapcar #'inner wlist)))
-                           (if (or (eq dir 'both)
-                                   (and (not dir) (not d1))
-                                   (and dir d1))
-                               (nreverse wl2) wl2)))))))
+  (cl-labels ((inner (w) (if (wg-window-p w) w
+                           (wg-abind w ((d1 dir) edges wlist)
+                             (wg-make-wtree
+                              d1 edges
+                              (let ((wl2 (mapcar #'inner wlist)))
+                                (if (or (eq dir 'both)
+                                        (and (not dir) (not d1))
+                                        (and dir d1))
+                                    (nreverse wl2) wl2)))))))
     (wg-normalize-wtree (inner w))))
 
 (defun wg-reverse-wconfig (&optional dir wconfig)
@@ -909,15 +909,15 @@ Otherwise, reverse WTREE vertically."
 
 (defun wg-wtree-move-window (wtree offset)
   "Offset `selected-window' OFFSET places in WTREE."
-  (flet ((inner
-          (w)
-          (if (wg-window-p w) w
-            (wg-abind w ((d1 dir) edges wlist)
-              (wg-make-wtree
-               d1 edges
-               (wg-aif (wg-get-some (sw wlist) (wg-aget sw 'selwin))
-                   (wg-cyclic-offset-elt it wlist offset)
-                 (mapcar #'inner wlist)))))))
+  (cl-labels ((inner
+               (w)
+               (if (wg-window-p w) w
+                 (wg-abind w ((d1 dir) edges wlist)
+                   (wg-make-wtree
+                    d1 edges
+                    (wg-aif (wg-get-some (sw wlist) (wg-aget sw 'selwin))
+                        (wg-cyclic-offset-elt it wlist offset)
+                      (mapcar #'inner wlist)))))))
     (wg-normalize-wtree (inner wtree))))
 
 (defun wg-wconfig-move-window (offset &optional wconfig)
@@ -940,6 +940,7 @@ EWIN should be an Emacs window object."
   (with-current-buffer (window-buffer ewin)
     `((type      .   window)
       (edges     .  ,(window-edges ewin))
+      (buffer    .  ,(current-buffer))
       (bname     .  ,(buffer-name))
       (fname     .  ,(buffer-file-name))
       (point     .  ,(wg-window-point ewin))
@@ -965,10 +966,10 @@ EWIN should be an Emacs window object."
   "Return a new Workgroups wtree from EWTREE or `window-tree'.
 If specified, EWTREE should be an Emacs `window-tree'."
   (wg-error-on-active-minibuffer)
-  (flet ((inner (ewt) (if (windowp ewt) (wg-ewin->window ewt)
-                        (wg-dbind (dir edges . wins) ewt
-                          (wg-make-wtree
-                           dir edges (mapcar #'inner wins))))))
+  (cl-labels ((inner (ewt) (if (windowp ewt) (wg-ewin->window ewt)
+                             (wg-dbind (dir edges . wins) ewt
+                               (wg-make-wtree
+                                dir edges (mapcar #'inner wins))))))
     (let ((ewt (car (or ewtree (window-tree)))))
       (when (and (windowp ewt) (window-minibuffer-p ewt))
         (error "Workgroups can't operate on minibuffer-only frames."))
@@ -1038,15 +1039,15 @@ Return the buffer if it was found, nil otherwise."
 
 (defun wg-restore-wtree (wtree)
   "Restore WTREE in `selected-frame'."
-  (flet ((inner (w) (if (wg-wtree-p w)
-                        (wg-abind w ((d dir) wlist)
-                          (let ((lastw (wg-last1 wlist)))
-                            (dolist (sw wlist)
-                              (unless (eq sw lastw)
-                                (split-window nil (wg-wsize sw d) (not d)))
-                              (inner sw))))
-                      (wg-restore-window w)
-                      (other-window 1))))
+  (cl-labels ((inner (w) (if (wg-wtree-p w)
+                             (wg-abind w ((d dir) wlist)
+                               (let ((lastw (wg-last1 wlist)))
+                                 (dolist (sw wlist)
+                                   (unless (eq sw lastw)
+                                     (split-window nil (wg-wsize sw d) (not d)))
+                                   (inner sw))))
+                           (wg-restore-window w)
+                           (other-window 1))))
     (let ((window-min-width  wg-window-min-width)
           (window-min-height wg-window-min-height))
       (delete-other-windows)
@@ -1222,17 +1223,17 @@ value in `wg-frame-table'."
 (defun wg-frame-val (key)
   "Return KEY's value in `selected-frame's state in `wg-frame-table'."
   (wg-with-frame-state frame state
-                       (gethash key state)))
+    (gethash key state)))
 
 (defun wg-set-frame-val (key val)
   "Set KEY to VAL in `selected-frame's state in `wg-frame-table'."
   (wg-with-frame-state frame state
-                       (puthash key val state)))
+    (puthash key val state)))
 
 (defun wg-delete-frame-key (key)
   "Remove KEY from `selected-frame's state in `wg-frame-table'."
   (wg-with-frame-state frame state
-                       (remhash key state)))
+    (remhash key state)))
 
 (defun wg-delete-frame (frame)
   "Remove FRAME from `wg-frame-table'."
@@ -1407,26 +1408,117 @@ Query to overwrite if a workgroup with the same name exists."
 
 ;;; buffer list ops
 
-(defun wg-wtree-buffer-list (wtree)
-  "Return a list of unique buffer names visible in WTREE."
-  (flet ((rec (w) (if (wg-window-p w) (list (wg-aget w 'bname))
-                    (mapcan #'rec (wg-wlist w)))))
-    (remove-duplicates (rec wtree) :test #'equal)))
+(defvar wg-buffer-mapping (make-hash-table :test 'eq :weakness 'key)
+  "Mapping from workgroups to their buffer lists.")
+
+(defun wg-add-buffer-to-workgroup (workgroup buffer)
+  "Adds BUFFER to the buffer list of WORKGROUP."
+  (interactive (list (wg-current-workgroup) (current-buffer)))
+  (let ((buffers (gethash workgroup wg-buffer-mapping)))
+    (unless (memq buffer buffers)
+      (puthash workgroup (cons buffer buffers) wg-buffer-mapping))))
+
+(defun wg-remove-buffer-from-workgroup (workgroup buffer)
+  "Removes BUFFER from the buffer list of WORKGROUP."
+  (interactive (list (wg-current-workgroup) (current-buffer)))
+  (puthash workgroup (delq buffer (gethash workgroup wg-buffer-mapping))
+           wg-buffer-mapping))
+
+(defun wg-toggle-buffer-in-workgroup (workgroup buffer)
+  "Toggles whether BUFFER is in the buffer list of WORKGROUP"
+  (interactive (list (wg-current-workgroup) (current-buffer)))
+  (let ((buffers (gethash workgroup wg-buffer-mapping)))
+    (if (memq buffer buffers)
+        (progn
+          (puthash workgroup (delq buffer buffers) wg-buffer-mapping)
+          (when (called-interactively-p 'interactive)
+            (message "Removed buffer from workgroup.")))
+      (puthash workgroup (cons buffer buffers) wg-buffer-mapping)
+      (when (called-interactively-p 'interactive)
+        (message "Added buffer to workgroup.")))))
 
 (defun wg-workgroup-buffer-list (workgroup)
-  "Call `wg-wconfig-buffer-list' on WORKGROUP's working config."
-  (wg-wtree-buffer-list (wg-wtree (wg-working-config workgroup))))
+  "Return a copy of the buffer list of WORKGROUP.
+Also removes any dead buffers."
+  (let* ((buffers (gethash workgroup wg-buffer-mapping))
+         (buffers (delete-if-not 'buffer-live-p buffers)))
+    (puthash workgroup buffers wg-buffer-mapping)
+    (copy-list buffers)))
 
 (defun wg-buffer-list ()
   "Call `wg-workgroup-buffer-list' on all workgroups in `wg-list'."
   (remove-duplicates
    (mapcan #'wg-workgroup-buffer-list (wg-list t))
-   :test #'equal))
+   :test #'eq))
 
 (defun wg-find-buffer (bname)
-  "Return the first workgroup in which a buffer named BNAME is visible."
-  (wg-get-some (wg (wg-list))
-               (member bname (wg-workgroup-buffer-list wg))))
+  "Return the first workgroup whose buffer list contains BNAME."
+  (let ((buffer (get-buffer bname)))
+    (wg-get-some (wg (wg-list))
+      (memq buffer (wg-workgroup-buffer-list wg)))))
+
+(defun wg-sort-buffers (buffers)
+  "Sort BUFFERS according to `buffer-list' output."
+  (let ((buffer-list (buffer-list)))
+    (sort buffers (lambda (b1 b2)
+                    (< (position b1 buffer-list)
+                       (position b2 buffer-list))))))
+
+(defun wg-workgroup-visible-buffers (workgroup)
+  "Return a list of unique buffer names visible in WORKGROUP."
+  (let ((wtree (wg-wtree (wg-working-config workgroup))))
+    (cl-labels ((rec (w) (if (wg-window-p w) (list (wg-aget w 'buffer))
+                           (mapcan #'rec (wg-wlist w)))))
+      (remove-duplicates (rec wtree) :test #'eq))))
+
+(defun wg-buffers-for-reading (&optional workgroup)
+  "Returns a list of buffers for reading from the user."
+  (let* ((wg (or workgroup (wg-current-workgroup)))
+         (buffers (wg-workgroup-buffer-list wg))
+         (buffers (wg-sort-buffers buffers)))
+    buffers))
+
+(defun wg-buffers-for-switching (&optional workgroup)
+  "Returns a list of buffers for switching to."
+  (let* ((wg (or workgroup (wg-current-workgroup)))
+         (buffers (wg-buffers-for-reading wg)))
+    (let ((visible-buffers (wg-workgroup-visible-buffers wg)))
+      (delete-if (lambda (b) (memq b visible-buffers)) buffers))))
+
+(defun wg-buffers-for-killing (&optional workgroup)
+  "Returns a list of buffers for killing."
+  (let ((bufs (wg-buffers-for-reading workgroup)))
+    (if (eq (car bufs) (current-buffer))
+        bufs
+      (cons (current-buffer) bufs))))
+
+(defun wg-make-ido-ignore-buffers-regexp (non-ignored-buffers)
+  "Return an entry for `ido-ignore-buffers' that matches all but
+NON-IGNORED-BUFFERS."
+  (let* ((ignored-buffers (set-difference (buffer-list) non-ignored-buffers))
+         (ignored-buffer-names (mapcar #'buffer-name ignored-buffers)))
+    (rx-to-string `(: bos (or ,@ignored-buffer-names) eos))))
+
+(defun wg-switch-to-buffer ()
+  "Switch to a buffer from the current workgroup."
+  (interactive)
+  (let* ((bufs (wg-buffers-for-switching))
+         (regexp (wg-make-ido-ignore-buffers-regexp bufs))
+         (ido-ignore-buffers (cons regexp ido-ignore-buffers)))
+    (let ((buffer (ido-read-buffer "Switch to buffer: ")))
+      (switch-to-buffer buffer))))
+
+(defun wg-kill-buffer ()
+  "Kill a buffer from the current workgroup and, if it was
+current, switch to another from the current workgroup."
+  (interactive)
+  (let* ((bufs (wg-buffers-for-killing))
+         (regexp (wg-make-ido-ignore-buffers-regexp bufs))
+         (ido-ignore-buffers (cons regexp ido-ignore-buffers)))
+    (let ((buffer (ido-read-buffer "Kill buffer: " (car bufs))))
+      (when (eq (get-buffer buffer) (current-buffer))
+        (switch-to-buffer (car (wg-buffers-for-switching))))
+      (kill-buffer buffer))))
 
 
 ;;; mode-line
@@ -1476,7 +1568,8 @@ Query to overwrite if a workgroup with the same name exists."
 
 (defun wg-read-buffer-name ()
   "Read and return a buffer-name from `wg-buffer-list'."
-  (wg-completing-read "Workgroup buffers: " (wg-buffer-list)))
+  (wg-completing-read
+   "Workgroup buffers: " (mapcar #'buffer-name (wg-buffer-list))))
 
 (defun wg-read-new-workgroup-name (&optional prompt)
   "Read a non-empty name string from the minibuffer."
@@ -1594,8 +1687,8 @@ configuration."
     (wg-set-working-config new (wg-working-config workgroup))
     (wg-switch-to-workgroup new)
     (wg-fontified-msg
-     (:cmd "Cloned: ") (:cur (wg-name workgroup))
-     (:msg " to ") (:cur name) "  " (wg-disp))))
+      (:cmd "Cloned: ") (:cur (wg-name workgroup))
+      (:msg " to ") (:cur name) "  " (wg-disp))))
 
 (defun wg-kill-workgroup (workgroup)
   "Kill WORKGROUP, saving its working config to the kill ring."
@@ -1607,23 +1700,23 @@ configuration."
     (if (eq to workgroup) (wg-restore-blank-wconfig)
       (wg-switch-to-workgroup to))
     (wg-fontified-msg
-     (:cmd "Killed: ") (:cur (wg-name workgroup)) "  " (wg-disp))))
+      (:cmd "Killed: ") (:cur (wg-name workgroup)) "  " (wg-disp))))
 
 (defun wg-kill-ring-save-base-config (workgroup)
   "Save WORKGROUP's base config to `wg-kill-ring'."
   (interactive (list (wg-arg)))
   (wg-add-to-kill-ring (wg-base-config workgroup))
   (wg-fontified-msg
-   (:cmd "Saved: ") (:cur (wg-name workgroup))
-   (:cur "'s ") (:msg "base config to the kill ring")))
+    (:cmd "Saved: ") (:cur (wg-name workgroup))
+    (:cur "'s ") (:msg "base config to the kill ring")))
 
 (defun wg-kill-ring-save-working-config (workgroup)
   "Save WORKGROUP's working config to `wg-kill-ring'."
   (interactive (list (wg-arg)))
   (wg-add-to-kill-ring (wg-working-config workgroup))
   (wg-fontified-msg
-   (:cmd "Saved: ") (:cur (wg-name workgroup))
-   (:cur "'s ") (:msg "working config to the kill ring")))
+    (:cmd "Saved: ") (:cur (wg-name workgroup))
+    (:cur "'s ") (:msg "working config to the kill ring")))
 
 (defun wg-yank-config ()
   "Restore a wconfig from `wg-kill-ring'.
@@ -1647,8 +1740,8 @@ ring, starting at the front."
     (wg-kill-workgroup workgroup)
     (mapc #'kill-buffer bufs)
     (wg-fontified-msg
-     (:cmd "Killed: ") (:cur (wg-name workgroup))
-     (:msg " and its buffers ") "\n" (wg-disp))))
+      (:cmd "Killed: ") (:cur (wg-name workgroup))
+      (:msg " and its buffers ") "\n" (wg-disp))))
 
 (defun wg-delete-other-workgroups (workgroup)
   "Delete all workgroups but WORKGROUP."
@@ -1659,15 +1752,15 @@ ring, starting at the front."
     (mapc #'wg-delete (remove workgroup (wg-list)))
     (unless (eq workgroup cur) (wg-switch-to-workgroup workgroup))
     (wg-fontified-msg
-     (:cmd "Deleted: ") (:msg "All workgroups but ")
-     (:cur (wg-name workgroup)))))
+      (:cmd "Deleted: ") (:msg "All workgroups but ")
+      (:cur (wg-name workgroup)))))
 
 (defun wg-update-workgroup (workgroup)
   "Set the base config of WORKGROUP to its working config in `selected-frame'."
   (interactive (list (wg-arg)))
   (wg-set-base-config workgroup (wg-working-config workgroup))
   (wg-fontified-msg
-   (:cmd "Updated: ") (:cur (wg-name workgroup))))
+    (:cmd "Updated: ") (:cur (wg-name workgroup))))
 
 (defun wg-update-all-workgroups ()
   "Update all workgroups' base configs.
@@ -1763,8 +1856,8 @@ Worgroups are updated with their working configs in the
   (let ((oldname (wg-name workgroup)))
     (wg-set-name workgroup newname)
     (wg-fontified-msg
-     (:cmd "Renamed: ") (:cur oldname) (:msg " to ")
-     (:cur (wg-name workgroup)))))
+      (:cmd "Renamed: ") (:cur oldname) (:msg " to ")
+      (:cur (wg-name workgroup)))))
 
 (defun wg-reset (&optional force)
   "Reset workgroups.
@@ -1780,6 +1873,47 @@ Deletes saved state in `wg-frame-table' and nulls out `wg-list',
 
 ;;; file commands
 
+(defvar wg-nonprintable-wg-fields '()
+  "List of names of unprintable workgroup fields.")
+
+(defvar wg-nonprintable-wconfig-fields '()
+  "List of names of unprintable wconfig fields.")
+
+(defvar wg-nonprintable-wtree-fields '(buffer)
+  "List of names of unprintable wtree fields.")
+
+(defun wg-alist-filter (alist fields)
+  "Returns ALIST with fields in FIELDS filtered."
+  (remove-if (lambda (key-value)
+               (memq (car key-value) fields))
+             alist))
+
+(defun wg-alist-update (alist field update-function)
+  "Returns ALIST with FIELD updated to NEW-VALUE."
+  (mapcar (lambda (key-value)
+            (if (eq (car key-value) field)
+                (cons field (funcall update-function (cdr key-value)))
+              key-value))
+          alist))
+
+(defun wg-filter-nonprintable-fields (wg)
+  "Returns WG with non-printable fields filtered."
+  (let* ((wg (wg-alist-filter wg wg-nonprintable-wg-fields))
+         (wg (wg-alist-update wg 'wconfig
+                              #'wg-filter-nonprintable-wconfig-fields)))
+    wg))
+
+(defun wg-filter-nonprintable-wconfig-fields (wconfig)
+  "Returns WCONFIG with non-printable fields filtered."
+  (let* ((wconfig (wg-alist-filter wconfig wg-nonprintable-wconfig-fields))
+         (wconfig (wg-alist-update wconfig 'wtree
+                                   #'wg-filter-nonprintable-wtree-fields)))
+    wconfig))
+
+(defun wg-filter-nonprintable-wtree-fields (wtree)
+  "Returns WTREE with non-printable fields filtered."
+  (wg-alist-filter wtree wg-nonprintable-wtree-fields))
+
 (defun wg-save (file)
   "Save workgroups to FILE.
 Called interactively with a prefix arg, or if `wg-file'
@@ -1787,8 +1921,9 @@ is nil, read a filename.  Otherwise use `wg-file'."
   (interactive
    (list (if (or current-prefix-arg (not (wg-file t)))
              (read-file-name "File: ") (wg-file))))
-  (wg-write-sexp-to-file
-   (cons wg-persisted-workgroups-tag (wg-list)) file)
+  (let ((wg-list (mapcar #'wg-filter-nonprintable-fields (wg-list))))
+    (wg-write-sexp-to-file
+     (cons wg-persisted-workgroups-tag wg-list) file))
   (setq wg-dirty nil wg-file file)
   (wg-fontified-msg (:cmd "Wrote: ") (:file file)))
 
@@ -1857,7 +1992,7 @@ working-config in the current frame."
   (setq wg-mode-line-on (not wg-mode-line-on))
   (force-mode-line-update)
   (wg-fontified-msg
-   (:cmd "mode-line: ") (:msg (if wg-mode-line-on "on" "off"))))
+    (:cmd "mode-line: ") (:msg (if wg-mode-line-on "on" "off"))))
 
 
 ;;; morph commands
@@ -1867,7 +2002,7 @@ working-config in the current frame."
   (interactive)
   (setq wg-morph-on (not wg-morph-on))
   (wg-fontified-msg
-   (:cmd "Morph: ") (:msg (if wg-morph-on "on" "off"))))
+    (:cmd "Morph: ") (:msg (if wg-morph-on "on" "off"))))
 
 
 ;;; Window movement commands
@@ -1904,7 +2039,7 @@ working-config in the current frame."
   "Display the name of the current workgroup in the echo area."
   (interactive)
   (wg-fontified-msg
-   (:cmd "Current: ") (:cur (wg-name (wg-current-workgroup)))))
+    (:cmd "Current: ") (:cur (wg-name (wg-current-workgroup)))))
 
 (defun wg-echo-all-workgroups ()
   "Display the names of all workgroups in the echo area."
@@ -1925,7 +2060,7 @@ working-config in the current frame."
   "Echo Workgroups' current version number."
   (interactive)
   (wg-fontified-msg
-   (:cmd "Workgroups version: ") (:msg wg-version)))
+    (:cmd "Workgroups version: ") (:msg wg-version)))
 
 (defun wg-echo-last-message ()
   "Echo the last message Workgroups sent to the echo area.
@@ -2062,119 +2197,120 @@ The string is passed through a format arg to escape %'s."
 (defvar wg-map
   (wg-fill-keymap (make-sparse-keymap)
 
-                  ;; workgroup creation
+    ;; workgroup creation
 
-                  "C-c"        'wg-create-workgroup
-                  "c"          'wg-create-workgroup
-                  "C"          'wg-clone-workgroup
-
-
-                  ;; killing and yanking
-
-                  "C-k"        'wg-kill-workgroup
-                  "k"          'wg-kill-workgroup
-                  "M-W"        'wg-kill-ring-save-base-config
-                  "M-w"        'wg-kill-ring-save-working-config
-                  "C-y"        'wg-yank-config
-                  "y"          'wg-yank-config
-                  "M-k"        'wg-kill-workgroup-and-buffers
-                  "K"          'wg-delete-other-workgroups
+    "C-c"        'wg-create-workgroup
+    "c"          'wg-create-workgroup
+    "C"          'wg-clone-workgroup
 
 
-                  ;; updating and reverting
+    ;; killing and yanking
 
-                  "C-u"        'wg-update-workgroup
-                  "u"          'wg-update-workgroup
-                  "C-S-u"      'wg-update-all-workgroups
-                  "U"          'wg-update-all-workgroups
-                  "C-r"        'wg-revert-workgroup
-                  "r"          'wg-revert-workgroup
-                  "C-S-r"      'wg-revert-all-workgroups
-                  "R"          'wg-revert-all-workgroups
-
-
-                  ;; workgroup switching
-
-                  "C-'"        'wg-switch-to-workgroup
-                  "'"          'wg-switch-to-workgroup
-                  "C-v"        'wg-switch-to-workgroup
-                  "v"          'wg-switch-to-workgroup
-                  "C-j"        'wg-switch-to-index
-                  "j"          'wg-switch-to-index
-                  "0"          'wg-switch-to-index-0
-                  "1"          'wg-switch-to-index-1
-                  "2"          'wg-switch-to-index-2
-                  "3"          'wg-switch-to-index-3
-                  "4"          'wg-switch-to-index-4
-                  "5"          'wg-switch-to-index-5
-                  "6"          'wg-switch-to-index-6
-                  "7"          'wg-switch-to-index-7
-                  "8"          'wg-switch-to-index-8
-                  "9"          'wg-switch-to-index-9
-                  "C-p"        'wg-switch-left
-                  "p"          'wg-switch-left
-                  "C-n"        'wg-switch-right
-                  "n"          'wg-switch-right
-                  "M-p"        'wg-switch-left-other-frame
-                  "M-n"        'wg-switch-right-other-frame
-                  "C-a"        'wg-switch-to-previous-workgroup
-                  "a"          'wg-switch-to-previous-workgroup
+    "C-k"        'wg-kill-workgroup
+    "k"          'wg-kill-workgroup
+    "M-W"        'wg-kill-ring-save-base-config
+    "M-w"        'wg-kill-ring-save-working-config
+    "C-y"        'wg-yank-config
+    "y"          'wg-yank-config
+    "M-k"        'wg-kill-workgroup-and-buffers
+    "K"          'wg-delete-other-workgroups
 
 
-                  ;; workgroup movement
+    ;; updating and reverting
 
-                  "C-x"        'wg-swap-workgroups
-                  "C-,"        'wg-offset-left
-                  "C-."        'wg-offset-right
-
-
-                  ;; file and buffer
-
-                  "C-s"        'wg-save
-                  "C-l"        'wg-load
-                  "S"          'wg-update-all-workgroups-and-save
-                  "C-f"        'wg-find-file
-                  "S-C-f"      'wg-find-file-read-only
-                  "C-b"        'wg-get-by-buffer
-                  "b"          'wg-get-by-buffer
-                  "d"          'wg-dired
+    "C-u"        'wg-update-workgroup
+    "u"          'wg-update-workgroup
+    "C-S-u"      'wg-update-all-workgroups
+    "U"          'wg-update-all-workgroups
+    "C-r"        'wg-revert-workgroup
+    "r"          'wg-revert-workgroup
+    "C-S-r"      'wg-revert-all-workgroups
+    "R"          'wg-revert-all-workgroups
 
 
-                  ;; window moving and frame reversal
+    ;; workgroup switching
 
-                  "<"          'wg-move-window-backward
-                  ">"          'wg-move-window-forward
-                  "|"          'wg-reverse-frame-horizontally
-                  "-"          'wg-reverse-frame-vertically
-                  "+"          'wg-reverse-frame-horizontally-and-vertically
+    "C-'"        'wg-switch-to-workgroup
+    "'"          'wg-switch-to-workgroup
+    "C-v"        'wg-switch-to-workgroup
+    "v"          'wg-switch-to-workgroup
+    "C-j"        'wg-switch-to-index
+    "j"          'wg-switch-to-index
+    "0"          'wg-switch-to-index-0
+    "1"          'wg-switch-to-index-1
+    "2"          'wg-switch-to-index-2
+    "3"          'wg-switch-to-index-3
+    "4"          'wg-switch-to-index-4
+    "5"          'wg-switch-to-index-5
+    "6"          'wg-switch-to-index-6
+    "7"          'wg-switch-to-index-7
+    "8"          'wg-switch-to-index-8
+    "9"          'wg-switch-to-index-9
+    "C-p"        'wg-switch-left
+    "p"          'wg-switch-left
+    "C-n"        'wg-switch-right
+    "n"          'wg-switch-right
+    "M-p"        'wg-switch-left-other-frame
+    "M-n"        'wg-switch-right-other-frame
+    "C-a"        'wg-switch-to-previous-workgroup
+    "a"          'wg-switch-to-previous-workgroup
 
 
-                  ;; toggling
+    ;; workgroup movement
 
-                  "C-i"        'wg-toggle-mode-line
-                  "C-w"        'wg-toggle-morph
-
-
-                  ;; echoing
-
-                  "S-C-e"      'wg-echo-current-workgroup
-                  "E"          'wg-echo-current-workgroup
-                  "C-e"        'wg-echo-all-workgroups
-                  "e"          'wg-echo-all-workgroups
-                  "C-t"        'wg-echo-time
-                  "t"          'wg-echo-time
-                  "V"          'wg-echo-version
-                  "C-m"        'wg-echo-last-message
-                  "m"          'wg-echo-last-message
+    "C-x"        'wg-swap-workgroups
+    "C-,"        'wg-offset-left
+    "C-."        'wg-offset-right
 
 
-                  ;; misc
+    ;; file and buffer
 
-                  "A"          'wg-rename-workgroup
-                  "!"          'wg-reset
-                  "?"          'wg-help
+    "C-s"        'wg-save
+    "C-l"        'wg-load
+    "S"          'wg-update-all-workgroups-and-save
+    "C-f"        'wg-find-file
+    "S-C-f"      'wg-find-file-read-only
+    "C-b"        'wg-get-by-buffer
+    "b"          'wg-get-by-buffer
+    "B"          'wg-toggle-buffer-in-workgroup
+    "d"          'wg-dired
 
-                  )
+
+    ;; window moving and frame reversal
+
+    "<"          'wg-move-window-backward
+    ">"          'wg-move-window-forward
+    "|"          'wg-reverse-frame-horizontally
+    "-"          'wg-reverse-frame-vertically
+    "+"          'wg-reverse-frame-horizontally-and-vertically
+
+
+    ;; toggling
+
+    "C-i"        'wg-toggle-mode-line
+    "C-w"        'wg-toggle-morph
+
+
+    ;; echoing
+
+    "S-C-e"      'wg-echo-current-workgroup
+    "E"          'wg-echo-current-workgroup
+    "C-e"        'wg-echo-all-workgroups
+    "e"          'wg-echo-all-workgroups
+    "C-t"        'wg-echo-time
+    "t"          'wg-echo-time
+    "V"          'wg-echo-version
+    "C-m"        'wg-echo-last-message
+    "m"          'wg-echo-last-message
+
+
+    ;; misc
+
+    "A"          'wg-rename-workgroup
+    "!"          'wg-reset
+    "?"          'wg-help
+
+    )
   "Workgroups' keymap.")
 
 
