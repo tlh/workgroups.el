@@ -588,9 +588,9 @@ Otherwise, cons a new key-value-pair onto ALIST."
 
 (defun wg-aput (alist &rest key-value-pairs)
   "Add all KEY-VALUE-PAIRS to a copy of ALIST, and return the copy."
-  (flet ((rec (alist kvps) (if (not kvps) alist
-                             (wg-dbind (k v . rest) kvps
-                               (wg-aset (rec alist rest) k v)))))
+  (cl-labels ((rec (alist kvps) (if (not kvps) alist
+                                  (wg-dbind (k v . rest) kvps
+                                    (wg-aset (rec alist rest) k v)))))
     (rec (wg-acopy alist) key-value-pairs)))
 
 (defun wg-get-alist (key val alist-list)
@@ -813,8 +813,8 @@ minibuffer is active.")))
 
 (defun wg-scale-wsize (w width-scale height-scale)
   "Scale W's size by WIDTH-SCALE and HEIGHT-SCALE."
-  (flet ((wscale (width)  (truncate (* width  width-scale)))
-         (hscale (height) (truncate (* height height-scale))))
+  (cl-labels ((wscale (width)  (truncate (* width  width-scale)))
+              (hscale (height) (truncate (* height height-scale))))
     (wg-adjust-wsize w #'wscale #'hscale)))
 
 (defun wg-equal-wtrees (w1 w2)
@@ -838,16 +838,16 @@ new wlist, return it instead of a new wtree."
         (let* ((min-size (wg-min-size dir))
                (max (- hb1 1 min-size))
                (lastw (wg-last1 wlist)))
-          (flet ((mapwl
-                  (wl)
-                  (wg-dbind (sw . rest) wl
-                    (cons (wg-normalize-wtree
-                           (wg-put-bounds
-                            sw dir ls1 hs1 lb1
-                            (setq lb1 (if (eq sw lastw) hb1
-                                        (let ((hb2 (+ lb1 (wg-wsize sw dir))))
-                                          (if (>= hb2 max) hb1 hb2))))))
-                          (when (< lb1 max) (mapwl rest))))))
+          (cl-labels ((mapwl
+                       (wl)
+                       (wg-dbind (sw . rest) wl
+                         (cons (wg-normalize-wtree
+                                (wg-put-bounds
+                                 sw dir ls1 hs1 lb1
+                                 (setq lb1 (if (eq sw lastw) hb1
+                                             (let ((hb2 (+ lb1 (wg-wsize sw dir))))
+                                               (if (>= hb2 max) hb1 hb2))))))
+                               (when (< lb1 max) (mapwl rest))))))
             (let ((new (mapwl wlist)))
               (if (cdr new) (wg-aput wtree 'wlist new)
                 (car new)))))))))
@@ -891,15 +891,15 @@ with `wg-scale-wconfigs-wtree' to fit the frame as it exists."
 If DIR is nil, reverse WTREE horizontally.
 If DIR is 'both, reverse WTREE both horizontally and vertically.
 Otherwise, reverse WTREE vertically."
-  (flet ((inner (w) (if (wg-window-p w) w
-                      (wg-abind w ((d1 dir) edges wlist)
-                        (wg-make-wtree
-                         d1 edges
-                         (let ((wl2 (mapcar #'inner wlist)))
-                           (if (or (eq dir 'both)
-                                   (and (not dir) (not d1))
-                                   (and dir d1))
-                               (nreverse wl2) wl2)))))))
+  (cl-labels ((inner (w) (if (wg-window-p w) w
+                           (wg-abind w ((d1 dir) edges wlist)
+                             (wg-make-wtree
+                              d1 edges
+                              (let ((wl2 (mapcar #'inner wlist)))
+                                (if (or (eq dir 'both)
+                                        (and (not dir) (not d1))
+                                        (and dir d1))
+                                    (nreverse wl2) wl2)))))))
     (wg-normalize-wtree (inner w))))
 
 (defun wg-reverse-wconfig (&optional dir wconfig)
@@ -909,15 +909,15 @@ Otherwise, reverse WTREE vertically."
 
 (defun wg-wtree-move-window (wtree offset)
   "Offset `selected-window' OFFSET places in WTREE."
-  (flet ((inner
-          (w)
-          (if (wg-window-p w) w
-            (wg-abind w ((d1 dir) edges wlist)
-              (wg-make-wtree
-               d1 edges
-               (wg-aif (wg-get-some (sw wlist) (wg-aget sw 'selwin))
-                   (wg-cyclic-offset-elt it wlist offset)
-                 (mapcar #'inner wlist)))))))
+  (cl-labels ((inner
+               (w)
+               (if (wg-window-p w) w
+                 (wg-abind w ((d1 dir) edges wlist)
+                   (wg-make-wtree
+                    d1 edges
+                    (wg-aif (wg-get-some (sw wlist) (wg-aget sw 'selwin))
+                        (wg-cyclic-offset-elt it wlist offset)
+                      (mapcar #'inner wlist)))))))
     (wg-normalize-wtree (inner wtree))))
 
 (defun wg-wconfig-move-window (offset &optional wconfig)
@@ -966,10 +966,10 @@ EWIN should be an Emacs window object."
   "Return a new Workgroups wtree from EWTREE or `window-tree'.
 If specified, EWTREE should be an Emacs `window-tree'."
   (wg-error-on-active-minibuffer)
-  (flet ((inner (ewt) (if (windowp ewt) (wg-ewin->window ewt)
-                        (wg-dbind (dir edges . wins) ewt
-                          (wg-make-wtree
-                           dir edges (mapcar #'inner wins))))))
+  (cl-labels ((inner (ewt) (if (windowp ewt) (wg-ewin->window ewt)
+                             (wg-dbind (dir edges . wins) ewt
+                               (wg-make-wtree
+                                dir edges (mapcar #'inner wins))))))
     (let ((ewt (car (or ewtree (window-tree)))))
       (when (and (windowp ewt) (window-minibuffer-p ewt))
         (error "Workgroups can't operate on minibuffer-only frames."))
@@ -1039,15 +1039,15 @@ Return the buffer if it was found, nil otherwise."
 
 (defun wg-restore-wtree (wtree)
   "Restore WTREE in `selected-frame'."
-  (flet ((inner (w) (if (wg-wtree-p w)
-                        (wg-abind w ((d dir) wlist)
-                          (let ((lastw (wg-last1 wlist)))
-                            (dolist (sw wlist)
-                              (unless (eq sw lastw)
-                                (split-window nil (wg-wsize sw d) (not d)))
-                              (inner sw))))
-                      (wg-restore-window w)
-                      (other-window 1))))
+  (cl-labels ((inner (w) (if (wg-wtree-p w)
+                             (wg-abind w ((d dir) wlist)
+                               (let ((lastw (wg-last1 wlist)))
+                                 (dolist (sw wlist)
+                                   (unless (eq sw lastw)
+                                     (split-window nil (wg-wsize sw d) (not d)))
+                                   (inner sw))))
+                           (wg-restore-window w)
+                           (other-window 1))))
     (let ((window-min-width  wg-window-min-width)
           (window-min-height wg-window-min-height))
       (delete-other-windows)
@@ -1467,8 +1467,8 @@ Also removes any dead buffers."
 (defun wg-workgroup-visible-buffers (workgroup)
   "Return a list of unique buffer names visible in WORKGROUP."
   (let ((wtree (wg-wtree (wg-working-config workgroup))))
-    (flet ((rec (w) (if (wg-window-p w) (list (wg-aget w 'buffer))
-                      (mapcan #'rec (wg-wlist w)))))
+    (cl-labels ((rec (w) (if (wg-window-p w) (list (wg-aget w 'buffer))
+                           (mapcan #'rec (wg-wlist w)))))
       (remove-duplicates (rec wtree) :test #'eq))))
 
 (defun wg-buffers-for-reading (&optional workgroup)
